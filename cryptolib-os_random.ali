@@ -1,0 +1,73 @@
+V "GNAT Lib v15"
+A -gnatc
+A -gnat2022
+A -gnatA
+A -mtune=generic
+A -march=x86-64
+P NO
+
+RN
+RV NO_DYNAMIC_SIZED_OBJECTS
+RV NO_ELABORATION_CODE
+
+U cryptolib.os_random%b	cryptolib-os_random.adb	4742cff3 OO PK
+Z ada.strings.text_buffers%s  a-sttebu.adb	a-sttebu.ali
+W cryptolib%s		cryptolib.ads		cryptolib.ali
+W interfaces%s		interfac.ads		interfac.ali
+W interfaces.c%s	i-c.adb			i-c.ali
+W system%s		system.ads		system.ali
+
+U cryptolib.os_random%s	cryptolib-os_random.ads	8e98744f EE OO PK
+W ada%s			ada.ads			ada.ali
+W ada.streams%s		a-stream.adb		a-stream.ali
+W cryptolib%s		cryptolib.ads		cryptolib.ali
+
+D ada.ads		20250808065140 76789da1 ada%s
+D a-stream.ads		20250808065140 17477cbd ada.streams%s
+D a-string.ads		20250808065140 90ac6797 ada.strings%s
+D a-sttebu.ads		20250808065140 f1ad67a2 ada.strings.text_buffers%s
+D a-stuten.ads		20250808065140 c6ced0ae ada.strings.utf_encoding%s
+D a-unccon.ads		20250808065140 0e9b276f ada.unchecked_conversion%s
+D cryptolib.ads		20260613171619 574063d9 cryptolib%s
+D cryptolib-os_random.ads  20260704065235 ce9f6b2b cryptolib.os_random%s
+D cryptolib-os_random.adb  20260704065519 74b959bd cryptolib.os_random%b
+D interfac.ads		20250808065140 9111f9c1 interfaces%s
+D i-c.ads		20250808065140 e94c966a interfaces.c%s
+D system.ads		20250808065140 14286b0f system%s
+D s-parame.ads		20250808065140 3597fc11 system.parameters%s
+G a e
+G c Z s b [fill_os cryptolib__os_random 10 14 none]
+G c Z b b [bcrypt_gen_random cryptolib__os_random 18 13 none]
+X 1 ada.ads
+18K9*Ada 22e8 8|1r6 11r21 9|26r21
+X 2 a-stream.ads
+36K13*Streams 90e16 8|1w10 11r25 9|26r25
+42M9*Stream_Element
+54A9*Stream_Element_Array(42M9)<44I9> 8|11r33 9|26r33
+X 7 cryptolib.ads
+1K9*CryptoLib 3e14 8|8r9 14r5 9|9r14 50r5
+X 8 cryptolib-os_random.ads
+8K19*OS_Random 7|1k9 8|14l15 14e24 9|9b24 50l15 50t24
+10U14*Fill_OS 11<7 12<7 9|25b14 48l8 48t15
+11a7 Buffer{2|54A9} 9|26b7 33m7 34r10 41m25 41r25 42r53 46m10
+12b7 Success{boolean} 9|27b7 32m7 35m10 44m7 45r14
+X 9 cryptolib-os_random.adb
+13N4 BCRYPT_USE_SYSTEM_PREFERRED_RNG 43r25
+14N4 STATUS_SUCCESS 44r27
+18V13 BCrypt_Gen_Random{11|64I9} 19>7 20>7 21>7 22>7 39s9
+19m7 Algorithm{12|67M9} 40r12
+20m7 Buffer{12|67M9} 41r12
+21m7 Count{11|73M9} 42r12
+22m7 Flags{11|73M9} 43r12
+30i7 Status{11|64I9} 38m7 44r18
+X 10 interfac.ads
+47K9*Interfaces 9|1r6 21r19 22r19 22r54 29r16 30r16 42r25 10|247e15
+X 11 i-c.ads
+33K20*C 9|1w17 21r30 22r30 22r65 29r27 30r27 42r36 11|601e17
+64I9*long<long_integer> 9|22r67 29r29 30r29
+73M9*unsigned_long 9|21r32 22r32 42r38
+X 12 system.ads
+37K9*System 9|2w6 19r19 20r19 40r25 12|155e11
+67M9*Address 9|19r26 20r26
+69m4*Null_Address{67M9} 9|40r32
+

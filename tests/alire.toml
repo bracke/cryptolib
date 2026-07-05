@@ -1,0 +1,21 @@
+name = "tests"
+description = "Test suite for cryptolib"
+version = "0.1.0-dev"
+
+authors = ["Bent Bracke"]
+maintainers = ["Bent Bracke <bent@bracke.dk>"]
+maintainers-logins = ["bracke"]
+licenses = "MIT OR Apache-2.0 WITH LLVM-exception"
+website = ""
+tags = ["tests"]
+
+executables = ["tests"]
+
+[[depends-on]]
+cryptolib = "*"
+
+[[depends-on]]
+aunit = "^26.0.0"
+
+[[pins]]
+cryptolib = { path = ".." }

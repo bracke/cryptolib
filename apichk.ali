@@ -1,0 +1,130 @@
+V "GNAT Lib v15"
+M P W=b
+A -gnatc
+A -gnat2022
+A -gnatA
+A -mtune=generic
+A -march=x86-64
+P NO
+
+RN
+RV NO_IMPLEMENTATION_PRAGMAS
+RV NO_ELABORATION_CODE
+
+U apichk%b		apichk.adb		d6f3484f OO SU
+W ada%s			ada.ads			ada.ali
+W ada.streams%s		a-stream.adb		a-stream.ali
+Z ada.strings.text_buffers%s  a-sttebu.adb	a-sttebu.ali
+W cryptolib%s		cryptolib.ads		cryptolib.ali
+W cryptolib.chacha20_poly1305%s  cryptolib-chacha20_poly1305.adb  cryptolib-chacha20_poly1305.ali
+W cryptolib.curve25519%s  cryptolib-curve25519.adb  cryptolib-curve25519.ali
+W cryptolib.ed25519%s	cryptolib-ed25519.adb	cryptolib-ed25519.ali
+W cryptolib.errors%s	cryptolib-errors.adb	cryptolib-errors.ali
+W cryptolib.hashes%s	cryptolib-hashes.adb	cryptolib-hashes.ali
+W cryptolib.macs%s	cryptolib-macs.adb	cryptolib-macs.ali
+W cryptolib.random%s	cryptolib-random.adb	cryptolib-random.ali
+W cryptolib.secure_wipe%s  cryptolib-secure_wipe.adb  cryptolib-secure_wipe.ali
+W interfaces%s		interfac.ads		interfac.ali
+Z system%s		system.ads		system.ali
+
+D ada.ads		20250808065140 76789da1 ada%s
+D a-stream.ads		20250808065140 17477cbd ada.streams%s
+D a-string.ads		20250808065140 90ac6797 ada.strings%s
+D a-sttebu.ads		20250808065140 f1ad67a2 ada.strings.text_buffers%s
+D a-stuten.ads		20250808065140 c6ced0ae ada.strings.utf_encoding%s
+D a-unccon.ads		20250808065140 0e9b276f ada.unchecked_conversion%s
+D apichk.adb		20260704121602 f474aaf7 apichk%b
+D cryptolib.ads		20260613171619 574063d9 cryptolib%s
+D cryptolib-chacha20_poly1305.ads  20260702171051 9a473c05 cryptolib.chacha20_poly1305%s
+D cryptolib-curve25519.ads  20260613174156 bac1b6e3 cryptolib.curve25519%s
+D cryptolib-ed25519.ads	20260613174725 29d241f8 cryptolib.ed25519%s
+D cryptolib-errors.ads	20260702180611 1916daf4 cryptolib.errors%s
+D cryptolib-hashes.ads	20260702185104 1593df5e cryptolib.hashes%s
+D cryptolib-macs.ads	20260629203907 0f2952aa cryptolib.macs%s
+D cryptolib-random.ads	20260703044611 96251863 cryptolib.random%s
+D cryptolib-secure_wipe.ads  20260704070544 380ce3b9 cryptolib.secure_wipe%s
+D interfac.ads		20250808065140 9111f9c1 interfaces%s
+D system.ads		20250808065140 14286b0f system%s
+G a e
+G c Z b b [apichk standard 6 11 none]
+G r c none [apichk standard 6 11 none] [sha256 cryptolib__hashes 49 13 none]
+G r c none [apichk standard 6 11 none] [hmac_sha256 cryptolib__macs 17 13 none]
+G r c none [apichk standard 6 11 none] [pbkdf2_hmac_sha256 cryptolib__macs 39 13 none]
+G r c none [apichk standard 6 11 none] [seal cryptolib__chacha20_poly1305 17 13 none]
+G r c none [apichk standard 6 11 none] [open cryptolib__chacha20_poly1305 24 13 none]
+G r c none [apichk standard 6 11 none] [initialize_production cryptolib__random 7 14 none]
+G r c none [apichk standard 6 11 none] [generate_keypair cryptolib__curve25519 11 13 none]
+G r c none [apichk standard 6 11 none] [shared_secret cryptolib__curve25519 24 13 none]
+G r c none [apichk standard 6 11 none] [clear cryptolib__curve25519 17 14 none]
+G r c none [apichk standard 6 11 none] [sign cryptolib__ed25519 9 13 none]
+G r c none [apichk standard 6 11 none] [verify cryptolib__ed25519 16 13 none]
+G r c none [apichk standard 6 11 none] [fill cryptolib__random 18 13 none]
+G r c none [apichk standard 6 11 none] [wipe cryptolib__secure_wipe 10 14 none]
+X 1 ada.ads
+18K9*Ada 22e8 7|1r6 1r23
+X 2 a-stream.ads
+36K13*Streams 90e16 7|1w10 1r27
+42M9*Stream_Element
+44I9*Stream_Element_Offset<long_long_integer> 7|13r57 17r37
+54A9*Stream_Element_Array(42M9)<44I9> 7|7r10 11r18 12r10 13r11 14r11 17r10
+. 18r10
+X 7 apichk.adb
+6U11*Apichk 6b11 32l5 32t11
+7a4 Msg{2|54A9} 8r56 9r62 9r67 11r67 11r72 13r33 13r46 14r33 21r42 27r48
+. 28r43
+8a4 D{13|14A9} 10r59
+9a4 T{14|8A12} 10r35
+10a4 K{14|8A12} 10r62
+11a4 DK{2|54A9} 19r45
+12a4 Key{2|54A9} 21r34 22r34
+13a4 Wire{2|54A9} 21m47 21r47 22r42
+14a4 Back{2|54A9} 22m48 22r48
+15r4 Rng{15|5R9} 23m34 24m39 24r39 29m23 29r23
+15r32 Priv{10|9R9} 24m44 24r44 25r36 26m22
+16a4 Pub{10|8A9} 24m50 24r50 25r42
+16a9 Sec{10|8A9} 25m47 25r47
+17a4 Sig{2|54A9} 27m53 27r53 28r38
+18a4 Buf{2|54A9} 27r24 27r36 28r26 29m28 29r28 30m22 30r22 30r35
+19e4 St{12|4E9} 21m4 22m4 24m4 25m4 27m4 28m4 29m4 31r25
+X 8 cryptolib.ads
+1K9*CryptoLib 7|3r6 3r29 3r50 4r6 4r33 4r57 5r6 5r34 5r56 8|3e14
+X 9 cryptolib-chacha20_poly1305.ads
+5K19*ChaCha20_Poly1305 7|3w60 13r80 21r10 22r10 9|30e32
+8i4*Tag_Length{natural} 7|13r98
+17V13*Seal{12|4E9} 7|21s28
+24V13*Open{12|4E9} 7|22s28
+X 10 cryptolib-curve25519.ads
+5K19*Curve25519 7|4w16 15r39 16r15 24r10 25r10 26r4 10|44e25
+8A9*Public_Key(2|42M9)<integer> 7|16r26
+9R9*Private_Key 7|15r50 10|43e14
+11V13*Generate_Keypair{12|4E9} 7|24s21
+17U14*Clear 7|26s15
+24V13*Shared_Secret{12|4E9} 7|25s21
+X 11 cryptolib-ed25519.ads
+4K19*Ed25519 7|4w43 17r60 27r10 28r10 11|21e22
+7i4*Signature_Length{natural} 7|17r68
+9V13*Sign{12|4E9} 7|27s18
+16V13*Verify{12|4E9} 7|28s18
+X 12 cryptolib-errors.ads
+1K19*Errors 7|5w44 19r9 12|32e21
+4E9*Status 7|19r16 12|28e22
+X 13 cryptolib-hashes.ads
+4K19*Hashes 7|3w16 8r17 8r41 13|100e21
+14A9*SHA256_Digest(2|42M9)<integer> 7|8r24
+49V13*SHA256{14A9} 7|8s48
+X 14 cryptolib-macs.ads
+4K19*Macs 7|3w39 9r17 9r44 10r8 11r42 14|105e19
+8A12*HMAC_SHA256_Digest{13|14A9}<integer> 7|9r22 10r13
+17V13*HMAC_SHA256{8A12} 7|9s49
+39V13*PBKDF2_HMAC_SHA256{2|54A9} 7|11s47
+X 15 cryptolib-random.ads
+4K19*Random 7|4w67 15r10 23r4 29r10 15|37e21
+5R9*Random_Source 7|15r17 15|36e14
+7U14*Initialize_Production 7|23s11
+18V13*Fill{12|4E9} 7|29s17
+X 16 cryptolib-secure_wipe.ads
+8K19*Secure_Wipe 7|5w16 30r4 16|12e26
+10U14*Wipe 7|30s16
+X 17 interfac.ads
+47K9*Interfaces 7|2w6 17|247e15
+

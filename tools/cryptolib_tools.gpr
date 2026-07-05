@@ -1,0 +1,24 @@
+with "cryptolib.gpr";
+with "project_tools.gpr";
+
+--  Verification tooling for the cryptolib crate. Built on the shared
+--  project_tools helpers. Run from the cryptolib crate root so the checks see
+--  cryptolib's own src/, tests/, and alire.toml.
+project Cryptolib_Tools is
+
+   for Source_Dirs use (".");
+   for Object_Dir use "obj";
+   for Exec_Dir use "bin";
+
+   for Main use
+     ("check_release_ready.adb",
+      "check_alire_manifest.adb",
+      "check_test_suite.adb",
+      "check_gnatdoc_tags.adb");
+
+   package Compiler is
+      for Default_Switches ("Ada") use
+        ("-gnat2022", "-gnata", "-Wall", "-Wextra");
+   end Compiler;
+
+end Cryptolib_Tools;
