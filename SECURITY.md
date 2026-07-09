@@ -96,7 +96,7 @@ The RNG **fails closed**: if no OS source is available it returns
 
 - **Windows RNG and `Secure_Wipe`** are written to the documented Windows APIs
   but have **not been built, linked, or run on Windows** from this repo — they
-  pass a standalone `gcc -gnatc` semantic check only and need a Windows CI pass.
+  pass an Alire GNAT semantic check off Windows only and need a Windows CI pass.
 - **No AES-NI / hardware acceleration** (see the CT caveat above).
 - GNAT `Ada.Numerics.Big_Numbers.Big_Integers` caps at ~6400 bits, which is why
   DH group16/18 use `Modexp` (fixed-width Montgomery) rather than `Big_Integers`.

@@ -4,6 +4,7 @@ with Interfaces;
 with System;
 
 with CryptoLib.ChaCha20_Poly1305;
+with CryptoLib.Checksums;
 with CryptoLib.Secure_Wipe;
 with CryptoLib.Hashes;
 with CryptoLib.Ciphers;
@@ -26,6 +27,7 @@ procedure Tests is
    use type Ada.Streams.Stream_Element_Array;
    use type Ada.Streams.Stream_Element_Offset;
    use type CryptoLib.Errors.Status;
+   use type Interfaces.Unsigned_32;
 
    procedure Check (Condition : Boolean; Message : String) is
    begin
@@ -169,6 +171,64 @@ procedure Tests is
       Check_128 (241, "8fe4da37d29ec7b9859dc8ab6dd85c7c");
       Check_128 (1024, "02e7aa13471474567df7f049c0c1ad73");
    end Check_XXH3;
+
+   procedure Check_Adler32 is
+      Empty : constant Ada.Streams.Stream_Element_Array (1 .. 0) := [others => 0];
+      Hello : constant Ada.Streams.Stream_Element_Array := Bytes_From_String ("hello");
+      Decimal_Data : constant Ada.Streams.Stream_Element_Array := Bytes_From_String ("123456789");
+      Binary : constant Ada.Streams.Stream_Element_Array :=
+        [1 => 16#00#,
+         2 => 16#FF#,
+         3 => 16#80#,
+         4 => 16#0D#,
+         5 => 16#0A#,
+         6 => 16#41#,
+         7 => 16#00#,
+         8 => 16#7F#];
+      State : CryptoLib.Checksums.Adler32_State;
+   begin
+      Check (CryptoLib.Checksums.Adler32 (Empty) = 16#0000_0001#, "Adler-32 empty vector");
+      Check (CryptoLib.Checksums.Adler32 (Hello) = 16#062C_0215#, "Adler-32 hello vector");
+      Check (CryptoLib.Checksums.Adler32 (Decimal_Data) = 16#091E_01DE#, "Adler-32 digits vector");
+      Check (CryptoLib.Checksums.Adler32 (Binary) = 16#0BAC_0257#, "Adler-32 binary vector");
+
+      CryptoLib.Checksums.Adler32_Reset (State);
+      CryptoLib.Checksums.Adler32_Update (State, Binary (1 .. 2));
+      CryptoLib.Checksums.Adler32_Update (State, Binary (3));
+      CryptoLib.Checksums.Adler32_Update (State, Binary (4 .. 8));
+      Check
+        (CryptoLib.Checksums.Adler32_Value (State) = CryptoLib.Checksums.Adler32 (Binary),
+         "chunked Adler-32 matches one-shot Adler-32");
+   end Check_Adler32;
+
+   procedure Check_CRC32 is
+      Empty : constant Ada.Streams.Stream_Element_Array (1 .. 0) := [others => 0];
+      Hello : constant Ada.Streams.Stream_Element_Array := Bytes_From_String ("hello");
+      Decimal_Data : constant Ada.Streams.Stream_Element_Array := Bytes_From_String ("123456789");
+      Binary : constant Ada.Streams.Stream_Element_Array :=
+        [1 => 16#00#,
+         2 => 16#FF#,
+         3 => 16#80#,
+         4 => 16#0D#,
+         5 => 16#0A#,
+         6 => 16#41#,
+         7 => 16#00#,
+         8 => 16#7F#];
+      State : CryptoLib.Checksums.CRC32_State;
+   begin
+      Check (CryptoLib.Checksums.CRC32 (Empty) = 16#0000_0000#, "CRC-32 empty vector");
+      Check (CryptoLib.Checksums.CRC32 (Hello) = 16#3610_A686#, "CRC-32 hello vector");
+      Check (CryptoLib.Checksums.CRC32 (Decimal_Data) = 16#CBF4_3926#, "CRC-32 digits vector");
+      Check (CryptoLib.Checksums.CRC32 (Binary) = 16#CF6B_2E0E#, "CRC-32 binary vector");
+
+      CryptoLib.Checksums.CRC32_Reset (State);
+      CryptoLib.Checksums.CRC32_Update (State, Binary (1 .. 2));
+      CryptoLib.Checksums.CRC32_Update (State, Binary (3));
+      CryptoLib.Checksums.CRC32_Update (State, Binary (4 .. 8));
+      Check
+        (CryptoLib.Checksums.CRC32_Value (State) = CryptoLib.Checksums.CRC32 (Binary),
+         "chunked CRC-32 matches one-shot CRC-32");
+   end Check_CRC32;
 
    procedure Check_PBKDF2_SHA1 is
       Actual : constant Ada.Streams.Stream_Element_Array :=
@@ -427,6 +487,8 @@ begin
    Check_AES_256_CBC_Raw_Roundtrip;
    Check_ECDSA_P384_P521_Signing;
    Check_XXH3;
+   Check_Adler32;
+   Check_CRC32;
 
    Check_MD5
      (Ada.Streams.Stream_Element_Array'(1 .. 0 => 0),
@@ -443,8 +505,6 @@ begin
    --  independent reference cross-checked against OpenSSL's ChaCha20) and
    --  Seal/Open round-trip.
    declare
-      use type Interfaces.Unsigned_32;
-
       function Nib (C : Character) return Ada.Streams.Stream_Element is
         (case C is
             when '0' .. '9' =>
@@ -693,7 +753,6 @@ begin
              "mlkem-768 decaps shared secret FIPS 203 KAT");
    end;
 
-
    declare
       S761_Sk_Hex : constant String :=
         "465545156582195951566154950866811165054a948519655555259125558145555a4555a0155569811555551504625a5555" &
@@ -787,7 +846,6 @@ begin
              "sntrup761 keygen/encaps/decaps roundtrip");
    end;
 
-
    declare
       ME_B : constant Ada.Streams.Stream_Element_Array := Bytes_From_Hex ("03");
       ME_E : constant Ada.Streams.Stream_Element_Array :=
@@ -867,7 +925,6 @@ begin
         (CryptoLib.Buffers.To_Array (Sh_A) = CryptoLib.Buffers.To_Array (Sh_B),
          "group16 DH roundtrip (Montgomery modexp)");
    end;
-
 
    --  SHA-3 / SHAKE NIST known-answer vectors (previously only validated
    --  transitively via ML-KEM / sntrup761).
@@ -1037,7 +1094,6 @@ begin
       Check (R521 = P521_R and then S521 = P521_S,
              "ECDSA P-521 RFC 6979 deterministic KAT");
    end;
-
 
    --  Direct SHA-1/2 known-answer vectors ("abc"), previously only exercised
    --  transitively through PBKDF2 / ML-KEM.

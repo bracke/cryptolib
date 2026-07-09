@@ -1,0 +1,116 @@
+V "GNAT Lib v15"
+M P W=b
+A -Wall
+A -Wextra
+A -gnatwa
+A -gnatA
+A -gnat2022
+A -gnata
+A -mtune=generic
+A -march=x86-64
+P SS ZX
+
+RN
+RV NO_EXCEPTION_HANDLERS
+RV NO_EXCEPTIONS
+RV NO_IO
+RV NO_DYNAMIC_SIZED_OBJECTS
+RV NO_IMPLEMENTATION_PRAGMAS
+
+U check_alire_manifest%b  check_alire_manifest.adb  53415e0d NE OO SU
+W ada%s			ada.ads			ada.ali
+W ada.command_line%s	a-comlin.adb		a-comlin.ali
+Z ada.strings.text_buffers%s  a-sttebu.adb	a-sttebu.ali
+W ada.text_io%s		a-textio.adb		a-textio.ali
+W project_tools%s	project_tools.ads	project_tools.ali
+W project_tools.alire_manifests%s  project_tools-alire_manifests.adb  project_tools-alire_manifests.ali
+W project_tools.files%s	project_tools-files.adb	project_tools-files.ali
+Z system.concat_2%s	s-conca2.adb		s-conca2.ali
+Z system.concat_4%s	s-conca4.adb		s-conca4.ali
+
+D ada.ads		20250808065140 76789da1 ada%s
+D a-charac.ads		20250808065140 2d3ec45b ada.characters%s
+D a-chlat1.ads		20250808065140 e0d72e76 ada.characters.latin_1%s
+D a-comlin.ads		20250808065140 4aa66568 ada.command_line%s
+D a-except.ads		20250808065140 e7970cd9 ada.exceptions%s
+D a-finali.ads		20250808065140 bf4f806b ada.finalization%s
+D a-ioexce.ads		20250808065140 40018c65 ada.io_exceptions%s
+D a-stream.ads		20250808065140 17477cbd ada.streams%s
+D a-string.ads		20250808065140 90ac6797 ada.strings%s
+D a-strmap.ads		20250808065140 1f91ebb6 ada.strings.maps%s
+D a-strsea.ads		20250808065140 18c3c634 ada.strings.search%s
+D a-sttebu.ads		20250808065140 f1ad67a2 ada.strings.text_buffers%s
+D a-strunb.ads		20250808065140 b10770ab ada.strings.unbounded%s
+D a-stuten.ads		20250808065140 c6ced0ae ada.strings.utf_encoding%s
+D a-tags.ads		20250808065140 fbca0ad5 ada.tags%s
+D a-textio.ads		20250808065140 34ef47de ada.text_io%s
+D a-unccon.ads		20250808065140 0e9b276f ada.unchecked_conversion%s
+D check_alire_manifest.adb  20260705231055 b5a0e7dd check_alire_manifest%b
+D interfac.ads		20250808065140 9111f9c1 interfaces%s
+D i-c.ads		20250808065140 e94c966a interfaces.c%s
+D i-cstrea.ads		20250808065140 ffd01b9d interfaces.c_streams%s
+D project_tools.ads	20260608162800 377f12dc project_tools%s
+D project_tools-alire_manifests.ads  20260608175458 09b270e4 project_tools.alire_manifests%s
+D project_tools-files.ads  20260704180212 911aeb82 project_tools.files%s
+D system.ads		20250808065140 14286b0f system%s
+D s-atocou.ads		20250808065140 dc18efc3 system.atomic_counters%s
+D s-conca2.ads		20250808065140 b5fb73f7 system.concat_2%s
+D s-conca4.ads		20250808065140 33f85f3e system.concat_4%s
+D s-crtl.ads		20250808065140 beb39b9e system.crtl%s
+D s-exctab.ads		20250808065140 91bef6ef system.exception_table%s
+D s-ficobl.ads		20250808065140 dc5161d4 system.file_control_block%s
+D s-finpri.ads		20250808065140 5970d55a system.finalization_primitives%s
+D s-finroo.ads		20250808065140 0a7c3ed4 system.finalization_root%s
+D s-oscons.ads		20250827122531 068e1a91 system.os_constants%s
+D s-oslock.ads		20250808065140 13fa6b78 system.os_locks%s
+D s-parame.ads		20250808065140 3597fc11 system.parameters%s
+D s-putima.ads		20250808065140 17291fe4 system.put_images%s
+D s-retsta.ads		20250808065140 0f6b06cb system.return_stack%s
+D s-secsta.ads		20250808065140 578279f5 system.secondary_stack%s
+D s-soflin.ads		20250808065140 5d88fdea system.soft_links%s
+D s-stache.ads		20250808065140 0b81c1fe system.stack_checking%s
+D s-stalib.ads		20250808065140 1c9580f6 system.standard_library%s
+D s-stoele.ads		20250808065140 ccded4e8 system.storage_elements%s
+D s-stratt.ads		20250808065140 516607ae system.stream_attributes%s
+D s-traent.ads		20250808065140 c81cbf8c system.traceback_entries%s
+D s-unstyp.ads		20250808065140 fa2a7f59 system.unsigned_types%s
+D s-wchcon.ads		20250808065140 d9032363 system.wch_con%s
+G a e
+G c Z b b [check_alire_manifest standard 10 11 none]
+G r c none [check_alire_manifest standard 10 11 none] [require_pin_free_crate_manifest project_tools__alire_manifests 43 14 none]
+G r c none [check_alire_manifest standard 10 11 none] [file_exists project_tools__files 12 13 none]
+G r c none [check_alire_manifest standard 10 11 none] [file_contains project_tools__files 20 13 none]
+X 1 ada.ads
+18K9*Ada 22e8 18|1r6 2r6 14r10 15r13 16r10 16r44 19r10 20r13 22r10 22r44
+. 40r7 41r7 42r10 43r7 43r41 52r4
+X 4 a-comlin.ads
+40K13*Command_Line 148e21 18|1w10 16r14 16r48 22r14 22r48 40r11 43r11 43r45
+43V13*Argument_Count{natural} 18|40s24
+74I9*Exit_Status<integer>
+77i4*Failure{74I9} 18|16r61 22r61 43r58
+79U14*Set_Exit_Status 18|16s27 22s27 43s24
+X 16 a-textio.ads
+58K13*Text_IO 785e16 18|2w10 14r14 15r17 19r14 20r17 41r11 42r14 52r8
+67P9*File_Type
+189V13*Standard_Error{67P9} 18|15s25 20s25 42s22
+555U14*Put_Line 18|14s22 19s22 41s19
+565U14*Put_Line 18|52s16
+X 18 check_alire_manifest.adb
+10U11*Check_Alire_Manifest 10b11 56l5 56t25
+11U14 Require_Text 11b14 11>28 11>43 25l8 25t20 29s7 30s7 31s7 32s7 33s7
+. 34s7 35s7 36s7 37s7
+11a28 Path{string} 13r47 15r76 18r52 21r48
+11a43 Needle{string} 18r58 21r62
+27U14 Require_Alire_GNAT_15 27b14 38l8 38t29 50s4
+X 22 project_tools.ads
+1K9*Project_Tools 18|4r6 5r6 13r14 18r17 47r4 22|3e18
+X 23 project_tools-alire_manifests.ads
+3K23*Alire_Manifests 18|4w20 47r18 23|114e34
+43U14*Require_Pin_Free_Crate_Manifest 18|47s34
+44a7 Manifest{string} 18|48r7
+45a7 Name{string} 18|49r7
+X 24 project_tools-files.ads
+3K23*Files 18|5w20 13r28 18r31 24|203e24
+12V13*File_Exists{boolean} 18|13s34
+20V13*File_Contains{boolean} 18|18s37
+

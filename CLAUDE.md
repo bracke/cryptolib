@@ -19,6 +19,11 @@ change behavior — every code example in `README.md` is verified to compile, an
 
 ## Build, test, style
 
+- Toolchain: use Alire GNAT 15 only. The root, tests, and tools crates require
+  `gnat_native = "^15"`; validate with `alr exec -- gnatls --version`. Do not
+  run plain system `gnat*`, `gnatmake`, `gnatls`, `gnatprove`, `gcc -gnat*`, or
+  `gprbuild` for this workspace, because PATH tools can bypass the enforced
+  Alire compiler.
 - Build: `alr build`.
 - Tests (KATs + negative/fail-closed tests): `(cd tests && alr build) && ./tests/bin/tests`
   — prints `cryptolib tests passed`. No OpenSSL: the cross-check vectors are
@@ -63,7 +68,7 @@ change behavior — every code example in `README.md` is verified to compile, an
   symbol (`getrandom`, `explicit_bzero`) in common `src/` — it breaks the Windows
   link. `CryptoLib.Secure_Wipe` is deliberately portable (volatile stores, no
   libc). The Windows RNG (`BCryptGenRandom`) is written but **unverified off
-  Windows** — it only passes a standalone `gcc -gnatc` semantic check.
+  Windows** — it only passes an Alire GNAT semantic check off Windows.
 - **GNAT `Ada.Numerics.Big_Numbers.Big_Integers` hard-caps at ~6400 bits** (200
   words → `STORAGE_ERROR`). That is why DH group16/18 use `CryptoLib.Modexp`
   (fixed-width Montgomery), not `Big_Integers`.

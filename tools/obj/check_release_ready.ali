@@ -1,0 +1,127 @@
+V "GNAT Lib v15"
+M P W=b
+A -Wall
+A -Wextra
+A -gnatwa
+A -gnatA
+A -gnat2022
+A -gnata
+A -mtune=generic
+A -march=x86-64
+P SS ZX
+
+RN
+RV NO_EXCEPTION_HANDLERS
+RV NO_EXCEPTIONS
+RV NO_IO
+RV NO_SECONDARY_STACK
+RV NO_STANDARD_STORAGE_POOLS
+RV NO_DYNAMIC_SIZED_OBJECTS
+RV NO_IMPLEMENTATION_PRAGMAS
+
+U check_release_ready%b	check_release_ready.adb	d89ba807 NE OO SU
+W ada%s			ada.ads			ada.ali
+W ada.command_line%s	a-comlin.adb		a-comlin.ali
+W ada.strings%s		a-string.ads		a-string.ali
+W ada.strings.fixed%s	a-strfix.adb		a-strfix.ali
+Z ada.strings.text_buffers%s  a-sttebu.adb	a-sttebu.ali
+W ada.text_io%s		a-textio.adb		a-textio.ali
+W project_tools%s	project_tools.ads	project_tools.ali
+W project_tools.processes%s  project_tools-processes.adb  project_tools-processes.ali
+Z system.concat_2%s	s-conca2.adb		s-conca2.ali
+Z system.secondary_stack%s  s-secsta.adb	s-secsta.ali
+
+D ada.ads		20250808065140 76789da1 ada%s
+D a-charac.ads		20250808065140 2d3ec45b ada.characters%s
+D a-chlat1.ads		20250808065140 e0d72e76 ada.characters.latin_1%s
+D a-comlin.ads		20250808065140 4aa66568 ada.command_line%s
+D a-except.ads		20250808065140 e7970cd9 ada.exceptions%s
+D a-finali.ads		20250808065140 bf4f806b ada.finalization%s
+D a-ioexce.ads		20250808065140 40018c65 ada.io_exceptions%s
+D a-stream.ads		20250808065140 17477cbd ada.streams%s
+D a-string.ads		20250808065140 90ac6797 ada.strings%s
+D a-strfix.ads		20250808065140 8648dedb ada.strings.fixed%s
+D a-strmap.ads		20250808065140 1f91ebb6 ada.strings.maps%s
+D a-strsea.ads		20250808065140 18c3c634 ada.strings.search%s
+D a-sttebu.ads		20250808065140 f1ad67a2 ada.strings.text_buffers%s
+D a-strunb.ads		20250808065140 b10770ab ada.strings.unbounded%s
+D a-stuten.ads		20250808065140 c6ced0ae ada.strings.utf_encoding%s
+D a-tags.ads		20250808065140 fbca0ad5 ada.tags%s
+D a-textio.ads		20250808065140 34ef47de ada.text_io%s
+D a-unccon.ads		20250808065140 0e9b276f ada.unchecked_conversion%s
+D a-uncdea.ads		20250808065140 c3a8ac65 ada.unchecked_deallocation%s
+D check_release_ready.adb  20260705231055 010c19f1 check_release_ready%b
+D gnat.ads		20250808065140 b5988c27 gnat%s
+D g-os_lib.ads		20250808065140 0db74523 gnat.os_lib%s
+D interfac.ads		20250808065140 9111f9c1 interfaces%s
+D i-c.ads		20250808065140 e94c966a interfaces.c%s
+D i-cstrea.ads		20250808065140 ffd01b9d interfaces.c_streams%s
+D project_tools.ads	20260608162800 377f12dc project_tools%s
+D project_tools-processes.ads  20260629162511 21964d9b project_tools.processes%s
+D system.ads		20250808065140 14286b0f system%s
+D s-atocou.ads		20250808065140 dc18efc3 system.atomic_counters%s
+D s-conca2.ads		20250808065140 b5fb73f7 system.concat_2%s
+D s-crtl.ads		20250808065140 beb39b9e system.crtl%s
+D s-exctab.ads		20250808065140 91bef6ef system.exception_table%s
+D s-ficobl.ads		20250808065140 dc5161d4 system.file_control_block%s
+D s-finpri.ads		20250808065140 5970d55a system.finalization_primitives%s
+D s-finroo.ads		20250808065140 0a7c3ed4 system.finalization_root%s
+D s-oscons.ads		20250827122531 068e1a91 system.os_constants%s
+D s-os_lib.ads		20250808065140 dd4133ed system.os_lib%s
+D s-oslock.ads		20250808065140 13fa6b78 system.os_locks%s
+D s-parame.ads		20250808065140 3597fc11 system.parameters%s
+D s-putima.ads		20250808065140 17291fe4 system.put_images%s
+D s-retsta.ads		20250808065140 0f6b06cb system.return_stack%s
+D s-secsta.ads		20250808065140 578279f5 system.secondary_stack%s
+D s-soflin.ads		20250808065140 5d88fdea system.soft_links%s
+D s-stache.ads		20250808065140 0b81c1fe system.stack_checking%s
+D s-stalib.ads		20250808065140 1c9580f6 system.standard_library%s
+D s-stoele.ads		20250808065140 ccded4e8 system.storage_elements%s
+D s-stratt.ads		20250808065140 516607ae system.stream_attributes%s
+D s-string.ads		20250808065140 582aac7d system.strings%s
+D s-traent.ads		20250808065140 c81cbf8c system.traceback_entries%s
+D s-unstyp.ads		20250808065140 fa2a7f59 system.unsigned_types%s
+D s-wchcon.ads		20250808065140 d9032363 system.wch_con%s
+G a e
+G c Z b b [check_release_ready standard 10 11 none]
+G r c none [check_release_ready standard 10 11 none] [shell_output_trimmed project_tools__processes 116 13 none]
+G r c none [check_release_ready standard 10 11 none] [run_shell project_tools__processes 93 13 none]
+X 1 ada.ads
+18K9*Ada 22e8 20|1r6 2r6 3r6 17r10 18r13 20r10 20r44 22r13 23r10 24r13 27r10
+. 27r44 31r7 36r7 37r7 39r10 40r13 42r10 42r44 47r7 48r7 49r10 50r7 50r41
+. 62r4 63r4 63r38
+X 4 a-comlin.ads
+40K13*Command_Line 148e21 20|1w10 20r14 20r48 27r14 27r48 42r14 42r48 47r11
+. 50r11 50r45 63r8 63r42
+43V13*Argument_Count{natural} 20|47s24
+74I9*Exit_Status<integer>
+76i4*Success{74I9} 20|63r55
+77i4*Failure{74I9} 20|20r61 27r61 42r61 50r58
+79U14*Set_Exit_Status 20|20s27 27s27 42s27 50s24 63s21
+X 9 a-string.ads
+16K13*Strings 35e16 20|2r10 22r17
+X 10 a-strfix.ads
+49K21*Fixed 1390e22 20|2w18 22r25
+252V13*Index{natural} 20|22s31
+X 17 a-textio.ads
+58K13*Text_IO 785e16 20|3w10 17r14 18r17 23r14 24r17 31r11 36r11 37r11 39r14
+. 40r17 48r11 49r14 62r8
+67P9*File_Type
+189V13*Standard_Error{67P9} 20|18s25 24s25 40s25 49s22
+284U14*New_Line 20|36s19
+555U14*Put_Line 20|17s22 23s22 39s22 48s19
+565U14*Put_Line 20|31s19 37s19 62s16
+X 20 check_release_ready.adb
+10U11*Check_Release_Ready 10b11 67l5 67t24
+11U14 Require_Alire_GNAT_15 11b14 32l8 32t29 54s4
+12a7 Output_Text{string} 16r10 22r38 26r15 31r62
+34U14 Step 34b14 34>20 34>36 45l8 45t12 55s4 56s4 57s4 58s4 59s4 60s4
+34a20 Label{string} 37r38 41r60
+34a36 Command{string} 38r45
+X 26 project_tools.ads
+1K9*Project_Tools 20|5r6 13r9 38r10 26|3e18
+X 27 project_tools-processes.ads
+4K23*Processes 20|5w20 13r23 38r24 27|120e28
+93V13*Run_Shell{integer} 20|38s34
+116V13*Shell_Output_Trimmed{string} 20|13s33
+

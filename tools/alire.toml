@@ -15,6 +15,9 @@ cryptolib = "*"
 [[depends-on]]
 project_tools = "~0.1.0"
 
+[[depends-on]]
+gnat_native = "^15"
+
 # Local development overrides; dev-only, not for publication.
 [[pins]]
 cryptolib = { path = ".." }

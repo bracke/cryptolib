@@ -6,5 +6,8 @@ authors = ["Bent Bracke"]
 maintainers = ["Bent Bracke <bent@bracke.dk>"]
 maintainers-logins = ["bracke"]
 licenses = "MIT OR Apache-2.0 WITH LLVM-exception"
-website = ""
+website = "https://github.com/bracke/cryptolib"
 tags = ["cryptology", "hashes"]
+
+[[depends-on]]
+gnat_native = "^15"

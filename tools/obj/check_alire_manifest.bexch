@@ -1,0 +1,26 @@
+[GENERATED OBJECT FILE]
+b__check_alire_manifest.o
+[PROJECT FILES]
+/home/bent/Projekte/Ada/cryptolib/tools/cryptolib_tools.gpr
+20260704131119 578a1938b2a6d954aed5c761d2f6681b
+/home/bent/Projekte/Ada/project_tools/project_tools.gpr
+20260608162800 d1f72196786200a06a03ad499ce76d63
+/home/bent/Projekte/Ada/cryptolib/config/cryptolib_config.gpr
+20260705102224 6b60020a92c166313ccb752260f1607b
+/home/bent/Projekte/Ada/cryptolib/cryptolib.gpr
+20260704065438 c72829aa877a83209eda8fda1d64bf75
+[BOUND OBJECT FILES]
+/home/bent/Projekte/Ada/cryptolib/tools/obj/check_alire_manifest.o
+[GENERATED SOURCE FILES]
+b__check_alire_manifest.ads
+b__check_alire_manifest.adb
+b__check_alire_manifest.ali
+[RESULTING OPTIONS]
+-L/home/bent/Projekte/Ada/cryptolib/tools/obj/
+-L/home/bent/Projekte/Ada/cryptolib/tools/obj/
+-L/home/bent/Projekte/Ada/cryptolib/lib/
+-L/home/bent/Projekte/Ada/project_tools/lib/
+-L/home/bent/.local/share/alire/toolchains/gnat_native_15.2.1_4640d4b3/lib/gcc/x86_64-pc-linux-gnu/15.2.0/adalib/
+-static
+/home/bent/.local/share/alire/toolchains/gnat_native_15.2.1_4640d4b3/lib/gcc/x86_64-pc-linux-gnu/15.2.0/adalib/libgnat.a
+-ldl

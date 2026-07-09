@@ -1,0 +1,151 @@
+V "GNAT Lib v15"
+M P W=b
+A -Wall
+A -Wextra
+A -gnatwa
+A -gnatA
+A -gnat2022
+A -gnata
+A -mtune=generic
+A -march=x86-64
+P SS ZX
+
+RN
+RV NO_EXCEPTION_HANDLERS
+RV NO_EXCEPTION_PROPAGATION
+RV NO_EXCEPTIONS
+RV NO_IO
+RV NO_NESTED_FINALIZATION
+RV NO_SECONDARY_STACK
+RV NO_STANDARD_STORAGE_POOLS
+RV NO_DEFAULT_INITIALIZATION
+RV NO_DYNAMIC_SIZED_OBJECTS
+RV NO_IMPLEMENTATION_PRAGMAS
+
+U check_gnatdoc_tags%b	check_gnatdoc_tags.adb	a1ea11cb NE OO SU
+W ada%s			ada.ads			ada.ali
+W ada.command_line%s	a-comlin.adb		a-comlin.ali
+W ada.directories%s	a-direct.adb		a-direct.ali
+Z ada.exceptions%s	a-except.adb		a-except.ali
+Z ada.strings.text_buffers%s  a-sttebu.adb	a-sttebu.ali
+W ada.text_io%s		a-textio.adb		a-textio.ali
+W project_tools%s	project_tools.ads	project_tools.ali
+W project_tools.ada_source%s  project_tools-ada_source.adb  project_tools-ada_source.ali
+Z system%s		system.ads		system.ali
+Z system.concat_3%s	s-conca3.adb		s-conca3.ali
+Z system.finalization_primitives%s  s-finpri.adb  s-finpri.ali
+Z system.img_int%s	s-imgint.ads		s-imgint.ali
+Z system.secondary_stack%s  s-secsta.adb	s-secsta.ali
+Z system.soft_links%s	s-soflin.adb		s-soflin.ali
+Z system.standard_library%s  s-stalib.adb	s-stalib.ali
+
+D ada.ads		20250808065140 76789da1 ada%s
+D a-calend.ads		20250808065140 bf7f3cc9 ada.calendar%s
+D a-charac.ads		20250808065140 2d3ec45b ada.characters%s
+D a-chlat1.ads		20250808065140 e0d72e76 ada.characters.latin_1%s
+D a-comlin.ads		20250808065140 4aa66568 ada.command_line%s
+D a-direct.ads		20250808065140 467e87a1 ada.directories%s
+D a-except.ads		20250808065140 e7970cd9 ada.exceptions%s
+D a-finali.ads		20250808065140 bf4f806b ada.finalization%s
+D a-ioexce.ads		20250808065140 40018c65 ada.io_exceptions%s
+D a-stream.ads		20250808065140 17477cbd ada.streams%s
+D a-string.ads		20250808065140 90ac6797 ada.strings%s
+D a-strmap.ads		20250808065140 1f91ebb6 ada.strings.maps%s
+D a-strsea.ads		20250808065140 18c3c634 ada.strings.search%s
+D a-sttebu.ads		20250808065140 f1ad67a2 ada.strings.text_buffers%s
+D a-strunb.ads		20250808065140 b10770ab ada.strings.unbounded%s
+D a-stuten.ads		20250808065140 c6ced0ae ada.strings.utf_encoding%s
+D a-tags.ads		20250808065140 fbca0ad5 ada.tags%s
+D a-textio.ads		20250808065140 34ef47de ada.text_io%s
+D a-unccon.ads		20250808065140 0e9b276f ada.unchecked_conversion%s
+D check_gnatdoc_tags.adb  20260704131219 4a884937 check_gnatdoc_tags%b
+D interfac.ads		20250808065140 9111f9c1 interfaces%s
+D i-c.ads		20250808065140 e94c966a interfaces.c%s
+D i-cstrea.ads		20250808065140 ffd01b9d interfaces.c_streams%s
+D project_tools.ads	20260608162800 377f12dc project_tools%s
+D project_tools-ada_source.ads  20260704081418 d355fdeb project_tools.ada_source%s
+D system.ads		20250808065140 14286b0f system%s
+D s-atocou.ads		20250808065140 dc18efc3 system.atomic_counters%s
+D s-conca3.ads		20250808065140 8a7a19a2 system.concat_3%s
+D s-crtl.ads		20250808065140 beb39b9e system.crtl%s
+D s-exctab.ads		20250808065140 91bef6ef system.exception_table%s
+D s-ficobl.ads		20250808065140 dc5161d4 system.file_control_block%s
+D s-finpri.ads		20250808065140 5970d55a system.finalization_primitives%s
+D s-finroo.ads		20250808065140 0a7c3ed4 system.finalization_root%s
+D s-imagei.ads		20250808065140 5e131ce0 system.image_i%s
+D s-imgint.ads		20250808065140 67e4edfb system.img_int%s
+D s-memory.ads		20250808065140 18949c1a system.memory%s
+D s-oscons.ads		20250827122531 068e1a91 system.os_constants%s
+D s-oslock.ads		20250808065140 13fa6b78 system.os_locks%s
+D s-parame.ads		20250808065140 3597fc11 system.parameters%s
+D s-putima.ads		20250808065140 17291fe4 system.put_images%s
+D s-retsta.ads		20250808065140 0f6b06cb system.return_stack%s
+D s-secsta.ads		20250808065140 578279f5 system.secondary_stack%s
+D s-soflin.ads		20250808065140 5d88fdea system.soft_links%s
+D s-stache.ads		20250808065140 0b81c1fe system.stack_checking%s
+D s-stalib.ads		20250808065140 1c9580f6 system.standard_library%s
+D s-stalib.adb		20250808065140 eb464a47 system.standard_library%b
+D s-stoele.ads		20250808065140 ccded4e8 system.storage_elements%s
+D s-stratt.ads		20250808065140 516607ae system.stream_attributes%s
+D s-traent.ads		20250808065140 c81cbf8c system.traceback_entries%s
+D s-unstyp.ads		20250808065140 fa2a7f59 system.unsigned_types%s
+D s-valspe.ads		20250808065140 f810d31c system.val_spec%s
+D s-vaispe.ads		20250808065140 8280550e system.value_i_spec%s
+D s-vauspe.ads		20250808065140 89269ba5 system.value_u_spec%s
+D s-vs_int.ads		20250808065140 06b6b724 system.vs_int%s
+D s-vs_uns.ads		20250808065140 e7f47a27 system.vs_uns%s
+D s-wchcon.ads		20250808065140 d9032363 system.wch_con%s
+G a e
+G c Z b b [check_gnatdoc_tags standard 10 11 none]
+G r c none [check_gnatdoc_tags standard 10 11 none] [require_public_gnatdoc_tags project_tools__ada_source 32 14 none]
+X 1 ada.ads
+18K9*Ada 22e8 20|1r6 2r6 3r6 14r16 15r16 17r14 20r7 22r21 23r13 24r10 26r26
+. 29r7 32r7 33r7 34r10 35r7 35r41 43r4
+X 5 a-comlin.ads
+40K13*Command_Line 148e21 20|1w10 32r11 35r11 35r45
+43V13*Argument_Count{natural} 20|32s24
+74I9*Exit_Status<integer>
+77i4*Failure{74I9} 20|35r58
+79U14*Set_Exit_Status 20|35s24
+X 6 a-direct.ads
+76K13*Directories 524e20 20|2w10 14r20 15r20 17r18 20r11 22r25 23r17 24r14
+. 26r30 29r11
+303n34*Ordinary_File{303E9} 20|22r37
+310V13*Exists{boolean} 20|17s30
+345R9*Directory_Entry_Type 517e14 20|15r32
+352A9*Filter_Type(boolean)<303E9>
+360R9*Search_Type<8|43R9> 488e14 20|14r32
+365U14*Start_Search 20|20s23
+369a7 Filter{352A9} 20|22r10
+387U14*End_Search 20|29s23
+394V13*More_Entries{boolean} 20|23s29
+398U14*Get_Next_Entry 20|24s26
+438V13*Full_Name{string} 20|26s42
+X 18 a-textio.ads
+58K13*Text_IO 785e16 20|3w10 33r11 34r14 43r8
+67P9*File_Type
+189V13*Standard_Error{67P9} 20|34s22
+555U14*Put_Line 20|33s19
+565U14*Put_Line 20|43s16
+X 20 check_gnatdoc_tags.adb
+10U11*Check_Gnatdoc_Tags 10b11 48l5 48t23
+11i4 Checked{natural} 27m10 27r21 44r48
+13U14 Check_Dir 13b14 13>25 30l8 30t17 39s4 40s4 41s4
+13a25 Dir{string} 17r38 21r18
+14r7 Search{6|360R9} 21m10 21r10 23r43 24m42 24r42 29m35 29r35
+15r7 Item{6|345R9} 24m50 26r53
+X 24 project_tools.ads
+1K9*Project_Tools 20|5r6 25r10 24|3e18
+X 25 project_tools-ada_source.ads
+3K23*Ada_Source 20|5w20 25r24 25|83e29
+32U14*Require_Public_GNATdoc_Tags 20|25s35
+33a7 Spec_Path{string} 20|26r13
+X 26 system.ads
+67M9*Address
+X 36 s-memory.ads
+51V13*Alloc{26|67M9} 101i<c,__gnat_malloc>22
+66U14*Free 102i<c,__gnat_free>22
+74V13*Realloc{26|67M9} 103i<c,__gnat_realloc>22
+X 46 s-stalib.adb
+87U14 Break_Start 88i<c,__gnat_break_start>22
+

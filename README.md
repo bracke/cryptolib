@@ -9,11 +9,24 @@ are embedded in the test suite, which links nothing beyond the Ada runtime.
 For the security properties, constant-time guarantees, and known limitations, see
 [`SECURITY.md`](SECURITY.md).
 
+## Toolchain
+
+CryptoLib must be built and validated with Alire GNAT 15 only. The root, tests,
+and tools crates require `gnat_native = "^15"`. Confirm with:
+
+```sh
+alr exec -- gnatls --version
+```
+
+Do not run plain system `gnat*`, `gnatmake`, `gnatls`, `gnatprove`,
+`gcc -gnat*`, or `gprbuild` in this workspace.
+
 ## Package map
 
 | Package | What it provides |
 |---------|------------------|
 | `CryptoLib.Hashes` | MD5, SHA-1, SHA-256/384/512, XXH3 |
+| `CryptoLib.Checksums` | Adler-32 and CRC-32 |
 | `CryptoLib.SHA3` | SHA3-256/512, SHAKE128/256 |
 | `CryptoLib.Macs` | HMAC-SHA1/256/384/512, PBKDF2, PBKDF1, PKCS12KDF |
 | `CryptoLib.UMAC` | UMAC-64/128 (RFC 4418) |

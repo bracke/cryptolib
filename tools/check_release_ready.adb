@@ -1,4 +1,5 @@
 with Ada.Command_Line;
+with Ada.Strings.Fixed;
 with Ada.Text_IO;
 
 with Project_Tools.Processes;
@@ -7,6 +8,29 @@ with Project_Tools.Processes;
 --  build and run its test suite, and run cryptolib's own verification checks.
 --  Run from the cryptolib crate root.
 procedure Check_Release_Ready is
+   procedure Require_Alire_GNAT_15 is
+      Output_Text : constant String :=
+        Project_Tools.Processes.Shell_Output_Trimmed
+          ("alr exec -- gnatls --version");
+   begin
+      if Output_Text = "" then
+         Ada.Text_IO.Put_Line
+           (Ada.Text_IO.Standard_Error,
+            "could not run `alr exec -- gnatls --version`");
+         Ada.Command_Line.Set_Exit_Status (Ada.Command_Line.Failure);
+         raise Program_Error;
+      elsif Ada.Strings.Fixed.Index (Output_Text, "GNATLS 15.") = 0 then
+         Ada.Text_IO.Put_Line
+           (Ada.Text_IO.Standard_Error,
+            "wrong Ada compiler: cryptolib release validation must use Alire GNAT 15; got: "
+            & Output_Text);
+         Ada.Command_Line.Set_Exit_Status (Ada.Command_Line.Failure);
+         raise Program_Error;
+      end if;
+
+      Ada.Text_IO.Put_Line ("Alire GNAT 15 check passed: " & Output_Text);
+   end Require_Alire_GNAT_15;
+
    procedure Step (Label : String; Command : String) is
    begin
       Ada.Text_IO.New_Line;
@@ -27,6 +51,7 @@ begin
       return;
    end if;
 
+   Require_Alire_GNAT_15;
    Step ("build cryptolib", "alr build");
    Step ("build test suite", "cd tests && alr build");
    Step ("run test suite", "./tests/bin/tests");

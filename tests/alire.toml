@@ -17,5 +17,8 @@ cryptolib = "*"
 [[depends-on]]
 aunit = "^26.0.0"
 
+[[depends-on]]
+gnat_native = "^15"
+
 [[pins]]
 cryptolib = { path = ".." }
