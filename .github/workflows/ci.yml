@@ -1,0 +1,40 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    name: Linux build and tests
+    runs-on: ubuntu-latest
+    env:
+      ALIRE_NONINTERACTIVE: "true"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Alire
+        # Pin the toolchain the manifest requires. setup-alire@v5 defaults to alr
+        # 2.1.0, whose index carries gnat_native 15.2.1; v4 pins alr 2.0.2, whose
+        # older index cannot resolve it.
+        uses: alire-project/setup-alire@v5
+        with:
+          toolchain: gnat_native=15.2.1 gprbuild
+
+      - name: Install workflow dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libaunit-dev \
+            || sudo apt-get install -y libaunit22-dev \
+            || sudo apt-get install -y libaunit24-dev
+
+      - name: Build the library
+        run: alr --non-interactive build
+
+      - name: Build and run the test suite
+        working-directory: tests
+        run: |
+          alr --non-interactive build
+          ./bin/tests
