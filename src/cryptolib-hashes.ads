@@ -27,6 +27,7 @@ package CryptoLib.Hashes is
    subtype XXH3_128_Digest_Index is Positive range 1 .. 16;
    type XXH3_128_Digest is array (XXH3_128_Digest_Index) of Ada.Streams.Stream_Element;
 
+   type SHA1_Context is private;
    type SHA256_Context is private;
    type SHA512_Context is private;
 
@@ -42,6 +43,27 @@ package CryptoLib.Hashes is
    --  @return the 20-byte SHA-1 digest
    function SHA1
      (Data : Ada.Streams.Stream_Element_Array)
+      return SHA1_Digest;
+
+   --  Reset a SHA-1 context to the initial state so it can accept Update
+   --  calls followed by a single Finalize.
+   --  @param Context_Item the SHA-1 streaming context to initialize
+   procedure Initialize_SHA1 (Context_Item : out SHA1_Context);
+
+   --  Absorb a further chunk of message bytes into a SHA-1 context; may be
+   --  called any number of times between Initialize and Finalize.
+   --  @param Context_Item the SHA-1 streaming context to update in place
+   --  @param Data         the next chunk of message bytes to hash
+   procedure Update
+     (Context_Item : in out SHA1_Context;
+      Data         : Ada.Streams.Stream_Element_Array);
+
+   --  Pad and finish a SHA-1 context, producing the digest of all bytes
+   --  absorbed by prior Update calls.
+   --  @param Context_Item the SHA-1 streaming context to finalize
+   --  @return the 20-byte SHA-1 digest
+   function Finalize
+     (Context_Item : in out SHA1_Context)
       return SHA1_Digest;
 
    --  Reset a SHA-256 context to the initial state so it can accept Update
@@ -122,6 +144,16 @@ package CryptoLib.Hashes is
       return XXH3_128_Digest;
 
 private
+   type SHA1_Block is array (Natural range 0 .. 63) of Interfaces.Unsigned_8;
+   type SHA1_State is array (Natural range 0 .. 4) of Interfaces.Unsigned_32;
+
+   type SHA1_Context is record
+      State_Data  : SHA1_State := [others => 0];
+      Block_Data  : SHA1_Block := [others => 0];
+      Block_Used  : Natural range 0 .. 64 := 0;
+      Total_Bytes : Interfaces.Unsigned_64 := 0;
+   end record;
+
    type SHA256_Block is array (Natural range 0 .. 63) of Interfaces.Unsigned_8;
    type SHA256_State is array (Natural range 0 .. 7) of Interfaces.Unsigned_32;
 

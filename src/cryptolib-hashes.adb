@@ -1,140 +1,18 @@
 
 package body CryptoLib.Hashes is
    use type Ada.Streams.Stream_Element_Offset;
+   --  One-shot SHA-1 via the streaming context, so a large input is hashed
+   --  block-at-a-time without allocating the whole padded message on the
+   --  stack (mirrors the SHA-256 one-shot below).
    function SHA1
      (Data : Ada.Streams.Stream_Element_Array)
       return SHA1_Digest
    is
-      use type Interfaces.Unsigned_32;
-      use type Interfaces.Unsigned_64;
-      subtype Word is Interfaces.Unsigned_32;
-
-      function Rotate_Left_32
-        (Value  : Word;
-         Amount : Natural)
-         return Word
-      is
-      begin
-         return Interfaces.Shift_Left (Value, Amount)
-           or Interfaces.Shift_Right (Value, 32 - Amount);
-      end Rotate_Left_32;
-
-      Total_Length  : constant Natural := Natural (Data'Length);
-      Padding_Count : Natural := 1;
-      Total_Bits    : constant Interfaces.Unsigned_64 :=
-        Interfaces.Unsigned_64 (Total_Length) * 8;
-      H0 : Word := 16#6745_2301#;
-      H1 : Word := 16#EFCD_AB89#;
-      H2 : Word := 16#98BA_DCFE#;
-      H3 : Word := 16#1032_5476#;
-      H4 : Word := 16#C3D2_E1F0#;
+      Context_Item : SHA1_Context;
    begin
-      while (Total_Length + Padding_Count + 8) mod 64 /= 0 loop
-         Padding_Count := Padding_Count + 1;
-      end loop;
-
-      declare
-         Message_Length : constant Natural := Total_Length + Padding_Count + 8;
-         Message_Data   : array (Natural range 0 .. Message_Length - 1)
-           of Interfaces.Unsigned_8 := [others => 0];
-         Cursor_Value   : Natural := 0;
-      begin
-         for Index_Value in Data'Range loop
-            Message_Data (Cursor_Value) := Interfaces.Unsigned_8 (Data (Index_Value));
-            Cursor_Value := Cursor_Value + 1;
-         end loop;
-         Message_Data (Cursor_Value) := 16#80#;
-
-         for Byte_Index in 0 .. 7 loop
-            Message_Data (Message_Length - 1 - Byte_Index) :=
-              Interfaces.Unsigned_8
-                (Interfaces.Shift_Right (Total_Bits, Byte_Index * 8) and 16#FF#);
-         end loop;
-
-         for Block_Index in 0 .. (Message_Length / 64) - 1 loop
-            declare
-               W : array (Natural range 0 .. 79) of Word := [others => 0];
-               A : Word := H0;
-               B : Word := H1;
-               C : Word := H2;
-               D : Word := H3;
-               E : Word := H4;
-               F : Word;
-               K : Word;
-               Temp_Value : Word;
-               Offset_Value : constant Natural := Block_Index * 64;
-            begin
-               for Word_Index in 0 .. 15 loop
-                  W (Word_Index) :=
-                    Interfaces.Shift_Left
-                      (Word (Message_Data (Offset_Value + Word_Index * 4)), 24)
-                    or Interfaces.Shift_Left
-                      (Word (Message_Data (Offset_Value + Word_Index * 4 + 1)), 16)
-                    or Interfaces.Shift_Left
-                      (Word (Message_Data (Offset_Value + Word_Index * 4 + 2)), 8)
-                    or Word (Message_Data (Offset_Value + Word_Index * 4 + 3));
-               end loop;
-
-               for Word_Index in 16 .. 79 loop
-                  W (Word_Index) := Rotate_Left_32
-                    (W (Word_Index - 3) xor W (Word_Index - 8)
-                     xor W (Word_Index - 14) xor W (Word_Index - 16), 1);
-               end loop;
-
-               for Round_Index in 0 .. 79 loop
-                  if Round_Index <= 19 then
-                     F := (B and C) or ((not B) and D);
-                     K := 16#5A82_7999#;
-                  elsif Round_Index <= 39 then
-                     F := B xor C xor D;
-                     K := 16#6ED9_EBA1#;
-                  elsif Round_Index <= 59 then
-                     F := (B and C) or (B and D) or (C and D);
-                     K := 16#8F1B_BCDC#;
-                  else
-                     F := B xor C xor D;
-                     K := 16#CA62_C1D6#;
-                  end if;
-
-                  Temp_Value := Rotate_Left_32 (A, 5) + F + E + K + W (Round_Index);
-                  E := D;
-                  D := C;
-                  C := Rotate_Left_32 (B, 30);
-                  B := A;
-                  A := Temp_Value;
-               end loop;
-
-               H0 := H0 + A;
-               H1 := H1 + B;
-               H2 := H2 + C;
-               H3 := H3 + D;
-               H4 := H4 + E;
-            end;
-         end loop;
-      end;
-
-      declare
-         Words : constant array (Natural range 0 .. 4) of Word :=
-           [H0, H1, H2, H3, H4];
-         Result_Item : SHA1_Digest;
-         Output_Index : Positive := Result_Item'First;
-      begin
-         for Word_Value of Words loop
-            Result_Item (Output_Index) := Ada.Streams.Stream_Element
-              (Interfaces.Shift_Right (Word_Value, 24) and 16#FF#);
-            Result_Item (Output_Index + 1) := Ada.Streams.Stream_Element
-              (Interfaces.Shift_Right (Word_Value, 16) and 16#FF#);
-            Result_Item (Output_Index + 2) := Ada.Streams.Stream_Element
-              (Interfaces.Shift_Right (Word_Value, 8) and 16#FF#);
-            Result_Item (Output_Index + 3) := Ada.Streams.Stream_Element
-              (Word_Value and 16#FF#);
-            Output_Index := Output_Index + 4;
-         end loop;
-         return Result_Item;
-      end;
-   exception
-      when others =>
-         return [others => 0];
+      Initialize_SHA1 (Context_Item);
+      Update (Context_Item, Data);
+      return Finalize (Context_Item);
    end SHA1;
 
    use Interfaces;
@@ -499,6 +377,138 @@ package body CryptoLib.Hashes is
       Update (Context_Item, Data);
       return Finalize (Context_Item);
    end SHA256;
+
+   --  Streaming SHA-1 (FIPS 180-4), block-at-a-time so callers can hash large
+   --  inputs without buffering. Mirrors the one-shot SHA1 compression above.
+   function Rotate_Left_32 (Value : Word; Amount : Natural) return Word is
+     (Shift_Left (Value, Amount) or Shift_Right (Value, 32 - Amount));
+
+   procedure Process_SHA1_Block (Context_Item : in out SHA1_Context) is
+      W : array (Natural range 0 .. 79) of Word := [others => 0];
+      A, B, C, D, E, F, K, Temp_Value : Word;
+   begin
+      for Index_Value in 0 .. 15 loop
+         W (Index_Value) :=
+           Shift_Left (Word (Context_Item.Block_Data (Index_Value * 4)), 24) or
+           Shift_Left (Word (Context_Item.Block_Data (Index_Value * 4 + 1)), 16) or
+           Shift_Left (Word (Context_Item.Block_Data (Index_Value * 4 + 2)), 8) or
+           Word (Context_Item.Block_Data (Index_Value * 4 + 3));
+      end loop;
+
+      for Index_Value in 16 .. 79 loop
+         W (Index_Value) := Rotate_Left_32
+           (W (Index_Value - 3) xor W (Index_Value - 8)
+            xor W (Index_Value - 14) xor W (Index_Value - 16), 1);
+      end loop;
+
+      A := Context_Item.State_Data (0);
+      B := Context_Item.State_Data (1);
+      C := Context_Item.State_Data (2);
+      D := Context_Item.State_Data (3);
+      E := Context_Item.State_Data (4);
+
+      for Round_Index in 0 .. 79 loop
+         if Round_Index <= 19 then
+            F := (B and C) or ((not B) and D);
+            K := 16#5A82_7999#;
+         elsif Round_Index <= 39 then
+            F := B xor C xor D;
+            K := 16#6ED9_EBA1#;
+         elsif Round_Index <= 59 then
+            F := (B and C) or (B and D) or (C and D);
+            K := 16#8F1B_BCDC#;
+         else
+            F := B xor C xor D;
+            K := 16#CA62_C1D6#;
+         end if;
+
+         Temp_Value := Rotate_Left_32 (A, 5) + F + E + K + W (Round_Index);
+         E := D;
+         D := C;
+         C := Rotate_Left_32 (B, 30);
+         B := A;
+         A := Temp_Value;
+      end loop;
+
+      Context_Item.State_Data (0) := Context_Item.State_Data (0) + A;
+      Context_Item.State_Data (1) := Context_Item.State_Data (1) + B;
+      Context_Item.State_Data (2) := Context_Item.State_Data (2) + C;
+      Context_Item.State_Data (3) := Context_Item.State_Data (3) + D;
+      Context_Item.State_Data (4) := Context_Item.State_Data (4) + E;
+      Context_Item.Block_Data := [others => 0];
+      Context_Item.Block_Used := 0;
+   end Process_SHA1_Block;
+
+   procedure Initialize_SHA1 (Context_Item : out SHA1_Context) is
+   begin
+      Context_Item.State_Data :=
+        [16#6745_2301#, 16#EFCD_AB89#, 16#98BA_DCFE#, 16#1032_5476#,
+         16#C3D2_E1F0#];
+      Context_Item.Block_Data := [others => 0];
+      Context_Item.Block_Used := 0;
+      Context_Item.Total_Bytes := 0;
+   end Initialize_SHA1;
+
+   procedure Update
+     (Context_Item : in out SHA1_Context;
+      Data         : Ada.Streams.Stream_Element_Array)
+   is
+   begin
+      for Byte_Value of Data loop
+         Context_Item.Block_Data (Context_Item.Block_Used) := Unsigned_8 (Byte_Value);
+         Context_Item.Block_Used := Context_Item.Block_Used + 1;
+         Context_Item.Total_Bytes := Context_Item.Total_Bytes + 1;
+         if Context_Item.Block_Used = 64 then
+            Process_SHA1_Block (Context_Item);
+         end if;
+      end loop;
+   end Update;
+
+   function Finalize
+     (Context_Item : in out SHA1_Context)
+      return SHA1_Digest
+   is
+      Length_Bits : constant Unsigned_64 := Context_Item.Total_Bytes * 8;
+      Result      : SHA1_Digest := [others => 0];
+      Byte_Index  : Natural := 1;
+   begin
+      Context_Item.Block_Data (Context_Item.Block_Used) := 16#80#;
+      Context_Item.Block_Used := Context_Item.Block_Used + 1;
+
+      if Context_Item.Block_Used > 56 then
+         while Context_Item.Block_Used < 64 loop
+            Context_Item.Block_Data (Context_Item.Block_Used) := 0;
+            Context_Item.Block_Used := Context_Item.Block_Used + 1;
+         end loop;
+         Process_SHA1_Block (Context_Item);
+      end if;
+
+      while Context_Item.Block_Used < 56 loop
+         Context_Item.Block_Data (Context_Item.Block_Used) := 0;
+         Context_Item.Block_Used := Context_Item.Block_Used + 1;
+      end loop;
+
+      for Index_Value in 0 .. 7 loop
+         Context_Item.Block_Data (56 + Index_Value) :=
+           Unsigned_8 (Shift_Right (Length_Bits, (7 - Index_Value) * 8) and 16#FF#);
+      end loop;
+      Context_Item.Block_Used := 64;
+      Process_SHA1_Block (Context_Item);
+
+      for Word_Index in 0 .. 4 loop
+         Result (SHA1_Digest_Index (Byte_Index)) := Ada.Streams.Stream_Element
+           (Shift_Right (Context_Item.State_Data (Word_Index), 24) and 16#FF#);
+         Result (SHA1_Digest_Index (Byte_Index + 1)) := Ada.Streams.Stream_Element
+           (Shift_Right (Context_Item.State_Data (Word_Index), 16) and 16#FF#);
+         Result (SHA1_Digest_Index (Byte_Index + 2)) := Ada.Streams.Stream_Element
+           (Shift_Right (Context_Item.State_Data (Word_Index), 8) and 16#FF#);
+         Result (SHA1_Digest_Index (Byte_Index + 3)) := Ada.Streams.Stream_Element
+           (Context_Item.State_Data (Word_Index) and 16#FF#);
+         Byte_Index := Byte_Index + 4;
+      end loop;
+
+      return Result;
+   end Finalize;
 
    subtype Word64 is Unsigned_64;
 

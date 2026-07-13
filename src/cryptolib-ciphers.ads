@@ -207,6 +207,51 @@ package CryptoLib.Ciphers is
       Plain_Packet   : out Ada.Streams.Stream_Element_Array)
       return CryptoLib.Errors.Status;
 
+   --  Seal Plain_Packet as plain AES-GCM, with no SSH framing: the whole
+   --  plaintext is encrypted and the wire is ciphertext followed by the
+   --  16-octet tag. Unlike Seal_GCM this leaves no cleartext prefix, imposes no
+   --  minimum plaintext length, and authenticates the caller's Associated_Data.
+   --  Use this for general-purpose encryption; Seal_GCM is only for the
+   --  aes-gcm@openssh.com packet format.
+   --  @param Algorithm_Name  the GCM cipher name selecting the key size
+   --  @param Key_Data        the AES-GCM key bytes
+   --  @param IV_Data         the 12-byte GCM nonce, unique per key
+   --  @param Associated_Data data to authenticate but not encrypt; may be empty
+   --  @param Plain_Packet    the cleartext; may be empty
+   --  @param Wire_Packet     the sealed output; length must be
+   --                         Plain_Packet'Length + AES_GCM_Tag_Length
+   --  @return Ok on success, Internal_Error on a size mismatch or unexpected
+   --          exception, or the propagated init failure status
+   function Seal_AEAD
+     (Algorithm_Name  : String;
+      Key_Data        : Ada.Streams.Stream_Element_Array;
+      IV_Data         : Ada.Streams.Stream_Element_Array;
+      Associated_Data : Ada.Streams.Stream_Element_Array;
+      Plain_Packet    : Ada.Streams.Stream_Element_Array;
+      Wire_Packet     : out Ada.Streams.Stream_Element_Array)
+      return CryptoLib.Errors.Status;
+
+   --  Open a packet sealed by Seal_AEAD: verify the trailing 16-octet tag over
+   --  (Associated_Data, ciphertext) in constant time and, only on a match,
+   --  decrypt the body.
+   --  @param Algorithm_Name  the GCM cipher name selecting the key size
+   --  @param Key_Data        the AES-GCM key bytes
+   --  @param IV_Data         the 12-byte GCM nonce used to seal
+   --  @param Associated_Data the data authenticated when sealing; may be empty
+   --  @param Wire_Packet     the sealed packet: ciphertext then 16-octet tag
+   --  @param Plain_Packet    the recovered cleartext; length must be
+   --                         Wire_Packet'Length - AES_GCM_Tag_Length
+   --  @return Ok on success, Handshake_Failed on a size mismatch or tag
+   --          verification failure, Internal_Error on an unexpected exception
+   function Open_AEAD
+     (Algorithm_Name  : String;
+      Key_Data        : Ada.Streams.Stream_Element_Array;
+      IV_Data         : Ada.Streams.Stream_Element_Array;
+      Associated_Data : Ada.Streams.Stream_Element_Array;
+      Wire_Packet     : Ada.Streams.Stream_Element_Array;
+      Plain_Packet    : out Ada.Streams.Stream_Element_Array)
+      return CryptoLib.Errors.Status;
+
 private
    type AES_Round_Index is range 0 .. 14;
    type AES_Word_Index is range 0 .. 59;

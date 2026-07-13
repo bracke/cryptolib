@@ -2734,4 +2734,112 @@ package body CryptoLib.Ciphers is
          return CryptoLib.Errors.Internal_Error;
    end Open_GCM;
 
+   function Seal_AEAD
+     (Algorithm_Name  : String;
+      Key_Data        : Stream_Element_Array;
+      IV_Data         : Stream_Element_Array;
+      Associated_Data : Stream_Element_Array;
+      Plain_Packet    : Stream_Element_Array;
+      Wire_Packet     : out Stream_Element_Array) return CryptoLib.Errors.Status
+   is
+      State_Item   : Cipher_State;
+      J0_Value     : Counter_Block;
+      Status_Value : CryptoLib.Errors.Status;
+      Tag_First    : constant Stream_Element_Offset :=
+        Wire_Packet'First + Stream_Element_Offset (Plain_Packet'Length);
+   begin
+      --  Plain AES-GCM: wire = [ciphertext][16-octet tag]. The whole plaintext
+      --  is encrypted, so there is no cleartext prefix and no minimum length.
+      Wire_Packet := [others => 0];
+      if Wire_Packet'Length /= Plain_Packet'Length + AES_GCM_Tag_Length
+        or else IV_Data'Length < 12
+      then
+         return CryptoLib.Errors.Internal_Error;
+      end if;
+      Status_Value :=
+        Initialize_GCM_State (State_Item, Algorithm_Name, Key_Data);
+      if Status_Value /= CryptoLib.Errors.Ok then
+         return Status_Value;
+      end if;
+      J0_Value := Make_GCM_J0 (IV_Data);
+      declare
+         Cipher_Data : Stream_Element_Array (1 .. Plain_Packet'Length);
+      begin
+         Status_Value :=
+           Apply_GCM_CTR (State_Item, J0_Value, Plain_Packet, Cipher_Data);
+         if Status_Value /= CryptoLib.Errors.Ok then
+            Reset (State_Item);
+            return Status_Value;
+         end if;
+         Wire_Packet (Wire_Packet'First .. Tag_First - 1) := Cipher_Data;
+         Wire_Packet (Tag_First .. Wire_Packet'Last) :=
+           GCM_Tag (State_Item, J0_Value, Associated_Data, Cipher_Data);
+      end;
+      Reset (State_Item);
+      return CryptoLib.Errors.Ok;
+   exception
+      when others =>
+         Reset (State_Item);
+         Wire_Packet := [others => 0];
+         return CryptoLib.Errors.Internal_Error;
+   end Seal_AEAD;
+
+   function Open_AEAD
+     (Algorithm_Name  : String;
+      Key_Data        : Stream_Element_Array;
+      IV_Data         : Stream_Element_Array;
+      Associated_Data : Stream_Element_Array;
+      Wire_Packet     : Stream_Element_Array;
+      Plain_Packet    : out Stream_Element_Array)
+      return CryptoLib.Errors.Status
+   is
+      State_Item   : Cipher_State;
+      J0_Value     : Counter_Block;
+      Cipher_Last  : constant Stream_Element_Offset :=
+        Wire_Packet'Last - Stream_Element_Offset (AES_GCM_Tag_Length);
+      Status_Value : CryptoLib.Errors.Status;
+   begin
+      --  Inverse of Seal_AEAD: verify the tag over (Associated_Data,
+      --  ciphertext) before decrypting anything.
+      Plain_Packet := [others => 0];
+      if Wire_Packet'Length < AES_GCM_Tag_Length
+        or else Plain_Packet'Length /= Wire_Packet'Length - AES_GCM_Tag_Length
+        or else IV_Data'Length < 12
+      then
+         return CryptoLib.Errors.Handshake_Failed;
+      end if;
+      Status_Value :=
+        Initialize_GCM_State (State_Item, Algorithm_Name, Key_Data);
+      if Status_Value /= CryptoLib.Errors.Ok then
+         return Status_Value;
+      end if;
+      J0_Value := Make_GCM_J0 (IV_Data);
+      declare
+         Cipher_Data : constant Stream_Element_Array :=
+           Wire_Packet (Wire_Packet'First .. Cipher_Last);
+         Actual_Tag  : constant Stream_Element_Array :=
+           Wire_Packet (Cipher_Last + 1 .. Wire_Packet'Last);
+         Wanted_Tag  : constant Stream_Element_Array :=
+           GCM_Tag (State_Item, J0_Value, Associated_Data, Cipher_Data);
+         Plain_Data  : Stream_Element_Array (1 .. Cipher_Data'Length);
+      begin
+         if not CryptoLib.Constant_Time.Equal (Actual_Tag, Wanted_Tag) then
+            Reset (State_Item);
+            return CryptoLib.Errors.Handshake_Failed;
+         end if;
+         Status_Value :=
+           Apply_GCM_CTR (State_Item, J0_Value, Cipher_Data, Plain_Data);
+         if Status_Value = CryptoLib.Errors.Ok then
+            Plain_Packet := Plain_Data;
+         end if;
+      end;
+      Reset (State_Item);
+      return Status_Value;
+   exception
+      when others =>
+         Reset (State_Item);
+         Plain_Packet := [others => 0];
+         return CryptoLib.Errors.Internal_Error;
+   end Open_AEAD;
+
 end CryptoLib.Ciphers;

@@ -1102,6 +1102,33 @@ begin
         (CryptoLib.Hashes.SHA1 (Bytes_From_String ("abc")))
       = Bytes_From_Hex ("a9993e364706816aba3e25717850c26c9cd0d89d"),
       "SHA-1 KAT (abc)");
+   --  Streaming SHA-1: chunked updates reproduce the KAT, and a byte-at-a-time
+   --  multi-block (>64 byte) input matches the one-shot digest.
+   declare
+      Ctx  : CryptoLib.Hashes.SHA1_Context;
+      Ctx2 : CryptoLib.Hashes.SHA1_Context;
+      Long : constant Ada.Streams.Stream_Element_Array :=
+        Bytes_From_String
+          ("The quick brown fox jumps over the lazy dog. "
+           & "Pack my box with five dozen liquor jugs. 0123456789");
+   begin
+      CryptoLib.Hashes.Initialize_SHA1 (Ctx);
+      CryptoLib.Hashes.Update (Ctx, Bytes_From_String ("ab"));
+      CryptoLib.Hashes.Update (Ctx, Bytes_From_String ("c"));
+      Check
+        (Ada.Streams.Stream_Element_Array (CryptoLib.Hashes.Finalize (Ctx))
+         = Bytes_From_Hex ("a9993e364706816aba3e25717850c26c9cd0d89d"),
+         "SHA-1 streaming KAT (abc, chunked)");
+
+      CryptoLib.Hashes.Initialize_SHA1 (Ctx2);
+      for Index in Long'Range loop
+         CryptoLib.Hashes.Update (Ctx2, Long (Index .. Index));
+      end loop;
+      Check
+        (Ada.Streams.Stream_Element_Array (CryptoLib.Hashes.Finalize (Ctx2))
+         = Ada.Streams.Stream_Element_Array (CryptoLib.Hashes.SHA1 (Long)),
+         "SHA-1 streaming matches one-shot (multi-block)");
+   end;
    Check
      (Ada.Streams.Stream_Element_Array
         (CryptoLib.Hashes.SHA256 (Bytes_From_String ("abc")))
@@ -1223,6 +1250,92 @@ begin
          end if;
       end loop;
       Check (Nonzero = 0, "Secure_Wipe zeroizes buffer");
+   end;
+
+   --  Seal_AEAD / Open_AEAD: plain AES-256-GCM with no SSH framing, checked
+   --  against the NIST GCM specification's AES-256 test vectors.
+   declare
+      use Ada.Streams;
+      Algorithm : constant String := "aes256-gcm@openssh.com";
+      Key       : constant Stream_Element_Array (1 .. 32) := [others => 0];
+      Nonce     : constant Stream_Element_Array (1 .. 12) := [others => 0];
+      Empty     : constant Stream_Element_Array (1 .. 0) := [others => 0];
+
+      --  Test case 13: empty plaintext, empty AAD -> tag only.
+      Tag_13 : constant Stream_Element_Array :=
+        [16#53#, 16#0F#, 16#8A#, 16#FB#, 16#C7#, 16#45#, 16#36#, 16#B9#,
+         16#A9#, 16#63#, 16#B4#, 16#F1#, 16#C4#, 16#CB#, 16#73#, 16#8B#];
+      Wire_13 : Stream_Element_Array (1 .. 16);
+
+      --  Test case 14: 16 zero bytes of plaintext, empty AAD.
+      Plain_14 : constant Stream_Element_Array (1 .. 16) := [others => 0];
+      Wire_14  : constant Stream_Element_Array :=
+        [16#CE#, 16#A7#, 16#40#, 16#3D#, 16#4D#, 16#60#, 16#6B#, 16#6E#,
+         16#07#, 16#4E#, 16#C5#, 16#D3#, 16#BA#, 16#F3#, 16#9D#, 16#18#,
+         16#D0#, 16#D1#, 16#C8#, 16#A7#, 16#99#, 16#99#, 16#6B#, 16#F0#,
+         16#26#, 16#5B#, 16#98#, 16#B5#, 16#D4#, 16#8A#, 16#B9#, 16#19#];
+      Sealed_14 : Stream_Element_Array (1 .. 32);
+
+      Message   : constant Stream_Element_Array :=
+        [16#01#, 16#02#, 16#03#, 16#04#, 16#05#, 16#06#, 16#07#];
+      Aad       : constant Stream_Element_Array := [16#AA#, 16#BB#];
+      Sealed    : Stream_Element_Array (1 .. Message'Length + 16);
+      Recovered : Stream_Element_Array (1 .. Message'Length);
+      Restored  : Stream_Element_Array (1 .. 0);
+      Result    : CryptoLib.Errors.Status;
+   begin
+      Result :=
+        CryptoLib.Ciphers.Seal_AEAD (Algorithm, Key, Nonce, Empty, Empty,
+                                     Wire_13);
+      Check (Result = CryptoLib.Errors.Ok and then Wire_13 = Tag_13,
+             "Seal_AEAD matches NIST GCM case 13 (empty plaintext)");
+
+      Result :=
+        CryptoLib.Ciphers.Open_AEAD (Algorithm, Key, Nonce, Empty, Wire_13,
+                                     Restored);
+      Check (Result = CryptoLib.Errors.Ok,
+             "Open_AEAD accepts an empty sealed plaintext");
+
+      Result :=
+        CryptoLib.Ciphers.Seal_AEAD (Algorithm, Key, Nonce, Empty, Plain_14,
+                                     Sealed_14);
+      Check (Result = CryptoLib.Errors.Ok and then Sealed_14 = Wire_14,
+             "Seal_AEAD matches NIST GCM case 14");
+
+      Result :=
+        CryptoLib.Ciphers.Seal_AEAD (Algorithm, Key, Nonce, Aad, Message,
+                                     Sealed);
+      Check (Result = CryptoLib.Errors.Ok, "Seal_AEAD seals with AAD");
+
+      --  The plaintext must not appear in the clear anywhere in the wire.
+      Check (Sealed (Sealed'First .. Sealed'First + Message'Length - 1)
+               /= Message,
+             "Seal_AEAD leaves no cleartext prefix");
+
+      Result :=
+        CryptoLib.Ciphers.Open_AEAD (Algorithm, Key, Nonce, Aad, Sealed,
+                                     Recovered);
+      Check (Result = CryptoLib.Errors.Ok and then Recovered = Message,
+             "Open_AEAD round-trips the plaintext");
+
+      --  A different AAD must fail the tag check.
+      Result :=
+        CryptoLib.Ciphers.Open_AEAD (Algorithm, Key, Nonce, Empty, Sealed,
+                                     Recovered);
+      Check (Result /= CryptoLib.Errors.Ok,
+             "Open_AEAD rejects a changed AAD");
+
+      --  A flipped ciphertext bit must fail the tag check.
+      declare
+         Tampered : Stream_Element_Array := Sealed;
+      begin
+         Tampered (Tampered'First) := Tampered (Tampered'First) xor 1;
+         Result :=
+           CryptoLib.Ciphers.Open_AEAD (Algorithm, Key, Nonce, Aad, Tampered,
+                                        Recovered);
+         Check (Result /= CryptoLib.Errors.Ok,
+                "Open_AEAD rejects tampered ciphertext");
+      end;
    end;
 
    Ada.Text_IO.Put_Line ("cryptolib tests passed");
