@@ -4,9 +4,10 @@ with Ada.Streams;
 --
 --  Operating-system CSPRNG access.  The body is selected per platform by the
 --  project file (Source_Dirs = "src-" & <host OS>): src-linux uses getrandom(2)
---  with a /dev/urandom fallback; src-windows uses BCryptGenRandom.  Callers must
---  fail closed -- Success = False means no OS entropy source was available and
---  Buffer has been zeroed.
+--  with a /dev/urandom fallback; src-macos uses getentropy(2) with the same
+--  fallback; src-windows uses BCryptGenRandom.  Callers must fail closed --
+--  Success = False means no OS entropy source was available and Buffer has been
+--  zeroed.
 package CryptoLib.OS_Random is
 
    --  Fill Buffer with bytes from the operating-system CSPRNG, failing closed.
