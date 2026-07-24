@@ -1,0 +1,1015 @@
+with Ada.Streams;
+with Ada.Strings.Fixed;
+
+with CryptoLib.Ciphers;
+with CryptoLib.Ed25519;
+with CryptoLib.Errors;
+with CryptoLib.Hashes;
+with CryptoLib.Macs;
+with CryptoLib.Random;
+
+package body CryptoLib.Certificates is
+   use Ada.Strings.Unbounded;
+   use type Ada.Streams.Stream_Element_Offset;
+   use type CryptoLib.Errors.Status;
+
+   Hex : constant String := "0123456789abcdef";
+   B64 : constant String :=
+     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+   function Status_Image (Status : Certificate_Status) return String is
+   begin
+      case Status is
+         when Ok =>
+            return "ok";
+         when Invalid_Input =>
+            return "invalid input";
+         when Unsupported_Profile =>
+            return "unsupported profile";
+         when Internal_Error =>
+            return "internal error";
+      end case;
+   end Status_Image;
+
+   function Byte (Value : Natural) return Character is
+   begin
+      return Character'Val (Value mod 256);
+   end Byte;
+
+   function To_Bytes (Text : String) return Ada.Streams.Stream_Element_Array is
+      Result : Ada.Streams.Stream_Element_Array
+        (1 .. Ada.Streams.Stream_Element_Offset (Text'Length));
+      Pos : Ada.Streams.Stream_Element_Offset := Result'First;
+   begin
+      for C of Text loop
+         Result (Pos) := Ada.Streams.Stream_Element (Character'Pos (C));
+         Pos := Pos + 1;
+      end loop;
+      return Result;
+   end To_Bytes;
+
+   function To_String
+     (Data : Ada.Streams.Stream_Element_Array) return String
+   is
+      Result : String (1 .. Natural (Data'Length));
+      Pos    : Positive := Result'First;
+   begin
+      for B of Data loop
+         Result (Pos) := Byte (Natural (B));
+         Pos := Pos + 1;
+      end loop;
+      return Result;
+   end To_String;
+
+   procedure Append_Line (Target : in out Unbounded_String; Line : String) is
+   begin
+      Append (Target, Line);
+      Append (Target, ASCII.LF);
+   end Append_Line;
+
+   function Hex_Image
+     (Data : Ada.Streams.Stream_Element_Array) return String
+   is
+      Result : String (1 .. Data'Length * 2);
+      Pos    : Positive := Result'First;
+   begin
+      for B of Data loop
+         Result (Pos) := Hex (Natural (B) / 16 + 1);
+         Result (Pos + 1) := Hex (Natural (B) mod 16 + 1);
+         Pos := Pos + 2;
+      end loop;
+      return Result;
+   end Hex_Image;
+
+   function Digest_Hex (Text : String) return String is
+   begin
+      return Hex_Image
+        (Ada.Streams.Stream_Element_Array
+           (CryptoLib.Hashes.SHA256 (To_Bytes (Text))));
+   end Digest_Hex;
+
+   function DER_Length (Length : Natural) return String is
+   begin
+      if Length < 128 then
+         return "" & Byte (Length);
+      elsif Length < 256 then
+         return Byte (16#81#) & Byte (Length);
+      else
+         return Byte (16#82#) & Byte (Length / 256) & Byte (Length mod 256);
+      end if;
+   end DER_Length;
+
+   function TLV (Tag : Natural; Content : String) return String is
+   begin
+      return Byte (Tag) & DER_Length (Content'Length) & Content;
+   end TLV;
+
+   function Seq (Content : String) return String is (TLV (16#30#, Content));
+   function Set_Of (Content : String) return String is (TLV (16#31#, Content));
+   function Octets (Content : String) return String is (TLV (16#04#, Content));
+   function Bits (Content : String) return String is (TLV (16#03#, Byte (0) & Content));
+   function Explicit (Tag : Natural; Content : String) return String is
+     (TLV (16#A0# + Tag, Content));
+   function Bool (Value : Boolean) return String is
+     (TLV (16#01#, "" & (if Value then Byte (16#FF#) else Byte (0))));
+   function UTF8 (Value : String) return String is (TLV (16#0C#, Value));
+   function UTC (Value : String) return String is (TLV (16#17#, Value));
+
+   function Integer_DER (Value : Natural) return String is
+   begin
+      if Value < 128 then
+         return TLV (16#02#, "" & Byte (Value));
+      elsif Value < 16#8000# then
+         return TLV (16#02#, Byte (Value / 256) & Byte (Value mod 256));
+      else
+         return TLV
+           (16#02#,
+            Byte (Value / 16#1000000#)
+            & Byte ((Value / 16#10000#) mod 256)
+            & Byte ((Value / 256) mod 256)
+            & Byte (Value mod 256));
+      end if;
+   end Integer_DER;
+
+   function OID (Content : String) return String is
+   begin
+      return TLV (16#06#, Content);
+   end OID;
+
+   function OID_Data return String is
+   begin
+      return OID
+        (Byte (16#2A#) & Byte (16#86#) & Byte (16#48#) & Byte (16#86#)
+         & Byte (16#F7#) & Byte (16#0D#) & Byte (16#01#) & Byte (16#07#)
+         & Byte (16#01#));
+   end OID_Data;
+
+   function OID_Shrouded_Key_Bag return String is
+   begin
+      return OID
+        (Byte (16#2A#) & Byte (16#86#) & Byte (16#48#) & Byte (16#86#)
+         & Byte (16#F7#) & Byte (16#0D#) & Byte (16#01#) & Byte (16#0C#)
+         & Byte (16#0A#) & Byte (16#01#) & Byte (16#02#));
+   end OID_Shrouded_Key_Bag;
+
+   function OID_Cert_Bag return String is
+   begin
+      return OID
+        (Byte (16#2A#) & Byte (16#86#) & Byte (16#48#) & Byte (16#86#)
+         & Byte (16#F7#) & Byte (16#0D#) & Byte (16#01#) & Byte (16#0C#)
+         & Byte (16#0A#) & Byte (16#01#) & Byte (16#03#));
+   end OID_Cert_Bag;
+
+   function OID_X509_Certificate return String is
+   begin
+      return OID
+        (Byte (16#2A#) & Byte (16#86#) & Byte (16#48#) & Byte (16#86#)
+         & Byte (16#F7#) & Byte (16#0D#) & Byte (16#01#) & Byte (16#09#)
+         & Byte (16#16#) & Byte (16#01#));
+   end OID_X509_Certificate;
+
+   function OID_SHA1 return String is
+   begin
+      return OID
+        (Byte (16#2B#) & Byte (16#0E#) & Byte (16#03#) & Byte (16#02#)
+         & Byte (16#1A#));
+   end OID_SHA1;
+
+   function OID_PBES2 return String is
+   begin
+      return OID
+        (Byte (16#2A#) & Byte (16#86#) & Byte (16#48#) & Byte (16#86#)
+         & Byte (16#F7#) & Byte (16#0D#) & Byte (16#01#) & Byte (16#05#)
+         & Byte (16#0D#));
+   end OID_PBES2;
+
+   function OID_PBKDF2 return String is
+   begin
+      return OID
+        (Byte (16#2A#) & Byte (16#86#) & Byte (16#48#) & Byte (16#86#)
+         & Byte (16#F7#) & Byte (16#0D#) & Byte (16#01#) & Byte (16#05#)
+         & Byte (16#0C#));
+   end OID_PBKDF2;
+
+   function OID_HMAC_SHA256 return String is
+   begin
+      return OID
+        (Byte (16#2A#) & Byte (16#86#) & Byte (16#48#) & Byte (16#86#)
+         & Byte (16#F7#) & Byte (16#0D#) & Byte (16#02#) & Byte (16#09#));
+   end OID_HMAC_SHA256;
+
+   function OID_AES_256_CBC return String is
+   begin
+      return OID
+        (Byte (16#60#) & Byte (16#86#) & Byte (16#48#) & Byte (16#01#)
+         & Byte (16#65#) & Byte (16#03#) & Byte (16#04#) & Byte (16#01#)
+         & Byte (16#2A#));
+   end OID_AES_256_CBC;
+
+   function Algorithm_Identifier return String is
+   begin
+      return Seq (OID (Byte (16#2B#) & Byte (16#65#) & Byte (16#70#)));
+   end Algorithm_Identifier;
+
+   function Name_DER (Common_Name : String) return String is
+   begin
+      return Seq
+        (Set_Of
+           (Seq
+              (OID (Byte (16#55#) & Byte (16#04#) & Byte (16#03#))
+               & UTF8 (Common_Name))));
+   end Name_DER;
+
+   function Validity_DER return String is
+   begin
+      return Seq (UTC ("260101000000Z") & UTC ("360101000000Z"));
+   end Validity_DER;
+
+   function SPKI_DER (Public_Key : Ada.Streams.Stream_Element_Array) return String is
+   begin
+      return Seq (Algorithm_Identifier & Bits (To_String (Public_Key)));
+   end SPKI_DER;
+
+   function Private_Key_DER
+     (Seed : Ada.Streams.Stream_Element_Array) return String
+   is
+   begin
+      return Seq
+        (Integer_DER (0)
+         & Algorithm_Identifier
+         & Octets (Octets (To_String (Seed))));
+   end Private_Key_DER;
+
+   function BMP_Password (Password : String) return Ada.Streams.Stream_Element_Array is
+      Result : Ada.Streams.Stream_Element_Array
+        (1 .. Ada.Streams.Stream_Element_Offset ((Password'Length + 1) * 2));
+      Pos : Ada.Streams.Stream_Element_Offset := Result'First;
+   begin
+      for C of Password loop
+         Result (Pos) := 0;
+         Result (Pos + 1) := Ada.Streams.Stream_Element (Character'Pos (C));
+         Pos := Pos + 2;
+      end loop;
+      Result (Pos) := 0;
+      Result (Pos + 1) := 0;
+      return Result;
+   end BMP_Password;
+
+   function Mac_Data
+     (Authenticated_Safe : String;
+      Password           : String;
+      Salt               : Ada.Streams.Stream_Element_Array) return String
+   is
+      Iterations : constant Positive := 2048;
+      Key        : constant Ada.Streams.Stream_Element_Array :=
+        CryptoLib.Macs.PKCS12_KDF_SHA1
+          (Password_Data => BMP_Password (Password),
+           Salt_Data     => Salt,
+           Iterations    => Iterations,
+           Id_Byte       => 3,
+           Output_Length => 20);
+      Tag        : constant CryptoLib.Macs.HMAC_SHA1_Digest :=
+        CryptoLib.Macs.HMAC_SHA1 (Key, To_Bytes (Authenticated_Safe));
+      Digest_Info : constant String :=
+        Seq
+          (Seq (OID_SHA1 & TLV (16#05#, ""))
+           & Octets (To_String (Ada.Streams.Stream_Element_Array (Tag))));
+   begin
+      return Seq
+        (Digest_Info & Octets (To_String (Salt)) & Integer_DER (Iterations));
+   end Mac_Data;
+
+   function PKCS7_Pad
+     (Data       : String;
+      Block_Size : Positive) return Ada.Streams.Stream_Element_Array
+   is
+      Pad_Length : constant Positive :=
+        (if Data'Length mod Block_Size = 0
+         then Block_Size
+         else Block_Size - (Data'Length mod Block_Size));
+      Result : Ada.Streams.Stream_Element_Array
+        (1 .. Ada.Streams.Stream_Element_Offset (Data'Length + Pad_Length));
+      Pos : Ada.Streams.Stream_Element_Offset := Result'First;
+   begin
+      for C of Data loop
+         Result (Pos) := Ada.Streams.Stream_Element (Character'Pos (C));
+         Pos := Pos + 1;
+      end loop;
+      for Index_Value in 1 .. Pad_Length loop
+         pragma Unreferenced (Index_Value);
+         Result (Pos) := Ada.Streams.Stream_Element (Pad_Length);
+         Pos := Pos + 1;
+      end loop;
+      return Result;
+   end PKCS7_Pad;
+
+   function PBES2_AES_256_CBC_Algorithm
+     (Salt       : Ada.Streams.Stream_Element_Array;
+      Iterations : Positive;
+      IV_Data    : Ada.Streams.Stream_Element_Array) return String
+   is
+      PBKDF2_Params : constant String :=
+        Seq
+          (Octets (To_String (Salt))
+           & Integer_DER (Iterations)
+           & Integer_DER (32)
+           & Seq (OID_HMAC_SHA256 & TLV (16#05#, "")));
+      KDF_Algorithm : constant String := Seq (OID_PBKDF2 & PBKDF2_Params);
+      Enc_Algorithm : constant String :=
+        Seq (OID_AES_256_CBC & Octets (To_String (IV_Data)));
+   begin
+      return Seq (OID_PBES2 & Seq (KDF_Algorithm & Enc_Algorithm));
+   end PBES2_AES_256_CBC_Algorithm;
+
+   function Base64_Encode (Data : String) return String is
+      Result : Unbounded_String;
+      I      : Natural := Data'First;
+      B1     : Natural;
+      B2     : Natural;
+      B3     : Natural;
+      Count  : Natural;
+   begin
+      while I <= Data'Last loop
+         B1 := Character'Pos (Data (I));
+         B2 := 0;
+         B3 := 0;
+         Count := 1;
+         if I + 1 <= Data'Last then
+            B2 := Character'Pos (Data (I + 1));
+            Count := 2;
+         end if;
+         if I + 2 <= Data'Last then
+            B3 := Character'Pos (Data (I + 2));
+            Count := 3;
+         end if;
+         Append (Result, B64 (B1 / 4 + 1));
+         Append (Result, B64 (((B1 mod 4) * 16) + (B2 / 16) + 1));
+         Append
+           (Result,
+            (if Count >= 2 then B64 (((B2 mod 16) * 4) + (B3 / 64) + 1)
+             else '='));
+         Append (Result, (if Count = 3 then B64 (B3 mod 64 + 1) else '='));
+         I := I + 3;
+      end loop;
+      return To_String (Result);
+   end Base64_Encode;
+
+   function PEM (Label : String; DER : String) return Unbounded_String is
+      Encoded : constant String := Base64_Encode (DER);
+      Result  : Unbounded_String;
+      I       : Natural := Encoded'First;
+      Last    : Natural;
+   begin
+      Append_Line (Result, "-----BEGIN " & Label & "-----");
+      while I <= Encoded'Last loop
+         Last := Natural'Min (Encoded'Last, I + 63);
+         Append_Line (Result, Encoded (I .. Last));
+         I := Last + 1;
+      end loop;
+      Append_Line (Result, "-----END " & Label & "-----");
+      return Result;
+   end PEM;
+
+   function Base64_Value (C : Character) return Integer is
+   begin
+      if C in 'A' .. 'Z' then
+         return Character'Pos (C) - Character'Pos ('A');
+      elsif C in 'a' .. 'z' then
+         return Character'Pos (C) - Character'Pos ('a') + 26;
+      elsif C in '0' .. '9' then
+         return Character'Pos (C) - Character'Pos ('0') + 52;
+      elsif C = '+' then
+         return 62;
+      elsif C = '/' then
+         return 63;
+      else
+         return -1;
+      end if;
+   end Base64_Value;
+
+   function Base64_Decode (Text : String) return String is
+      Clean  : Unbounded_String;
+      Result : Unbounded_String;
+      I      : Natural;
+      A      : Integer;
+      B      : Integer;
+      C      : Integer;
+      D      : Integer;
+      First  : Natural := Ada.Strings.Fixed.Index (Text, "" & ASCII.LF);
+      Last   : Natural;
+      Footer : Natural;
+   begin
+      if First = 0 then
+         First := Text'First;
+      else
+         First := First + 1;
+      end if;
+
+      Footer := Ada.Strings.Fixed.Index (Text (First .. Text'Last), "-----END");
+      if Footer = 0 then
+         Last := Text'Last;
+      else
+         Last := Footer - 1;
+      end if;
+
+      for Ch of Text (First .. Last) loop
+         if Base64_Value (Ch) >= 0 or else Ch = '=' then
+            Append (Clean, Ch);
+         end if;
+      end loop;
+      declare
+         S : constant String := To_String (Clean);
+      begin
+         I := S'First;
+         while I + 3 <= S'Last loop
+            A := Base64_Value (S (I));
+            B := Base64_Value (S (I + 1));
+            C := (if S (I + 2) = '=' then -1 else Base64_Value (S (I + 2)));
+            D := (if S (I + 3) = '=' then -1 else Base64_Value (S (I + 3)));
+            if A < 0 or else B < 0 then
+               return "";
+            end if;
+            Append (Result, Byte (A * 4 + B / 16));
+            if C >= 0 then
+               Append (Result, Byte ((B mod 16) * 16 + C / 4));
+            end if;
+            if C >= 0 and then D >= 0 then
+               Append (Result, Byte ((C mod 4) * 64 + D));
+            end if;
+            I := I + 4;
+         end loop;
+      end;
+      return To_String (Result);
+   end Base64_Decode;
+
+   function Seed_From_Private_Key_PEM
+     (Private_Key_PEM : String;
+      Seed            : out Ada.Streams.Stream_Element_Array) return Boolean
+   is
+      DER : constant String := Base64_Decode (Private_Key_PEM);
+   begin
+      if Seed'Length /= 32 or else DER'Length < 34 then
+         Seed := [others => 0];
+         return False;
+      end if;
+
+      for I in DER'First .. DER'Last - 33 loop
+         if Character'Pos (DER (I)) = 16#04#
+           and then Character'Pos (DER (I + 1)) = 16#20#
+         then
+            for J in Seed'Range loop
+               Seed (J) :=
+                 Ada.Streams.Stream_Element
+                   (Character'Pos
+                      (DER (I + 2 + Natural (J - Seed'First))));
+            end loop;
+            return True;
+         end if;
+      end loop;
+
+      Seed := [others => 0];
+      return False;
+   end Seed_From_Private_Key_PEM;
+
+   function Valid_Name (Text : String) return Boolean is
+   begin
+      if Text = "" then
+         return False;
+      end if;
+
+      for C of Text loop
+         if not (C in 'a' .. 'z'
+                 or else C in 'A' .. 'Z'
+                 or else C in '0' .. '9'
+                 or else C = '.'
+                 or else C = '-'
+                 or else C = '_'
+                 or else C = '*')
+         then
+            return False;
+         end if;
+      end loop;
+      return True;
+   end Valid_Name;
+
+   function Extensions_DER
+     (Is_CA : Boolean;
+      Names : Subject_Alternative_Name_List) return String
+   is
+      Items : Unbounded_String;
+      SANs  : Unbounded_String;
+   begin
+      if Is_CA then
+         Append
+           (Items,
+            Seq
+              (OID (Byte (16#55#) & Byte (16#1D#) & Byte (16#13#))
+               & Bool (True)
+               & Octets (Seq (Bool (True)))));
+         Append
+           (Items,
+            Seq
+              (OID (Byte (16#55#) & Byte (16#1D#) & Byte (16#0F#))
+               & Bool (True)
+               & Octets (TLV (16#03#, Byte (1) & Byte (16#06#)))));
+      else
+         for Name of Names loop
+            Append (SANs, TLV (16#82#, To_String (Name)));
+         end loop;
+         Append
+           (Items,
+            Seq
+              (OID (Byte (16#55#) & Byte (16#1D#) & Byte (16#11#))
+               & Octets (Seq (To_String (SANs)))));
+         Append
+           (Items,
+            Seq
+              (OID (Byte (16#55#) & Byte (16#1D#) & Byte (16#25#))
+               & Octets
+                   (Seq
+                      (OID
+                         (Byte (16#2B#) & Byte (16#06#) & Byte (16#01#)
+                          & Byte (16#05#) & Byte (16#05#) & Byte (16#07#)
+                          & Byte (16#03#) & Byte (16#01#))))));
+      end if;
+      return Explicit (3, Seq (To_String (Items)));
+   end Extensions_DER;
+
+   function Sign_Certificate
+     (Serial      : Natural;
+      Issuer_CN   : String;
+      Subject_CN  : String;
+      Subject_Key : Ada.Streams.Stream_Element_Array;
+      Sign_Seed   : Ada.Streams.Stream_Element_Array;
+      Sign_Public : Ada.Streams.Stream_Element_Array;
+      Is_CA       : Boolean;
+      Names       : Subject_Alternative_Name_List) return String
+   is
+      TBS : constant String :=
+        Seq
+          (Explicit (0, Integer_DER (2))
+           & Integer_DER (Serial)
+           & Algorithm_Identifier
+           & Name_DER (Issuer_CN)
+           & Validity_DER
+           & Name_DER (Subject_CN)
+           & SPKI_DER (Subject_Key)
+           & Extensions_DER (Is_CA, Names));
+      Sig : Ada.Streams.Stream_Element_Array (1 .. 64);
+      St  : constant CryptoLib.Errors.Status :=
+        CryptoLib.Ed25519.Sign (Sign_Seed, Sign_Public, To_Bytes (TBS), Sig);
+   begin
+      if St /= CryptoLib.Errors.Ok then
+         return "";
+      end if;
+      return Seq (TBS & Algorithm_Identifier & Bits (To_String (Sig)));
+   end Sign_Certificate;
+
+   function Read_Length
+     (DER : String;
+      Pos : in out Natural;
+      Len : out Natural) return Boolean
+   is
+      Octet : Natural;
+      Count : Natural;
+   begin
+      if Pos > DER'Last then
+         return False;
+      end if;
+
+      Octet := Character'Pos (DER (Pos));
+      Pos := Pos + 1;
+      if Octet < 128 then
+         Len := Octet;
+         return True;
+      end if;
+
+      Count := Octet mod 128;
+      if Count = 0 or else Count > 2 or else Pos + Count - 1 > DER'Last then
+         return False;
+      end if;
+
+      Len := 0;
+      for I in 1 .. Count loop
+         Len := Len * 256 + Character'Pos (DER (Pos));
+         Pos := Pos + 1;
+      end loop;
+      return True;
+   end Read_Length;
+
+   function Read_TLV
+     (DER     : String;
+      Pos     : in out Natural;
+      Tag     : Natural;
+      Content : out Unbounded_String) return Boolean
+   is
+      Len   : Natural;
+      First : Natural;
+   begin
+      Content := Null_Unbounded_String;
+      if Pos > DER'Last or else Character'Pos (DER (Pos)) /= Tag then
+         return False;
+      end if;
+      Pos := Pos + 1;
+      if not Read_Length (DER, Pos, Len) then
+         return False;
+      end if;
+      First := Pos;
+      if Len = 0 then
+         Content := Null_Unbounded_String;
+         return True;
+      elsif First + Len - 1 > DER'Last then
+         return False;
+      end if;
+      Content := To_Unbounded_String (DER (First .. First + Len - 1));
+      Pos := First + Len;
+      return True;
+   end Read_TLV;
+
+   function Contains (Data : String; Needle : String) return Boolean is
+   begin
+      return Ada.Strings.Fixed.Index (Data, Needle) /= 0;
+   end Contains;
+
+   function Extract_Common_Name
+     (Name_DER : String;
+      Common_Name : out Unbounded_String) return Boolean
+   is
+      CN_OID : constant String :=
+        Byte (16#06#) & Byte (16#03#) & Byte (16#55#) & Byte (16#04#)
+        & Byte (16#03#);
+      Start : constant Natural := Ada.Strings.Fixed.Index (Name_DER, CN_OID);
+      Pos   : Natural;
+      Value : Unbounded_String;
+   begin
+      Common_Name := Null_Unbounded_String;
+      if Start = 0 then
+         return False;
+      end if;
+
+      Pos := Start + CN_OID'Length;
+      if Pos > Name_DER'Last then
+         return False;
+      end if;
+
+      if Character'Pos (Name_DER (Pos)) = 16#0C#
+        or else Character'Pos (Name_DER (Pos)) = 16#13#
+        or else Character'Pos (Name_DER (Pos)) = 16#16#
+      then
+         declare
+            Tag : constant Natural := Character'Pos (Name_DER (Pos));
+         begin
+            if not Read_TLV (Name_DER, Pos, Tag, Value) then
+               return False;
+            elsif not Valid_Name (To_String (Value)) then
+               return False;
+            else
+               Common_Name := Value;
+               return True;
+            end if;
+         end;
+      end if;
+      return False;
+   end Extract_Common_Name;
+
+   function Extract_CSR
+     (CSR_PEM    : String;
+      Subject_CN : out Unbounded_String;
+      Public_Key : out Ada.Streams.Stream_Element_Array) return Boolean
+   is
+      DER      : constant String := Base64_Decode (CSR_PEM);
+      Pos      : Natural := DER'First;
+      Outer    : Unbounded_String;
+      CRI      : Unbounded_String;
+      Version  : Unbounded_String;
+      Name     : Unbounded_String;
+      SPKI     : Unbounded_String;
+      Alg      : Unbounded_String;
+      Bits_U   : Unbounded_String;
+      OID_Ed    : constant String :=
+        Byte (16#06#) & Byte (16#03#) & Byte (16#2B#) & Byte (16#65#)
+        & Byte (16#70#);
+   begin
+      Subject_CN := Null_Unbounded_String;
+      Public_Key := [others => 0];
+
+      if DER = "" or else Public_Key'Length /= 32 then
+         return False;
+      end if;
+
+      if not Read_TLV (DER, Pos, 16#30#, Outer) then
+         return False;
+      end if;
+
+      declare
+         Outer_Text : constant String := To_String (Outer);
+         Outer_Pos  : Natural := Outer_Text'First;
+      begin
+         if not Read_TLV (Outer_Text, Outer_Pos, 16#30#, CRI) then
+            return False;
+         end if;
+      end;
+
+      declare
+         CRI_Text : constant String := To_String (CRI);
+         CRI_Pos  : Natural := CRI_Text'First;
+      begin
+         if not Read_TLV (CRI_Text, CRI_Pos, 16#02#, Version) then
+            return False;
+         end if;
+         if not Read_TLV (CRI_Text, CRI_Pos, 16#30#, Name) then
+            return False;
+         end if;
+         if not Extract_Common_Name (To_String (Name), Subject_CN) then
+            return False;
+         end if;
+         if not Read_TLV (CRI_Text, CRI_Pos, 16#30#, SPKI) then
+            return False;
+         end if;
+      end;
+
+      declare
+         SPKI_Text : constant String := To_String (SPKI);
+         SPKI_Pos  : Natural := SPKI_Text'First;
+      begin
+         if not Read_TLV (SPKI_Text, SPKI_Pos, 16#30#, Alg) then
+            return False;
+         end if;
+         if not Contains (To_String (Alg), OID_Ed) then
+            return False;
+         end if;
+         if not Read_TLV (SPKI_Text, SPKI_Pos, 16#03#, Bits_U) then
+            return False;
+         end if;
+      end;
+
+      declare
+         Bits_Text : constant String := To_String (Bits_U);
+      begin
+         if Bits_Text'Length /= 33
+           or else Character'Pos (Bits_Text (Bits_Text'First)) /= 0
+         then
+            return False;
+         end if;
+
+         for I in Public_Key'Range loop
+            Public_Key (I) :=
+              Ada.Streams.Stream_Element
+                (Character'Pos
+                   (Bits_Text
+                      (Bits_Text'First + Natural (I - Public_Key'First) + 1)));
+         end loop;
+      end;
+      return True;
+   exception
+      when others =>
+         Subject_CN := Null_Unbounded_String;
+         Public_Key := [others => 0];
+         return False;
+   end Extract_CSR;
+
+   function Create_Local_CA
+     (Common_Name     : String;
+      Certificate_PEM : out Unbounded_String;
+      Private_Key_PEM : out Unbounded_String) return Certificate_Status
+   is
+      Rng    : CryptoLib.Random.Random_Source;
+      Seed   : Ada.Streams.Stream_Element_Array (1 .. 32);
+      Public : Ada.Streams.Stream_Element_Array (1 .. 32);
+      Cert   : Unbounded_String;
+   begin
+      Certificate_PEM := Null_Unbounded_String;
+      Private_Key_PEM := Null_Unbounded_String;
+
+      if not Valid_Name (Common_Name) then
+         return Invalid_Input;
+      end if;
+
+      CryptoLib.Random.Initialize_Production (Rng);
+      if CryptoLib.Ed25519.Generate_Keypair (Rng, Seed, Public) /= CryptoLib.Errors.Ok then
+         return Internal_Error;
+      end if;
+
+      Cert :=
+        To_Unbounded_String
+          (Sign_Certificate
+             (Serial      => 1,
+              Issuer_CN   => Common_Name,
+              Subject_CN  => Common_Name,
+              Subject_Key => Public,
+              Sign_Seed   => Seed,
+              Sign_Public => Public,
+              Is_CA       => True,
+              Names       => [1 => To_Unbounded_String (Common_Name)]));
+      if Length (Cert) = 0 then
+         return Internal_Error;
+      end if;
+
+      Certificate_PEM := PEM ("CERTIFICATE", To_String (Cert));
+      Private_Key_PEM := PEM ("PRIVATE KEY", Private_Key_DER (Seed));
+      return Ok;
+   end Create_Local_CA;
+
+   function Issue_Server_Certificate
+     (CA_Certificate_PEM : String;
+      CA_Private_Key_PEM : String;
+      Common_Name        : String;
+      Names              : Subject_Alternative_Name_List;
+      Certificate_PEM    : out Unbounded_String;
+      Private_Key_PEM    : out Unbounded_String) return Certificate_Status
+   is
+      pragma Unreferenced (CA_Certificate_PEM);
+      Rng       : CryptoLib.Random.Random_Source;
+      CA_Seed   : Ada.Streams.Stream_Element_Array (1 .. 32);
+      CA_Public : Ada.Streams.Stream_Element_Array (1 .. 32);
+      Seed      : Ada.Streams.Stream_Element_Array (1 .. 32);
+      Public    : Ada.Streams.Stream_Element_Array (1 .. 32);
+      Cert      : Unbounded_String;
+   begin
+      Certificate_PEM := Null_Unbounded_String;
+      Private_Key_PEM := Null_Unbounded_String;
+
+      if CA_Private_Key_PEM = "" or else not Valid_Name (Common_Name)
+        or else Names'Length = 0
+      then
+         return Invalid_Input;
+      end if;
+
+      for Name of Names loop
+         if not Valid_Name (To_String (Name)) then
+            return Invalid_Input;
+         end if;
+      end loop;
+
+      if not Seed_From_Private_Key_PEM (CA_Private_Key_PEM, CA_Seed) then
+         return Invalid_Input;
+      end if;
+      if CryptoLib.Ed25519.Public_Key_From_Seed (CA_Seed, CA_Public)
+        /= CryptoLib.Errors.Ok
+      then
+         return Internal_Error;
+      end if;
+
+      CryptoLib.Random.Initialize_Production (Rng);
+      if CryptoLib.Ed25519.Generate_Keypair (Rng, Seed, Public) /= CryptoLib.Errors.Ok then
+         return Internal_Error;
+      end if;
+
+      Cert :=
+        To_Unbounded_String
+          (Sign_Certificate
+             (Serial      => 10,
+              Issuer_CN   => "devcert-local-development-ca",
+              Subject_CN  => Common_Name,
+              Subject_Key => Public,
+              Sign_Seed   => CA_Seed,
+              Sign_Public => CA_Public,
+              Is_CA       => False,
+              Names       => Names));
+      if Length (Cert) = 0 then
+         return Internal_Error;
+      end if;
+
+      Certificate_PEM := PEM ("CERTIFICATE", To_String (Cert));
+      Private_Key_PEM := PEM ("PRIVATE KEY", Private_Key_DER (Seed));
+      return Ok;
+   exception
+      when others =>
+         Certificate_PEM := Null_Unbounded_String;
+         Private_Key_PEM := Null_Unbounded_String;
+         return Internal_Error;
+   end Issue_Server_Certificate;
+
+   function Sign_CSR
+     (CA_Certificate_PEM : String;
+      CA_Private_Key_PEM : String;
+      CSR_PEM            : String;
+      Certificate_PEM    : out Unbounded_String) return Certificate_Status
+   is
+      pragma Unreferenced (CA_Certificate_PEM);
+      CA_Seed   : Ada.Streams.Stream_Element_Array (1 .. 32);
+      CA_Public : Ada.Streams.Stream_Element_Array (1 .. 32);
+      Subject   : Unbounded_String;
+      CSR_Public : Ada.Streams.Stream_Element_Array (1 .. 32);
+      Cert      : Unbounded_String;
+   begin
+      Certificate_PEM := Null_Unbounded_String;
+      if CA_Private_Key_PEM = "" or else CSR_PEM = "" then
+         return Invalid_Input;
+      end if;
+      if not Seed_From_Private_Key_PEM (CA_Private_Key_PEM, CA_Seed) then
+         return Invalid_Input;
+      end if;
+      if CryptoLib.Ed25519.Public_Key_From_Seed (CA_Seed, CA_Public)
+        /= CryptoLib.Errors.Ok
+      then
+         return Internal_Error;
+      end if;
+      if not Extract_CSR (CSR_PEM, Subject, CSR_Public) then
+         return Invalid_Input;
+      end if;
+
+      Cert :=
+        To_Unbounded_String
+          (Sign_Certificate
+             (Serial      => 20,
+              Issuer_CN   => "devcert-local-development-ca",
+              Subject_CN  => To_String (Subject),
+              Subject_Key => CSR_Public,
+              Sign_Seed   => CA_Seed,
+              Sign_Public => CA_Public,
+              Is_CA       => False,
+              Names       => [1 => Subject]));
+      if Length (Cert) = 0 then
+         return Internal_Error;
+      end if;
+      Certificate_PEM := PEM ("CERTIFICATE", To_String (Cert));
+      return Ok;
+   end Sign_CSR;
+
+   function Generate_PKCS12
+     (Certificate_PEM : String;
+      Private_Key_PEM : String;
+      Friendly_Name   : String;
+      Password        : String;
+      Bundle_Data     : out Unbounded_String) return Certificate_Status
+   is
+      Cert_DER        : constant String := Base64_Decode (Certificate_PEM);
+      Key_DER         : constant String := Base64_Decode (Private_Key_PEM);
+      Iterations      : constant Positive := 2048;
+      Padded_Key      : constant Ada.Streams.Stream_Element_Array :=
+        PKCS7_Pad (Key_DER, 16);
+      Rng             : CryptoLib.Random.Random_Source;
+      Mac_Salt        : Ada.Streams.Stream_Element_Array (1 .. 8);
+      Encryption_Salt : Ada.Streams.Stream_Element_Array (1 .. 16);
+      IV_Data         : Ada.Streams.Stream_Element_Array (1 .. 16);
+   begin
+      Bundle_Data := Null_Unbounded_String;
+      if Certificate_PEM = "" or else Private_Key_PEM = "" or else Friendly_Name = "" then
+         return Invalid_Input;
+      end if;
+      if Cert_DER = "" or else Key_DER = "" then
+         return Invalid_Input;
+      end if;
+
+      CryptoLib.Random.Initialize_Production (Rng);
+      if CryptoLib.Random.Fill (Rng, Mac_Salt) /= CryptoLib.Errors.Ok
+        or else CryptoLib.Random.Fill (Rng, Encryption_Salt) /= CryptoLib.Errors.Ok
+        or else CryptoLib.Random.Fill (Rng, IV_Data) /= CryptoLib.Errors.Ok
+      then
+         return Internal_Error;
+      end if;
+
+      declare
+         Key_Data : constant Ada.Streams.Stream_Element_Array :=
+           CryptoLib.Macs.PBKDF2_HMAC_SHA256
+             (Password_Data => To_Bytes (Password),
+              Salt_Data     => Encryption_Salt,
+              Iterations    => Iterations,
+              Output_Length => 32);
+         Encrypted_Key : Ada.Streams.Stream_Element_Array (Padded_Key'Range);
+         Status        : CryptoLib.Errors.Status;
+      begin
+         Status :=
+           CryptoLib.Ciphers.Encrypt_CBC_Raw
+             ("aes256-cbc", Key_Data, IV_Data, Padded_Key, Encrypted_Key);
+         if Status /= CryptoLib.Errors.Ok then
+            return Internal_Error;
+         end if;
+
+         declare
+            Encrypted_Private_Key_Info : constant String :=
+              Seq
+                (PBES2_AES_256_CBC_Algorithm
+                   (Encryption_Salt, Iterations, IV_Data)
+                 & Octets (To_String (Encrypted_Key)));
+            Key_Bag : constant String :=
+              Seq
+                (OID_Shrouded_Key_Bag
+                 & Explicit (0, Encrypted_Private_Key_Info));
+            Cert_Bag : constant String :=
+              Seq
+                (OID_Cert_Bag
+                 & Explicit
+                     (0,
+                      Seq
+                        (OID_X509_Certificate
+                         & Explicit (0, Octets (Cert_DER)))));
+            Safe_Contents : constant String := Seq (Key_Bag & Cert_Bag);
+            Inner_Content : constant String :=
+              Seq (OID_Data & Explicit (0, Octets (Safe_Contents)));
+            Authenticated_Safe : constant String := Seq (Inner_Content);
+            Auth_Safe : constant String :=
+              Seq (OID_Data & Explicit (0, Octets (Authenticated_Safe)));
+         begin
+            Bundle_Data :=
+              To_Unbounded_String
+                (Seq
+                   (Integer_DER (3)
+                    & Auth_Safe
+                    & Mac_Data (Authenticated_Safe, Password, Mac_Salt)));
+            return Ok;
+         end;
+      end;
+   end Generate_PKCS12;
+end CryptoLib.Certificates;

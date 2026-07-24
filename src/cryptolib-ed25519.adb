@@ -713,6 +713,73 @@ package body CryptoLib.Ed25519 is
       return Result_Value;
    end Secret_Scalar_From_Seed;
 
+   function Public_Key_From_Seed
+     (Seed_Bytes       : Stream_Element_Array;
+      Public_Key_Bytes : out Stream_Element_Array)
+      return Status
+   is
+      Prefix_Bytes : Stream_Element_Array (1 .. 32) := [others => 0];
+      A_Scalar     : Field_Element;
+      Base_Point   : Point;
+      Encoded      : Stream_Element_Array (1 .. 32);
+   begin
+      if Seed_Bytes'Length /= 32
+        or else Public_Key_Bytes'Length /= Public_Key_Length
+      then
+         Public_Key_Bytes := [others => 0];
+         return Handshake_Failed;
+      end if;
+
+      A_Scalar := Secret_Scalar_From_Seed (Seed_Bytes, Prefix_Bytes);
+      Base_Point := Decode_Base_Point;
+      Encoded := Encode_Point (Scalar_Multiply (A_Scalar, Base_Point));
+      Public_Key_Bytes := Encoded;
+      CryptoLib.Secure_Wipe.Wipe (Prefix_Bytes'Address, Prefix_Bytes'Length);
+      CryptoLib.Secure_Wipe.Wipe (A_Scalar'Address, A_Scalar'Length);
+      return Ok;
+   exception
+      when others =>
+         Public_Key_Bytes := [others => 0];
+         CryptoLib.Secure_Wipe.Wipe (Prefix_Bytes'Address, Prefix_Bytes'Length);
+         CryptoLib.Secure_Wipe.Wipe (A_Scalar'Address, A_Scalar'Length);
+         return Internal_Error;
+   end Public_Key_From_Seed;
+
+   function Generate_Keypair
+     (Rng              : in out CryptoLib.Random.Random_Source;
+      Seed_Bytes       : out Stream_Element_Array;
+      Public_Key_Bytes : out Stream_Element_Array)
+      return Status
+   is
+      Random_Status : Status;
+      Derive_Status : Status;
+   begin
+      if Seed_Bytes'Length /= 32
+        or else Public_Key_Bytes'Length /= Public_Key_Length
+      then
+         Seed_Bytes := [others => 0];
+         Public_Key_Bytes := [others => 0];
+         return Handshake_Failed;
+      end if;
+
+      Random_Status := CryptoLib.Random.Fill (Rng, Seed_Bytes);
+      if Random_Status /= Ok then
+         Public_Key_Bytes := [others => 0];
+         return Random_Status;
+      end if;
+
+      Derive_Status := Public_Key_From_Seed (Seed_Bytes, Public_Key_Bytes);
+      if Derive_Status /= Ok then
+         Seed_Bytes := [others => 0];
+      end if;
+      return Derive_Status;
+   exception
+      when others =>
+         Seed_Bytes := [others => 0];
+         Public_Key_Bytes := [others => 0];
+         return Internal_Error;
+   end Generate_Keypair;
+
    function Sign
      (Seed_Bytes       : Stream_Element_Array;
       Public_Key_Bytes : Stream_Element_Array;

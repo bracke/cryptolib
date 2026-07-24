@@ -1,9 +1,11 @@
 with Ada.Streams;
+with Ada.Strings.Unbounded;
 with Ada.Text_IO;
 with Interfaces;
 with System;
 
 with CryptoLib.ChaCha20_Poly1305;
+with CryptoLib.Certificates;
 with CryptoLib.Checksums;
 with CryptoLib.Secure_Wipe;
 with CryptoLib.Hashes;
@@ -26,7 +28,9 @@ procedure Tests is
    use type Ada.Streams.Stream_Element;
    use type Ada.Streams.Stream_Element_Array;
    use type Ada.Streams.Stream_Element_Offset;
+   use Ada.Strings.Unbounded;
    use type CryptoLib.Errors.Status;
+   use type CryptoLib.Certificates.Certificate_Status;
    use type Interfaces.Unsigned_32;
 
    procedure Check (Condition : Boolean; Message : String) is
@@ -229,6 +233,69 @@ procedure Tests is
         (CryptoLib.Checksums.CRC32_Value (State) = CryptoLib.Checksums.CRC32 (Binary),
          "chunked CRC-32 matches one-shot CRC-32");
    end Check_CRC32;
+
+   procedure Check_Certificates is
+      CA_Cert   : Ada.Strings.Unbounded.Unbounded_String;
+      CA_Key    : Ada.Strings.Unbounded.Unbounded_String;
+      Leaf_Cert : Ada.Strings.Unbounded.Unbounded_String;
+      Leaf_Key  : Ada.Strings.Unbounded.Unbounded_String;
+      CSR_Cert  : Ada.Strings.Unbounded.Unbounded_String;
+      Bundle    : Ada.Strings.Unbounded.Unbounded_String;
+   begin
+      Check
+        (CryptoLib.Certificates.Create_Local_CA
+           ("devcert-test-ca", CA_Cert, CA_Key) = CryptoLib.Certificates.Ok,
+         "local CA creation succeeds");
+      Check
+        (Ada.Strings.Unbounded.Index
+           (CA_Cert, "BEGIN CERTIFICATE") /= 0,
+         "local CA certificate is PEM encoded");
+      Check
+        (Ada.Strings.Unbounded.Index
+           (CA_Key, "BEGIN PRIVATE KEY") /= 0,
+         "local CA private key is PKCS#8 PEM");
+
+      Check
+        (CryptoLib.Certificates.Issue_Server_Certificate
+           (To_String (CA_Cert),
+            To_String (CA_Key),
+            "localhost",
+            [1 => To_Unbounded_String ("localhost")],
+            Leaf_Cert,
+            Leaf_Key) = CryptoLib.Certificates.Ok,
+         "server certificate creation succeeds");
+      Check
+        (Ada.Strings.Unbounded.Index
+           (Leaf_Cert, "BEGIN CERTIFICATE") /= 0,
+         "server certificate is PEM encoded");
+      Check
+        (Ada.Strings.Unbounded.Index
+           (Leaf_Key, "BEGIN PRIVATE KEY") /= 0,
+         "server private key is PKCS#8 PEM");
+
+      Check
+        (CryptoLib.Certificates.Sign_CSR
+           (To_String (CA_Cert),
+            To_String (CA_Key),
+            "-----BEGIN CERTIFICATE REQUEST-----",
+            CSR_Cert) = CryptoLib.Certificates.Invalid_Input,
+         "malformed CSR is rejected");
+      Check
+        (Ada.Strings.Unbounded.Length (CSR_Cert) = 0,
+         "malformed CSR does not produce a certificate");
+
+      Check
+        (CryptoLib.Certificates.Generate_PKCS12
+           (To_String (Leaf_Cert),
+            To_String (Leaf_Key),
+            "localhost",
+            "secret",
+            Bundle) = CryptoLib.Certificates.Ok,
+         "PKCS#12 generation succeeds");
+      Check
+        (Ada.Strings.Unbounded.Element (Bundle, 1) = Character'Val (16#30#),
+         "PKCS#12 bundle is DER sequence");
+   end Check_Certificates;
 
    procedure Check_PBKDF2_SHA1 is
       Actual : constant Ada.Streams.Stream_Element_Array :=
@@ -450,6 +517,48 @@ procedure Tests is
       Check (Round = Plain, "AES-256-CBC raw roundtrip");
    end Check_AES_256_CBC_Raw_Roundtrip;
 
+   procedure Check_AES_CBC_Raw_Rejects_Bad_Sizes is
+      Key    : constant Ada.Streams.Stream_Element_Array (1 .. 32) :=
+        [16#00#, 16#01#, 16#02#, 16#03#, 16#04#, 16#05#, 16#06#, 16#07#,
+         16#08#, 16#09#, 16#0A#, 16#0B#, 16#0C#, 16#0D#, 16#0E#, 16#0F#,
+         16#10#, 16#11#, 16#12#, 16#13#, 16#14#, 16#15#, 16#16#, 16#17#,
+         16#18#, 16#19#, 16#1A#, 16#1B#, 16#1C#, 16#1D#, 16#1E#, 16#1F#];
+      IV     : constant Ada.Streams.Stream_Element_Array (1 .. 16) :=
+        [16#20#, 16#21#, 16#22#, 16#23#, 16#24#, 16#25#, 16#26#, 16#27#,
+         16#28#, 16#29#, 16#2A#, 16#2B#, 16#2C#, 16#2D#, 16#2E#, 16#2F#];
+      Short_IV : constant Ada.Streams.Stream_Element_Array (1 .. 15) :=
+        [16#20#, 16#21#, 16#22#, 16#23#, 16#24#, 16#25#, 16#26#, 16#27#,
+         16#28#, 16#29#, 16#2A#, 16#2B#, 16#2C#, 16#2D#, 16#2E#];
+      Cipher : constant Ada.Streams.Stream_Element_Array (1 .. 16) :=
+        [16#30#, 16#31#, 16#32#, 16#33#, 16#34#, 16#35#, 16#36#, 16#37#,
+         16#38#, 16#39#, 16#3A#, 16#3B#, 16#3C#, 16#3D#, 16#3E#, 16#3F#];
+      Bad_Cipher : constant Ada.Streams.Stream_Element_Array (1 .. 17) :=
+        [16#30#, 16#31#, 16#32#, 16#33#, 16#34#, 16#35#, 16#36#, 16#37#,
+         16#38#, 16#39#, 16#3A#, 16#3B#, 16#3C#, 16#3D#, 16#3E#, 16#3F#,
+         16#40#];
+      Plain      : Ada.Streams.Stream_Element_Array (Cipher'Range);
+      Bad_Plain  : Ada.Streams.Stream_Element_Array (Bad_Cipher'Range);
+      Status     : CryptoLib.Errors.Status;
+   begin
+      Status :=
+        CryptoLib.Ciphers.Decrypt_CBC_Raw
+          ("aes256-cbc", Key, Short_IV, Cipher, Plain);
+      Check
+        (Status = CryptoLib.Errors.Authentication_Failed,
+         "AES-CBC raw rejects short IV");
+      Check (Plain = [Plain'Range => 0], "AES-CBC raw clears short-IV output");
+
+      Status :=
+        CryptoLib.Ciphers.Decrypt_CBC_Raw
+          ("aes256-cbc", Key, IV, Bad_Cipher, Bad_Plain);
+      Check
+        (Status = CryptoLib.Errors.Authentication_Failed,
+         "AES-CBC raw rejects partial block");
+      Check
+        (Bad_Plain = [Bad_Plain'Range => 0],
+         "AES-CBC raw clears partial-block output");
+   end Check_AES_CBC_Raw_Rejects_Bad_Sizes;
+
    procedure Check_ECDSA_P384_P521_Signing is
       Message : constant Ada.Streams.Stream_Element_Array :=
         Bytes_From_String ("cryptolib ecdsa signing");
@@ -485,7 +594,9 @@ begin
    Check_ZIP_AES_CTR_Roundtrip;
    Check_RC2_40_CBC_Decrypt;
    Check_AES_256_CBC_Raw_Roundtrip;
+   Check_AES_CBC_Raw_Rejects_Bad_Sizes;
    Check_ECDSA_P384_P521_Signing;
+   Check_Certificates;
    Check_XXH3;
    Check_Adler32;
    Check_CRC32;
