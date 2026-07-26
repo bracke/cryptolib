@@ -245,6 +245,8 @@ procedure Tests is
       Client_Key  : Ada.Strings.Unbounded.Unbounded_String;
       Email_Cert  : Ada.Strings.Unbounded.Unbounded_String;
       Email_Key   : Ada.Strings.Unbounded.Unbounded_String;
+      Other_CA_Cert : Ada.Strings.Unbounded.Unbounded_String;
+      Other_CA_Key  : Ada.Strings.Unbounded.Unbounded_String;
    begin
       Check
         (CryptoLib.Certificates.Create_Local_CA
@@ -258,6 +260,21 @@ procedure Tests is
         (Ada.Strings.Unbounded.Index
            (CA_Key, "BEGIN PRIVATE KEY") /= 0,
          "local CA private key is PKCS#8 PEM");
+      Check
+        (CryptoLib.Certificates.Create_Local_CA
+           ("devcert-other-ca", Other_CA_Cert, Other_CA_Key)
+         = CryptoLib.Certificates.Ok,
+         "second local CA creation succeeds");
+      Check
+        (CryptoLib.Certificates.Private_Key_Matches_Certificate
+           (To_String (CA_Cert), To_String (CA_Key))
+         = CryptoLib.Certificates.Ok,
+         "certificate/private-key match is detected");
+      Check
+        (CryptoLib.Certificates.Private_Key_Matches_Certificate
+           (To_String (CA_Cert), To_String (Other_CA_Key))
+         = CryptoLib.Certificates.Invalid_Input,
+         "certificate/private-key mismatch is rejected");
 
       Check
         (CryptoLib.Certificates.Issue_Server_Certificate

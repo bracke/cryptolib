@@ -1247,6 +1247,29 @@ package body CryptoLib.Certificates is
       return Ok;
    end Sign_CSR;
 
+   function Private_Key_Matches_Certificate
+     (Certificate_PEM : String;
+      Private_Key_PEM : String) return Certificate_Status
+   is
+      DER    : constant String := Base64_Decode (Certificate_PEM);
+      Seed   : Ada.Streams.Stream_Element_Array (1 .. 32);
+      Public : Ada.Streams.Stream_Element_Array (1 .. 32);
+   begin
+      if DER = "" or else Private_Key_PEM = "" then
+         return Invalid_Input;
+      elsif not Seed_From_Private_Key_PEM (Private_Key_PEM, Seed) then
+         return Invalid_Input;
+      elsif CryptoLib.Ed25519.Public_Key_From_Seed (Seed, Public)
+        /= CryptoLib.Errors.Ok
+      then
+         return Internal_Error;
+      elsif Contains (DER, SPKI_DER (Public)) then
+         return Ok;
+      else
+         return Invalid_Input;
+      end if;
+   end Private_Key_Matches_Certificate;
+
    function Generate_PKCS12
      (Certificate_PEM : String;
       Private_Key_PEM : String;

@@ -48,6 +48,10 @@ package CryptoLib.Certificates is
       CSR_PEM            : String;
       Certificate_PEM    : out Unbounded_String) return Certificate_Status;
 
+   function Private_Key_Matches_Certificate
+     (Certificate_PEM : String;
+      Private_Key_PEM : String) return Certificate_Status;
+
    function Generate_PKCS12
      (Certificate_PEM : String;
       Private_Key_PEM : String;
