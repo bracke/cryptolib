@@ -9,6 +9,13 @@ licenses = "MIT OR Apache-2.0 WITH LLVM-exception"
 website = ""
 tags = []
 
+executables = [
+   "check_release_ready",
+   "check_alire_manifest",
+   "check_test_suite",
+   "check_gnatdoc_tags",
+]
+
 [[depends-on]]
 cryptolib = "*"
 
@@ -24,3 +31,9 @@ cryptolib = { path = ".." }
 
 [[pins]]
 project_tools = { path = "../../project_tools" }
+
+# Build dependencies in the development profile (-Og) too, not the default
+# release (-O3), so this root and the parent share cryptolib object files
+# rather than forcing each other into full rebuilds.
+[build-profiles]
+"*" = "development"

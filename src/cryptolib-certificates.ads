@@ -26,6 +26,22 @@ package CryptoLib.Certificates is
       Certificate_PEM    : out Unbounded_String;
       Private_Key_PEM    : out Unbounded_String) return Certificate_Status;
 
+   function Issue_Client_Certificate
+     (CA_Certificate_PEM : String;
+      CA_Private_Key_PEM : String;
+      Common_Name        : String;
+      Names              : Subject_Alternative_Name_List;
+      Certificate_PEM    : out Unbounded_String;
+      Private_Key_PEM    : out Unbounded_String) return Certificate_Status;
+
+   function Issue_Email_Certificate
+     (CA_Certificate_PEM : String;
+      CA_Private_Key_PEM : String;
+      Common_Name        : String;
+      Emails             : Subject_Alternative_Name_List;
+      Certificate_PEM    : out Unbounded_String;
+      Private_Key_PEM    : out Unbounded_String) return Certificate_Status;
+
    function Sign_CSR
      (CA_Certificate_PEM : String;
       CA_Private_Key_PEM : String;

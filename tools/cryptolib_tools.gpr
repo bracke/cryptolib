@@ -1,13 +1,13 @@
-with "cryptolib.gpr";
-with "project_tools.gpr";
+with "config/cryptolib_tools_config.gpr";
 
 --  Verification tooling for the cryptolib crate. Built on the shared
 --  project_tools helpers. Run from the cryptolib crate root so the checks see
 --  cryptolib's own src/, tests/, and alire.toml.
 project Cryptolib_Tools is
 
-   for Source_Dirs use (".");
-   for Object_Dir use "obj";
+   for Source_Dirs use (".", "config");
+   for Object_Dir use "obj/" & Cryptolib_Tools_Config.Build_Profile;
+   for Create_Missing_Dirs use "True";
    for Exec_Dir use "bin";
 
    for Main use
@@ -17,8 +17,15 @@ project Cryptolib_Tools is
       "check_gnatdoc_tags.adb");
 
    package Compiler is
+      --  -gnatyM120 is not decoration: Ada_Compiler_Switches brings -gnatym,
+      --  whose default limit is 80, and the workspace standard is 120.
       for Default_Switches ("Ada") use
-        ("-gnat2022", "-gnata", "-Wall", "-Wextra");
+        Cryptolib_Tools_Config.Ada_Compiler_Switches
+        & ("-gnat2022", "-gnatyM120", "-gnata", "-Wall", "-Wextra");
    end Compiler;
+
+   package Binder is
+      for Switches ("Ada") use ("-Es"); --  Symbolic traceback
+   end Binder;
 
 end Cryptolib_Tools;

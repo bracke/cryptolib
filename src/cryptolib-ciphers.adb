@@ -2144,6 +2144,10 @@ package body CryptoLib.Ciphers is
          return CryptoLib.Errors.Unsupported_Feature;
       end if;
 
+      if IV_Data'Length < 16 or else Ciphertext'Length mod 16 /= 0 then
+         return CryptoLib.Errors.Authentication_Failed;
+      end if;
+
       Status_Value := Expand_Key (State_Item, Key_Data, Key_Bits);
       if Status_Value /= CryptoLib.Errors.Ok then
          Reset (State_Item);

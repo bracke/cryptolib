@@ -241,6 +241,10 @@ procedure Tests is
       Leaf_Key  : Ada.Strings.Unbounded.Unbounded_String;
       CSR_Cert  : Ada.Strings.Unbounded.Unbounded_String;
       Bundle    : Ada.Strings.Unbounded.Unbounded_String;
+      Client_Cert : Ada.Strings.Unbounded.Unbounded_String;
+      Client_Key  : Ada.Strings.Unbounded.Unbounded_String;
+      Email_Cert  : Ada.Strings.Unbounded.Unbounded_String;
+      Email_Key   : Ada.Strings.Unbounded.Unbounded_String;
    begin
       Check
         (CryptoLib.Certificates.Create_Local_CA
@@ -272,6 +276,53 @@ procedure Tests is
         (Ada.Strings.Unbounded.Index
            (Leaf_Key, "BEGIN PRIVATE KEY") /= 0,
          "server private key is PKCS#8 PEM");
+
+      Check
+        (CryptoLib.Certificates.Issue_Server_Certificate
+           (To_String (CA_Cert),
+            To_String (CA_Key),
+            "127.0.0.1",
+            [1 => To_Unbounded_String ("127.0.0.1"),
+             2 => To_Unbounded_String ("::1")],
+            Leaf_Cert,
+            Leaf_Key) = CryptoLib.Certificates.Ok,
+         "IP SAN certificate creation succeeds");
+
+      Check
+        (CryptoLib.Certificates.Issue_Client_Certificate
+           (To_String (CA_Cert),
+            To_String (CA_Key),
+            "client",
+            [1 => To_Unbounded_String ("client")],
+            Client_Cert,
+            Client_Key) = CryptoLib.Certificates.Ok,
+         "client certificate creation succeeds");
+      Check
+        (Ada.Strings.Unbounded.Index
+           (Client_Cert, "BEGIN CERTIFICATE") /= 0,
+         "client certificate is PEM encoded");
+      Check
+        (Ada.Strings.Unbounded.Index
+           (Client_Key, "BEGIN PRIVATE KEY") /= 0,
+         "client private key is PKCS#8 PEM");
+
+      Check
+        (CryptoLib.Certificates.Issue_Email_Certificate
+           (To_String (CA_Cert),
+            To_String (CA_Key),
+            "user@example.test",
+            [1 => To_Unbounded_String ("user@example.test")],
+            Email_Cert,
+            Email_Key) = CryptoLib.Certificates.Ok,
+         "email certificate creation succeeds");
+      Check
+        (Ada.Strings.Unbounded.Index
+           (Email_Cert, "BEGIN CERTIFICATE") /= 0,
+         "email certificate is PEM encoded");
+      Check
+        (Ada.Strings.Unbounded.Index
+           (Email_Key, "BEGIN PRIVATE KEY") /= 0,
+         "email private key is PKCS#8 PEM");
 
       Check
         (CryptoLib.Certificates.Sign_CSR

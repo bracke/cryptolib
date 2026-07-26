@@ -17,6 +17,9 @@ package body CryptoLib.Certificates is
    B64 : constant String :=
      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
+   type Certificate_Profile is (CA_Profile, Server_Profile, Client_Profile,
+                                Email_Profile);
+
    function Status_Image (Status : Certificate_Status) return String is
    begin
       case Status is
@@ -492,14 +495,221 @@ package body CryptoLib.Certificates is
       return True;
    end Valid_Name;
 
+   function Valid_Email (Text : String) return Boolean is
+      At_Pos : Natural := 0;
+      Dot_Pos : Natural := 0;
+   begin
+      if Text'Length < 3 then
+         return False;
+      end if;
+
+      for I in Text'Range loop
+         if Text (I) = '@' then
+            if At_Pos /= 0 or else I = Text'First or else I = Text'Last then
+               return False;
+            end if;
+            At_Pos := I;
+         elsif Text (I) = '.' and then At_Pos /= 0 and then I > At_Pos + 1 then
+            Dot_Pos := I;
+         elsif not (Text (I) in 'a' .. 'z'
+                    or else Text (I) in 'A' .. 'Z'
+                    or else Text (I) in '0' .. '9'
+                    or else Text (I) = '.'
+                    or else Text (I) = '-'
+                    or else Text (I) = '_'
+                    or else Text (I) = '+')
+         then
+            return False;
+         end if;
+      end loop;
+
+      return At_Pos /= 0 and then Dot_Pos /= 0 and then Dot_Pos < Text'Last;
+   end Valid_Email;
+
+   function IPv4_Bytes (Text : String) return String is
+      Result      : String (1 .. 4);
+      Part        : Natural := 0;
+      Value       : Natural := 0;
+      Digit_Count : Natural := 0;
+
+      procedure Finish (Ok : in out Boolean) is
+      begin
+         if Digit_Count = 0 or else Value > 255 or else Part = 4 then
+            Ok := False;
+         else
+            Part := Part + 1;
+            Result (Part) := Byte (Value);
+            Value := 0;
+            Digit_Count := 0;
+         end if;
+      end Finish;
+
+      Ok : Boolean := True;
+   begin
+      if Text = "" then
+         return "";
+      end if;
+
+      for C of Text loop
+         if C in '0' .. '9' then
+            Value := Value * 10 + Character'Pos (C) - Character'Pos ('0');
+            Digit_Count := Digit_Count + 1;
+         elsif C = '.' then
+            Finish (Ok);
+            if not Ok then
+               return "";
+            end if;
+         else
+            return "";
+         end if;
+      end loop;
+
+      Finish (Ok);
+      if Ok and then Part = 4 then
+         return Result;
+      else
+         return "";
+      end if;
+   end IPv4_Bytes;
+
+   function Hex_Value (C : Character) return Integer is
+   begin
+      if C in '0' .. '9' then
+         return Character'Pos (C) - Character'Pos ('0');
+      elsif C in 'a' .. 'f' then
+         return Character'Pos (C) - Character'Pos ('a') + 10;
+      elsif C in 'A' .. 'F' then
+         return Character'Pos (C) - Character'Pos ('A') + 10;
+      else
+         return -1;
+      end if;
+   end Hex_Value;
+
+   function IPv6_Bytes (Text : String) return String is
+      Groups          : array (1 .. 8) of Natural := [others => 0];
+      Group_Count     : Natural := 0;
+      Compress_Index  : Natural := 0;
+      I               : Natural := Text'First;
+
+      function Read_Group
+        (Pos   : in out Natural;
+         Value : out Natural) return Boolean
+      is
+         Digit_Total : Natural := 0;
+         V      : Natural := 0;
+         H      : Integer;
+      begin
+         Value := 0;
+         while Pos <= Text'Last loop
+            exit when Text (Pos) = ':';
+            H := Hex_Value (Text (Pos));
+            if H < 0 or else Digit_Total = 4 then
+               return False;
+            end if;
+            V := V * 16 + Natural (H);
+            Digit_Total := Digit_Total + 1;
+            Pos := Pos + 1;
+         end loop;
+         if Digit_Total = 0 then
+            return False;
+         end if;
+         Value := V;
+         return True;
+      end Read_Group;
+   begin
+      if Text'Length < 2 then
+         return "";
+      end if;
+
+      while I <= Text'Last loop
+         if Text (I) = ':' then
+            if I = Text'Last or else Text (I + 1) /= ':' or else Compress_Index /= 0
+            then
+               return "";
+            end if;
+            Compress_Index := Group_Count + 1;
+            I := I + 2;
+            if I > Text'Last then
+               exit;
+            end if;
+         else
+            if Group_Count = 8 then
+               return "";
+            end if;
+            Group_Count := Group_Count + 1;
+            if not Read_Group (I, Groups (Group_Count)) then
+               return "";
+            end if;
+            if I <= Text'Last then
+               if Text (I) /= ':' then
+                  return "";
+               end if;
+               I := I + 1;
+            end if;
+         end if;
+      end loop;
+
+      if Compress_Index = 0 and then Group_Count /= 8 then
+         return "";
+      elsif Compress_Index /= 0 then
+         declare
+            Missing : constant Natural := 8 - Group_Count;
+         begin
+            if Missing = 0 then
+               return "";
+            end if;
+            for J in reverse Compress_Index .. Group_Count loop
+               Groups (J + Missing) := Groups (J);
+            end loop;
+            for J in Compress_Index .. Compress_Index + Missing - 1 loop
+               Groups (J) := 0;
+            end loop;
+         end;
+      end if;
+
+      declare
+         Result : String (1 .. 16);
+         Pos    : Positive := Result'First;
+      begin
+         for G of Groups loop
+            Result (Pos) := Byte (G / 256);
+            Result (Pos + 1) := Byte (G mod 256);
+            Pos := Pos + 2;
+         end loop;
+         return Result;
+      end;
+   end IPv6_Bytes;
+
+   function IP_Bytes (Text : String) return String is
+      V4 : constant String := IPv4_Bytes (Text);
+   begin
+      if V4 /= "" then
+         return V4;
+      else
+         return IPv6_Bytes (Text);
+      end if;
+   end IP_Bytes;
+
+   function Valid_Profile_Name
+     (Profile : Certificate_Profile;
+      Text    : String) return Boolean
+   is
+   begin
+      if Profile = Email_Profile then
+         return Valid_Email (Text);
+      else
+         return Valid_Name (Text) or else IP_Bytes (Text) /= "";
+      end if;
+   end Valid_Profile_Name;
+
    function Extensions_DER
-     (Is_CA : Boolean;
-      Names : Subject_Alternative_Name_List) return String
+     (Profile : Certificate_Profile;
+      Names   : Subject_Alternative_Name_List) return String
    is
       Items : Unbounded_String;
       SANs  : Unbounded_String;
    begin
-      if Is_CA then
+      if Profile = CA_Profile then
          Append
            (Items,
             Seq
@@ -514,8 +724,33 @@ package body CryptoLib.Certificates is
                & Octets (TLV (16#03#, Byte (1) & Byte (16#06#)))));
       else
          for Name of Names loop
-            Append (SANs, TLV (16#82#, To_String (Name)));
+            declare
+               Name_Text : constant String := To_String (Name);
+               IP_Data   : constant String := IP_Bytes (Name_Text);
+            begin
+               if IP_Data /= "" then
+                  Append (SANs, TLV (16#87#, IP_Data));
+               else
+                  Append
+                    (SANs,
+                     TLV
+                       ((if Profile = Email_Profile then 16#81# else 16#82#),
+                        Name_Text));
+               end if;
+            end;
          end loop;
+         Append
+           (Items,
+            Seq
+              (OID (Byte (16#55#) & Byte (16#1D#) & Byte (16#13#))
+               & Bool (True)
+               & Octets (Seq (""))));
+         Append
+           (Items,
+            Seq
+              (OID (Byte (16#55#) & Byte (16#1D#) & Byte (16#0F#))
+               & Bool (True)
+               & Octets (TLV (16#03#, Byte (7) & Byte (16#80#)))));
          Append
            (Items,
             Seq
@@ -530,7 +765,12 @@ package body CryptoLib.Certificates is
                       (OID
                          (Byte (16#2B#) & Byte (16#06#) & Byte (16#01#)
                           & Byte (16#05#) & Byte (16#05#) & Byte (16#07#)
-                          & Byte (16#03#) & Byte (16#01#))))));
+                          & Byte (16#03#)
+                          & (case Profile is
+                               when Server_Profile => Byte (16#01#),
+                               when Client_Profile => Byte (16#02#),
+                               when Email_Profile => Byte (16#04#),
+                               when CA_Profile => Byte (16#01#)))))));
       end if;
       return Explicit (3, Seq (To_String (Items)));
    end Extensions_DER;
@@ -542,7 +782,7 @@ package body CryptoLib.Certificates is
       Subject_Key : Ada.Streams.Stream_Element_Array;
       Sign_Seed   : Ada.Streams.Stream_Element_Array;
       Sign_Public : Ada.Streams.Stream_Element_Array;
-      Is_CA       : Boolean;
+      Profile     : Certificate_Profile;
       Names       : Subject_Alternative_Name_List) return String
    is
       TBS : constant String :=
@@ -554,7 +794,7 @@ package body CryptoLib.Certificates is
            & Validity_DER
            & Name_DER (Subject_CN)
            & SPKI_DER (Subject_Key)
-           & Extensions_DER (Is_CA, Names));
+           & Extensions_DER (Profile, Names));
       Sig : Ada.Streams.Stream_Element_Array (1 .. 64);
       St  : constant CryptoLib.Errors.Status :=
         CryptoLib.Ed25519.Sign (Sign_Seed, Sign_Public, To_Bytes (TBS), Sig);
@@ -686,6 +926,8 @@ package body CryptoLib.Certificates is
       SPKI     : Unbounded_String;
       Alg      : Unbounded_String;
       Bits_U   : Unbounded_String;
+      CSR_Alg  : Unbounded_String;
+      CSR_Sig  : Unbounded_String;
       OID_Ed    : constant String :=
         Byte (16#06#) & Byte (16#03#) & Byte (16#2B#) & Byte (16#65#)
         & Byte (16#70#);
@@ -706,6 +948,15 @@ package body CryptoLib.Certificates is
          Outer_Pos  : Natural := Outer_Text'First;
       begin
          if not Read_TLV (Outer_Text, Outer_Pos, 16#30#, CRI) then
+            return False;
+         end if;
+         if not Read_TLV (Outer_Text, Outer_Pos, 16#30#, CSR_Alg) then
+            return False;
+         end if;
+         if not Contains (To_String (CSR_Alg), OID_Ed) then
+            return False;
+         end if;
+         if not Read_TLV (Outer_Text, Outer_Pos, 16#03#, CSR_Sig) then
             return False;
          end if;
       end;
@@ -760,6 +1011,33 @@ package body CryptoLib.Certificates is
                       (Bits_Text'First + Natural (I - Public_Key'First) + 1)));
          end loop;
       end;
+
+      declare
+         Signature_Text : constant String := To_String (CSR_Sig);
+         Signature      : Ada.Streams.Stream_Element_Array (1 .. 64);
+      begin
+         if Signature_Text'Length /= 65
+           or else Character'Pos (Signature_Text (Signature_Text'First)) /= 0
+         then
+            return False;
+         end if;
+
+         for I in Signature'Range loop
+            Signature (I) :=
+              Ada.Streams.Stream_Element
+                (Character'Pos
+                   (Signature_Text
+                      (Signature_Text'First
+                       + Natural (I - Signature'First) + 1)));
+         end loop;
+
+         if CryptoLib.Ed25519.Verify
+           (Public_Key, Signature, To_Bytes (Seq (To_String (CRI))))
+           /= CryptoLib.Errors.Ok
+         then
+            return False;
+         end if;
+      end;
       return True;
    exception
       when others =>
@@ -799,7 +1077,7 @@ package body CryptoLib.Certificates is
               Subject_Key => Public,
               Sign_Seed   => Seed,
               Sign_Public => Public,
-              Is_CA       => True,
+              Profile     => CA_Profile,
               Names       => [1 => To_Unbounded_String (Common_Name)]));
       if Length (Cert) = 0 then
          return Internal_Error;
@@ -810,11 +1088,12 @@ package body CryptoLib.Certificates is
       return Ok;
    end Create_Local_CA;
 
-   function Issue_Server_Certificate
+   function Issue_Profile_Certificate
      (CA_Certificate_PEM : String;
       CA_Private_Key_PEM : String;
       Common_Name        : String;
       Names              : Subject_Alternative_Name_List;
+      Profile            : Certificate_Profile;
       Certificate_PEM    : out Unbounded_String;
       Private_Key_PEM    : out Unbounded_String) return Certificate_Status
    is
@@ -829,14 +1108,16 @@ package body CryptoLib.Certificates is
       Certificate_PEM := Null_Unbounded_String;
       Private_Key_PEM := Null_Unbounded_String;
 
-      if CA_Private_Key_PEM = "" or else not Valid_Name (Common_Name)
+      if CA_Private_Key_PEM = ""
+        or else not Valid_Profile_Name (Profile, Common_Name)
         or else Names'Length = 0
+        or else Profile = CA_Profile
       then
          return Invalid_Input;
       end if;
 
       for Name of Names loop
-         if not Valid_Name (To_String (Name)) then
+         if not Valid_Profile_Name (Profile, To_String (Name)) then
             return Invalid_Input;
          end if;
       end loop;
@@ -864,7 +1145,7 @@ package body CryptoLib.Certificates is
               Subject_Key => Public,
               Sign_Seed   => CA_Seed,
               Sign_Public => CA_Public,
-              Is_CA       => False,
+              Profile     => Profile,
               Names       => Names));
       if Length (Cert) = 0 then
          return Internal_Error;
@@ -878,7 +1159,46 @@ package body CryptoLib.Certificates is
          Certificate_PEM := Null_Unbounded_String;
          Private_Key_PEM := Null_Unbounded_String;
          return Internal_Error;
+   end Issue_Profile_Certificate;
+
+   function Issue_Server_Certificate
+     (CA_Certificate_PEM : String;
+      CA_Private_Key_PEM : String;
+      Common_Name        : String;
+      Names              : Subject_Alternative_Name_List;
+      Certificate_PEM    : out Unbounded_String;
+      Private_Key_PEM    : out Unbounded_String) return Certificate_Status is
+   begin
+      return Issue_Profile_Certificate
+        (CA_Certificate_PEM, CA_Private_Key_PEM, Common_Name, Names,
+         Server_Profile, Certificate_PEM, Private_Key_PEM);
    end Issue_Server_Certificate;
+
+   function Issue_Client_Certificate
+     (CA_Certificate_PEM : String;
+      CA_Private_Key_PEM : String;
+      Common_Name        : String;
+      Names              : Subject_Alternative_Name_List;
+      Certificate_PEM    : out Unbounded_String;
+      Private_Key_PEM    : out Unbounded_String) return Certificate_Status is
+   begin
+      return Issue_Profile_Certificate
+        (CA_Certificate_PEM, CA_Private_Key_PEM, Common_Name, Names,
+         Client_Profile, Certificate_PEM, Private_Key_PEM);
+   end Issue_Client_Certificate;
+
+   function Issue_Email_Certificate
+     (CA_Certificate_PEM : String;
+      CA_Private_Key_PEM : String;
+      Common_Name        : String;
+      Emails             : Subject_Alternative_Name_List;
+      Certificate_PEM    : out Unbounded_String;
+      Private_Key_PEM    : out Unbounded_String) return Certificate_Status is
+   begin
+      return Issue_Profile_Certificate
+        (CA_Certificate_PEM, CA_Private_Key_PEM, Common_Name, Emails,
+         Email_Profile, Certificate_PEM, Private_Key_PEM);
+   end Issue_Email_Certificate;
 
    function Sign_CSR
      (CA_Certificate_PEM : String;
@@ -918,7 +1238,7 @@ package body CryptoLib.Certificates is
               Subject_Key => CSR_Public,
               Sign_Seed   => CA_Seed,
               Sign_Public => CA_Public,
-              Is_CA       => False,
+              Profile     => Server_Profile,
               Names       => [1 => Subject]));
       if Length (Cert) = 0 then
          return Internal_Error;
