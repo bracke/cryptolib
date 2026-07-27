@@ -519,6 +519,52 @@ package body CryptoLib.Certificates is
       return To_String (Result);
    end Base64_Decode;
 
+   function Contains (Data : String; Needle : String) return Boolean;
+
+   --  Which algorithm a private key PEM carries. An Ed25519 key is only ever
+   --  one thing; an EC key names its curve, so the curve OID in the DER is the
+   --  discriminator.
+   function Algorithm_Of_Private_Key (Private_Key_PEM : String) return Key_Algorithm is
+      DER       : constant String := Base64_Decode (Private_Key_PEM);
+      Secp384r1 : constant String :=
+        Byte (16#2B#) & Byte (16#81#) & Byte (16#04#) & Byte (16#00#) & Byte (16#22#);
+   begin
+      if Contains (DER, Secp384r1) then
+         return P384_Key;
+      end if;
+      return Ed25519_Key;
+   end Algorithm_Of_Private_Key;
+
+   --  The P-384 scalar out of a PKCS#8 ECPrivateKey: the 48-byte OCTET STRING
+   --  inside it. Ed25519's seed is found the same way, by its own length, and
+   --  neither shape can be mistaken for the other.
+   function Scalar_From_Private_Key_PEM
+     (Private_Key_PEM : String;
+      Scalar          : out Ada.Streams.Stream_Element_Array) return Boolean
+   is
+      DER    : constant String := Base64_Decode (Private_Key_PEM);
+      Wanted : constant Natural := Natural (Scalar'Length);
+   begin
+      Scalar := [others => 0];
+      if DER'Length < Wanted + 2 then
+         return False;
+      end if;
+
+      for I in DER'First .. DER'Last - Wanted - 1 loop
+         if Character'Pos (DER (I)) = 16#04#
+           and then Character'Pos (DER (I + 1)) = Wanted
+         then
+            for J in Scalar'Range loop
+               Scalar (J) :=
+                 Ada.Streams.Stream_Element
+                   (Character'Pos (DER (I + 2 + Natural (J - Scalar'First))));
+            end loop;
+            return True;
+         end if;
+      end loop;
+      return False;
+   end Scalar_From_Private_Key_PEM;
+
    function Seed_From_Private_Key_PEM
      (Private_Key_PEM : String;
       Seed            : out Ada.Streams.Stream_Element_Array) return Boolean
@@ -858,8 +904,11 @@ package body CryptoLib.Certificates is
       Sign_Public : Ada.Streams.Stream_Element_Array;
       Profile     : Certificate_Profile;
       Names       : Subject_Alternative_Name_List;
-      Algorithm   : Key_Algorithm := Ed25519_Key) return String
+      Algorithm   : Key_Algorithm := Ed25519_Key;
+      Subject_Algorithm : Key_Algorithm := Ed25519_Key) return String
    is
+      --  The signer's algorithm and the subject's need not agree: a CSR brings
+      --  its own key, and the CA signs whatever it was handed.
       TBS : constant String :=
         Seq
           (Explicit (0, Integer_DER (2))
@@ -868,7 +917,7 @@ package body CryptoLib.Certificates is
            & Name_DER (Issuer_CN)
            & Validity_DER
            & Name_DER (Subject_CN)
-           & SPKI_DER (Subject_Key, Algorithm)
+           & SPKI_DER (Subject_Key, Subject_Algorithm)
            & Extensions_DER (Profile, Names));
    begin
       case Algorithm is
@@ -1203,7 +1252,8 @@ package body CryptoLib.Certificates is
               Sign_Public => Public,
               Profile     => CA_Profile,
               Names       => [1 => To_Unbounded_String (Common_Name)],
-              Algorithm   => Algorithm));
+              Algorithm   => Algorithm,
+              Subject_Algorithm => Algorithm));
       if Length (Cert) = 0 then
          return Internal_Error;
       end if;
@@ -1227,11 +1277,23 @@ package body CryptoLib.Certificates is
       Private_Key_PEM    : out Unbounded_String) return Certificate_Status
    is
       pragma Unreferenced (CA_Certificate_PEM);
-      Rng       : CryptoLib.Random.Random_Source;
-      CA_Seed   : Ada.Streams.Stream_Element_Array (1 .. 32);
-      CA_Public : Ada.Streams.Stream_Element_Array (1 .. 32);
-      Seed      : Ada.Streams.Stream_Element_Array (1 .. 32);
-      Public    : Ada.Streams.Stream_Element_Array (1 .. 32);
+      Rng : CryptoLib.Random.Random_Source;
+
+      --  A leaf is signed by the CA and has to be verifiable by whatever
+      --  accepts the CA, so it carries the same kind of key. Nothing asks the
+      --  caller: the CA's own key already says which.
+      Algorithm : constant Key_Algorithm :=
+        Algorithm_Of_Private_Key (CA_Private_Key_PEM);
+      Is_EC     : constant Boolean := Algorithm = P384_Key;
+
+      CA_Seed   : Ada.Streams.Stream_Element_Array
+        (1 .. (if Is_EC then 48 else 32));
+      CA_Public : Ada.Streams.Stream_Element_Array
+        (1 .. (if Is_EC then 97 else 32));
+      Seed      : Ada.Streams.Stream_Element_Array
+        (1 .. (if Is_EC then 48 else 32));
+      Public    : Ada.Streams.Stream_Element_Array
+        (1 .. (if Is_EC then 97 else 32));
       Cert      : Unbounded_String;
    begin
       Certificate_PEM := Null_Unbounded_String;
@@ -1251,17 +1313,36 @@ package body CryptoLib.Certificates is
          end if;
       end loop;
 
-      if not Seed_From_Private_Key_PEM (CA_Private_Key_PEM, CA_Seed) then
-         return Invalid_Input;
-      end if;
-      if CryptoLib.Ed25519.Public_Key_From_Seed (CA_Seed, CA_Public)
-        /= CryptoLib.Errors.Ok
-      then
-         return Internal_Error;
+      if Is_EC then
+         if not Scalar_From_Private_Key_PEM (CA_Private_Key_PEM, CA_Seed) then
+            return Invalid_Input;
+         end if;
+         if CryptoLib.ECDSA.Public_Nistp384_Raw (CA_Seed, CA_Public)
+           /= CryptoLib.Errors.Ok
+         then
+            return Internal_Error;
+         end if;
+      else
+         if not Seed_From_Private_Key_PEM (CA_Private_Key_PEM, CA_Seed) then
+            return Invalid_Input;
+         end if;
+         if CryptoLib.Ed25519.Public_Key_From_Seed (CA_Seed, CA_Public)
+           /= CryptoLib.Errors.Ok
+         then
+            return Internal_Error;
+         end if;
       end if;
 
       CryptoLib.Random.Initialize_Production (Rng);
-      if CryptoLib.Ed25519.Generate_Keypair (Rng, Seed, Public) /= CryptoLib.Errors.Ok then
+      if Is_EC then
+         if CryptoLib.ECDSA.Generate_Nistp384_Keypair (Rng, Seed, Public)
+           /= CryptoLib.Errors.Ok
+         then
+            return Internal_Error;
+         end if;
+      elsif CryptoLib.Ed25519.Generate_Keypair (Rng, Seed, Public)
+        /= CryptoLib.Errors.Ok
+      then
          return Internal_Error;
       end if;
 
@@ -1275,13 +1356,18 @@ package body CryptoLib.Certificates is
               Sign_Seed   => CA_Seed,
               Sign_Public => CA_Public,
               Profile     => Profile,
-              Names       => Names));
+              Names       => Names,
+              Algorithm   => Algorithm,
+              Subject_Algorithm => Algorithm));
       if Length (Cert) = 0 then
          return Internal_Error;
       end if;
 
       Certificate_PEM := PEM ("CERTIFICATE", To_String (Cert));
-      Private_Key_PEM := PEM ("PRIVATE KEY", Private_Key_DER (Seed));
+      Private_Key_PEM :=
+        PEM ("PRIVATE KEY",
+             (if Is_EC then P384_Private_Key_DER (Seed, Public)
+              else Private_Key_DER (Seed)));
       return Ok;
    exception
       when others =>
@@ -1336,9 +1422,16 @@ package body CryptoLib.Certificates is
       Certificate_PEM    : out Unbounded_String) return Certificate_Status
    is
       pragma Unreferenced (CA_Certificate_PEM);
-      CA_Seed   : Ada.Streams.Stream_Element_Array (1 .. 32);
-      CA_Public : Ada.Streams.Stream_Element_Array (1 .. 32);
+      Algorithm : constant Key_Algorithm :=
+        Algorithm_Of_Private_Key (CA_Private_Key_PEM);
+      Is_EC     : constant Boolean := Algorithm = P384_Key;
+      CA_Seed   : Ada.Streams.Stream_Element_Array
+        (1 .. (if Is_EC then 48 else 32));
+      CA_Public : Ada.Streams.Stream_Element_Array
+        (1 .. (if Is_EC then 97 else 32));
       Subject   : Unbounded_String;
+      --  The CSR carries an Ed25519 key: this reads and verifies that shape
+      --  only, whatever the CA itself is signed with.
       CSR_Public : Ada.Streams.Stream_Element_Array (1 .. 32);
       Cert      : Unbounded_String;
    begin
@@ -1346,14 +1439,26 @@ package body CryptoLib.Certificates is
       if CA_Private_Key_PEM = "" or else CSR_PEM = "" then
          return Invalid_Input;
       end if;
-      if not Seed_From_Private_Key_PEM (CA_Private_Key_PEM, CA_Seed) then
-         return Invalid_Input;
+      if Is_EC then
+         if not Scalar_From_Private_Key_PEM (CA_Private_Key_PEM, CA_Seed) then
+            return Invalid_Input;
+         end if;
+         if CryptoLib.ECDSA.Public_Nistp384_Raw (CA_Seed, CA_Public)
+           /= CryptoLib.Errors.Ok
+         then
+            return Internal_Error;
+         end if;
+      else
+         if not Seed_From_Private_Key_PEM (CA_Private_Key_PEM, CA_Seed) then
+            return Invalid_Input;
+         end if;
+         if CryptoLib.Ed25519.Public_Key_From_Seed (CA_Seed, CA_Public)
+           /= CryptoLib.Errors.Ok
+         then
+            return Internal_Error;
+         end if;
       end if;
-      if CryptoLib.Ed25519.Public_Key_From_Seed (CA_Seed, CA_Public)
-        /= CryptoLib.Errors.Ok
-      then
-         return Internal_Error;
-      end if;
+
       if not Extract_CSR (CSR_PEM, Subject, CSR_Public) then
          return Invalid_Input;
       end if;
@@ -1368,7 +1473,9 @@ package body CryptoLib.Certificates is
               Sign_Seed   => CA_Seed,
               Sign_Public => CA_Public,
               Profile     => Server_Profile,
-              Names       => [1 => Subject]));
+              Names       => [1 => Subject],
+              Algorithm   => Algorithm,
+              Subject_Algorithm => Ed25519_Key));
       if Length (Cert) = 0 then
          return Internal_Error;
       end if;
@@ -1380,19 +1487,41 @@ package body CryptoLib.Certificates is
      (Certificate_PEM : String;
       Private_Key_PEM : String) return Certificate_Status
    is
-      DER    : constant String := Base64_Decode (Certificate_PEM);
-      Seed   : Ada.Streams.Stream_Element_Array (1 .. 32);
-      Public : Ada.Streams.Stream_Element_Array (1 .. 32);
+      DER       : constant String := Base64_Decode (Certificate_PEM);
+      Algorithm : constant Key_Algorithm :=
+        Algorithm_Of_Private_Key (Private_Key_PEM);
+      Is_EC     : constant Boolean := Algorithm = P384_Key;
+      Seed      : Ada.Streams.Stream_Element_Array
+        (1 .. (if Is_EC then 48 else 32));
+      Public    : Ada.Streams.Stream_Element_Array
+        (1 .. (if Is_EC then 97 else 32));
    begin
       if DER = "" or else Private_Key_PEM = "" then
          return Invalid_Input;
-      elsif not Seed_From_Private_Key_PEM (Private_Key_PEM, Seed) then
-         return Invalid_Input;
-      elsif CryptoLib.Ed25519.Public_Key_From_Seed (Seed, Public)
-        /= CryptoLib.Errors.Ok
-      then
-         return Internal_Error;
-      elsif Contains (DER, SPKI_DER (Public)) then
+      end if;
+
+      --  Derive the public key the private one implies and look for it in the
+      --  certificate: a key that belongs to another certificate cannot produce
+      --  a subject public key that matches this one.
+      if Is_EC then
+         if not Scalar_From_Private_Key_PEM (Private_Key_PEM, Seed) then
+            return Invalid_Input;
+         elsif CryptoLib.ECDSA.Public_Nistp384_Raw (Seed, Public)
+           /= CryptoLib.Errors.Ok
+         then
+            return Internal_Error;
+         end if;
+      else
+         if not Seed_From_Private_Key_PEM (Private_Key_PEM, Seed) then
+            return Invalid_Input;
+         elsif CryptoLib.Ed25519.Public_Key_From_Seed (Seed, Public)
+           /= CryptoLib.Errors.Ok
+         then
+            return Internal_Error;
+         end if;
+      end if;
+
+      if Contains (DER, SPKI_DER (Public, Algorithm)) then
          return Ok;
       else
          return Invalid_Input;
