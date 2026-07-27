@@ -627,6 +627,56 @@ procedure Tests is
          "AES-CBC raw clears partial-block output");
    end Check_AES_CBC_Raw_Rejects_Bad_Sizes;
 
+   --  d = 1 multiplies the base point by one, so the public point is the
+   --  generator itself -- a value published in FIPS 186-4, not one this code
+   --  produced. Signing was interoperable long before the public point could
+   --  be derived at all, which is exactly the half that was missing.
+   procedure Check_ECDSA_P384_Public_Key is
+      Generator : constant Ada.Streams.Stream_Element_Array (1 .. 97) :=
+        [16#04#,
+         16#aa#, 16#87#, 16#ca#, 16#22#, 16#be#, 16#8b#, 16#05#, 16#37#,
+         16#8e#, 16#b1#, 16#c7#, 16#1e#, 16#f3#, 16#20#, 16#ad#, 16#74#,
+         16#6e#, 16#1d#, 16#3b#, 16#62#, 16#8b#, 16#a7#, 16#9b#, 16#98#,
+         16#59#, 16#f7#, 16#41#, 16#e0#, 16#82#, 16#54#, 16#2a#, 16#38#,
+         16#55#, 16#02#, 16#f2#, 16#5d#, 16#bf#, 16#55#, 16#29#, 16#6c#,
+         16#3a#, 16#54#, 16#5e#, 16#38#, 16#72#, 16#76#, 16#0a#, 16#b7#,
+         16#36#, 16#17#, 16#de#, 16#4a#, 16#96#, 16#26#, 16#2c#, 16#6f#,
+         16#5d#, 16#9e#, 16#98#, 16#bf#, 16#92#, 16#92#, 16#dc#, 16#29#,
+         16#f8#, 16#f4#, 16#1d#, 16#bd#, 16#28#, 16#9a#, 16#14#, 16#7c#,
+         16#e9#, 16#da#, 16#31#, 16#13#, 16#b5#, 16#f0#, 16#b8#, 16#c0#,
+         16#0a#, 16#60#, 16#b1#, 16#ce#, 16#1d#, 16#7e#, 16#81#, 16#9d#,
+         16#7a#, 16#43#, 16#1d#, 16#7c#, 16#90#, 16#ea#, 16#0e#, 16#5f#];
+
+      Point    : Ada.Streams.Stream_Element_Array (1 .. 97);
+      Derived  : Ada.Streams.Stream_Element_Array (1 .. 97);
+      Scalar   : Ada.Streams.Stream_Element_Array (1 .. 48);
+      Source   : CryptoLib.Random.Random_Source;
+      Status   : CryptoLib.Errors.Status;
+   begin
+      Status := CryptoLib.ECDSA.Public_Nistp384_Raw ([1 => 1], Point);
+      Check (Status = CryptoLib.Errors.Ok, "ECDSA P-384 public key status");
+      Check (Point = Generator, "ECDSA P-384 d=1 yields the generator");
+
+      --  A scalar of zero is not in [1, n-1] and must be rejected rather than
+      --  quietly yielding the point at infinity.
+      Status := CryptoLib.ECDSA.Public_Nistp384_Raw ([1 => 0], Point);
+      Check
+        (Status /= CryptoLib.Errors.Ok,
+         "ECDSA P-384 rejects a zero scalar");
+
+      CryptoLib.Random.Initialize_Deterministic (Source, [16#5A#, 16#C3#]);
+      Status :=
+        CryptoLib.ECDSA.Generate_Nistp384_Keypair (Source, Scalar, Point);
+      Check (Status = CryptoLib.Errors.Ok, "ECDSA P-384 keypair status");
+      Check (Scalar /= [Scalar'Range => 0], "ECDSA P-384 keypair emits a scalar");
+
+      Status := CryptoLib.ECDSA.Public_Nistp384_Raw (Scalar, Derived);
+      Check (Status = CryptoLib.Errors.Ok, "ECDSA P-384 keypair scalar derives");
+      Check
+        (Derived = Point,
+         "ECDSA P-384 keypair public point matches its own scalar");
+   end Check_ECDSA_P384_Public_Key;
+
    procedure Check_ECDSA_P384_P521_Signing is
       Message : constant Ada.Streams.Stream_Element_Array :=
         Bytes_From_String ("cryptolib ecdsa signing");
@@ -664,6 +714,7 @@ begin
    Check_AES_256_CBC_Raw_Roundtrip;
    Check_AES_CBC_Raw_Rejects_Bad_Sizes;
    Check_ECDSA_P384_P521_Signing;
+   Check_ECDSA_P384_Public_Key;
    Check_Certificates;
    Check_XXH3;
    Check_Adler32;

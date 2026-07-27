@@ -559,4 +559,91 @@ package body CryptoLib.ECDSA is
         (P521_Curve, Private_Scalar_Mpint, Message_Bytes, R_Bytes, S_Bytes);
    end Sign_Nistp521_Raw;
 
+   --  Projective (X/Z, Y/Z), so one inversion gives both affine coordinates.
+   function Affine_Point
+     (Cv           : Curve_Data;
+      D            : Element;
+      Public_Point : out Stream_Element_Array) return Status
+   is
+      Pt : constant Point := Scalar_Mult (Cv, D);
+      Zn : constant Element := From_Mont (Cv.Field, Pt.Z);
+      Zi : Element;
+   begin
+      if Is_Zero_Mask (Zn) /= 0 then
+         return CryptoLib.Errors.Authentication_Failed;
+      end if;
+
+      Zi := Inv_Mod (Zn, Low (Cv.P_Minus_2, Cv.P_Len),
+                     Low (Cv.P_Bytes, Cv.P_Len), Cv.Field);
+
+      declare
+         X_Aff : constant Element := Mont_Mul (Cv.Field, Pt.X, Zi);
+         Y_Aff : constant Element := Mont_Mul (Cv.Field, Pt.Y, Zi);
+         X_By  : constant Stream_Element_Array := To_Bytes (Cv.Field, X_Aff);
+         Y_By  : constant Stream_Element_Array := To_Bytes (Cv.Field, Y_Aff);
+      begin
+         Public_Point (Public_Point'First) := 16#04#;
+         Public_Point
+           (Public_Point'First + 1
+            .. Public_Point'First + Stream_Element_Offset (Cv.P_Len)) := X_By;
+         Public_Point
+           (Public_Point'First + Stream_Element_Offset (Cv.P_Len) + 1
+            .. Public_Point'Last) := Y_By;
+      end;
+      return CryptoLib.Errors.Ok;
+   end Affine_Point;
+
+   function Public_Nistp384_Raw
+     (Private_Scalar_Mpint : Stream_Element_Array;
+      Public_Point         : out Stream_Element_Array)
+      return Status
+   is
+      Cv : constant Curve_Data := P384_Curve;
+      D  : Element;
+   begin
+      Public_Point := [others => 0];
+      if Public_Point'Length /= 2 * Stream_Element_Offset (Cv.P_Len) + 1 then
+         return CryptoLib.Errors.Handshake_Failed;
+      end if;
+      if not Parse_Private (Private_Scalar_Mpint, Cv, D) then
+         return CryptoLib.Errors.Authentication_Failed;
+      end if;
+      return Affine_Point (Cv, D, Public_Point);
+   end Public_Nistp384_Raw;
+
+   function Generate_Nistp384_Keypair
+     (Rng            : in out CryptoLib.Random.Random_Source;
+      Private_Scalar : out Stream_Element_Array;
+      Public_Point   : out Stream_Element_Array)
+      return Status
+   is
+      Cv       : constant Curve_Data := P384_Curve;
+      Attempts : constant := 64;
+      D        : Element;
+   begin
+      Private_Scalar := [others => 0];
+      Public_Point := [others => 0];
+      if Private_Scalar'Length /= Stream_Element_Offset (Cv.Byte_Length)
+        or else Public_Point'Length /= 2 * Stream_Element_Offset (Cv.P_Len) + 1
+      then
+         return CryptoLib.Errors.Handshake_Failed;
+      end if;
+
+      --  A uniform draw is only a valid scalar when it lands in [1, n-1].
+      --  Rejecting and redrawing keeps the distribution honest, where reducing
+      --  mod n would bias it.
+      for Attempt in 1 .. Attempts loop
+         if CryptoLib.Random.Fill (Rng, Private_Scalar) /= CryptoLib.Errors.Ok
+         then
+            return CryptoLib.Errors.Internal_Error;
+         end if;
+         if Parse_Private (Private_Scalar, Cv, D) then
+            return Affine_Point (Cv, D, Public_Point);
+         end if;
+      end loop;
+
+      Private_Scalar := [others => 0];
+      return CryptoLib.Errors.Internal_Error;
+   end Generate_Nistp384_Keypair;
+
 end CryptoLib.ECDSA;
