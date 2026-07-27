@@ -792,6 +792,60 @@ procedure Tests is
       end;
    end Check_P384_Local_CA;
 
+   --  Verification closes the loop the signer left open: signing was
+   --  interoperable, but nothing here could check a signature, so an ECDSA CSR
+   --  had to be refused rather than examined.
+   procedure Check_ECDSA_P384_Verify is
+      Message : constant Ada.Streams.Stream_Element_Array :=
+        Bytes_From_String ("cryptolib ecdsa verification");
+      Other   : constant Ada.Streams.Stream_Element_Array :=
+        Bytes_From_String ("cryptolib ecdsa verificatiom");
+      Scalar  : Ada.Streams.Stream_Element_Array (1 .. 48);
+      Point   : Ada.Streams.Stream_Element_Array (1 .. 97);
+      R       : Ada.Streams.Stream_Element_Array (1 .. 48);
+      S       : Ada.Streams.Stream_Element_Array (1 .. 48);
+      Source  : CryptoLib.Random.Random_Source;
+      Status  : CryptoLib.Errors.Status;
+   begin
+      CryptoLib.Random.Initialize_Deterministic (Source, [16#11#, 16#22#]);
+      Status :=
+        CryptoLib.ECDSA.Generate_Nistp384_Keypair (Source, Scalar, Point);
+      Check (Status = CryptoLib.Errors.Ok, "ECDSA P-384 verify keypair");
+
+      Status := CryptoLib.ECDSA.Sign_Nistp384_Raw (Scalar, Message, R, S);
+      Check (Status = CryptoLib.Errors.Ok, "ECDSA P-384 verify signing");
+
+      Status := CryptoLib.ECDSA.Verify_Nistp384_Raw (Point, Message, R, S);
+      Check (Status = CryptoLib.Errors.Ok, "ECDSA P-384 accepts its own signature");
+
+      Status := CryptoLib.ECDSA.Verify_Nistp384_Raw (Point, Other, R, S);
+      Check
+        (Status /= CryptoLib.Errors.Ok,
+         "ECDSA P-384 rejects a signature over another message");
+
+      declare
+         Tampered : Ada.Streams.Stream_Element_Array := R;
+      begin
+         Tampered (Tampered'Last) := Tampered (Tampered'Last) xor 1;
+         Status :=
+           CryptoLib.ECDSA.Verify_Nistp384_Raw (Point, Message, Tampered, S);
+         Check
+           (Status /= CryptoLib.Errors.Ok,
+            "ECDSA P-384 rejects a tampered r");
+      end;
+
+      declare
+         Zero_R : constant Ada.Streams.Stream_Element_Array (1 .. 48) :=
+           [others => 0];
+      begin
+         Status :=
+           CryptoLib.ECDSA.Verify_Nistp384_Raw (Point, Message, Zero_R, S);
+         Check
+           (Status /= CryptoLib.Errors.Ok,
+            "ECDSA P-384 rejects r outside [1, n-1]");
+      end;
+   end Check_ECDSA_P384_Verify;
+
    procedure Check_ECDSA_P384_P521_Signing is
       Message : constant Ada.Streams.Stream_Element_Array :=
         Bytes_From_String ("cryptolib ecdsa signing");
@@ -831,6 +885,7 @@ begin
    Check_ECDSA_P384_P521_Signing;
    Check_ECDSA_P384_Public_Key;
    Check_P384_Local_CA;
+   Check_ECDSA_P384_Verify;
    Check_Certificates;
    Check_XXH3;
    Check_Adler32;

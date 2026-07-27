@@ -224,14 +224,18 @@ package body CryptoLib.ECDSA is
    end Point_Add;
 
    --  Fixed-length double-and-add-always ladder with branchless point select.
-   function Scalar_Mult (Cv : Curve_Data; K : Element) return Point is
+   --  The ladder over any base, not only the generator: verification needs
+   --  u1*G + u2*Q, and Q is whatever public key is being checked.
+   function Scalar_Mult_Base
+     (Cv : Curve_Data; K : Element; Base : Point) return Point
+   is
       R : Point := (X => Zero, Y => One_Mont (Cv.Field), Z => Zero);
    begin
       for Bit in reverse 0 .. Cv.Q_Bits - 1 loop
          R := Point_Add (Cv.Field, Cv.A3_Mont, Cv.B3_Mont, R, R);
          declare
             Sum  : constant Point :=
-              Point_Add (Cv.Field, Cv.A3_Mont, Cv.B3_Mont, R, Cv.Base);
+              Point_Add (Cv.Field, Cv.A3_Mont, Cv.B3_Mont, R, Base);
             Bit_Val : constant Word :=
               Shift_Right (K (Bit / 32), Bit mod 32) and 1;
             Mask : constant Word := Word (0) - Bit_Val;
@@ -242,7 +246,10 @@ package body CryptoLib.ECDSA is
          end;
       end loop;
       return R;
-   end Scalar_Mult;
+   end Scalar_Mult_Base;
+
+   function Scalar_Mult (Cv : Curve_Data; K : Element) return Point is
+     (Scalar_Mult_Base (Cv, K, Cv.Base));
 
    --  The low L bytes of a right-aligned modulus slot.
    function Low (S : Stream_Element_Array; L : Natural) return Stream_Element_Array
@@ -645,5 +652,99 @@ package body CryptoLib.ECDSA is
       Private_Scalar := [others => 0];
       return CryptoLib.Errors.Internal_Error;
    end Generate_Nistp384_Keypair;
+
+   --  Verification is public arithmetic: r and s are on the wire and the key is
+   --  published, so nothing here is secret and the constant-time discipline the
+   --  signer needs does not apply. It reuses the same primitives regardless.
+   function Verify_Nistp384_Raw
+     (Public_Point  : Stream_Element_Array;
+      Message_Bytes : Stream_Element_Array;
+      R_Bytes       : Stream_Element_Array;
+      S_Bytes       : Stream_Element_Array) return Status
+   is
+      Cv     : constant Curve_Data := P384_Curve;
+      Length : constant Stream_Element_Offset :=
+        Stream_Element_Offset (Cv.Byte_Length);
+      P_Len  : constant Stream_Element_Offset :=
+        Stream_Element_Offset (Cv.P_Len);
+
+      function In_Range (Value : Element) return Boolean is
+        (Is_Zero_Mask (Value) = 0
+         and then Geq_Mask (Value, Modulus (Cv.Order)) = 0);
+
+      R_Value, S_Value : Element;
+      Q                : Point;
+   begin
+      if Public_Point'Length /= 2 * P_Len + 1
+        or else R_Bytes'Length /= Length
+        or else S_Bytes'Length /= Length
+      then
+         return Handshake_Failed;
+      end if;
+
+      --  Only the uncompressed form; a compressed point would have to be
+      --  decompressed, and nothing here emits one.
+      if Public_Point (Public_Point'First) /= 16#04# then
+         return Authentication_Failed;
+      end if;
+
+      R_Value := From_Bytes (Cv.Order, R_Bytes);
+      S_Value := From_Bytes (Cv.Order, S_Bytes);
+      if not In_Range (R_Value) or else not In_Range (S_Value) then
+         return Authentication_Failed;
+      end if;
+
+      Q :=
+        (X => To_Mont
+                (Cv.Field,
+                 From_Bytes
+                   (Cv.Field,
+                    Public_Point (Public_Point'First + 1
+                                  .. Public_Point'First + P_Len))),
+         Y => To_Mont
+                (Cv.Field,
+                 From_Bytes
+                   (Cv.Field,
+                    Public_Point (Public_Point'First + P_Len + 1
+                                  .. Public_Point'Last))),
+         Z => One_Mont (Cv.Field));
+
+      declare
+         Hash    : constant Stream_Element_Array :=
+           Hash_Data (Cv, Message_Bytes);
+         H_Value : constant Element :=
+           Add (Cv.Order, From_Bytes (Cv.Order, Hash), Zero);
+         S_Inv   : constant Element :=
+           Inv_Mod (S_Value, Low (Cv.N_Minus_2, Cv.Byte_Length),
+                    Low (Cv.N_Bytes, Cv.Byte_Length), Cv.Order);
+         U1      : constant Element := Mul_Mod (Cv.Order, H_Value, S_Inv);
+         U2      : constant Element := Mul_Mod (Cv.Order, R_Value, S_Inv);
+         Sum     : constant Point :=
+           Point_Add
+             (Cv.Field, Cv.A3_Mont, Cv.B3_Mont,
+              Scalar_Mult (Cv, U1),
+              Scalar_Mult_Base (Cv, U2, Q));
+         Zn      : constant Element := From_Mont (Cv.Field, Sum.Z);
+         Zi      : Element;
+         X_Aff   : Element;
+      begin
+         if Is_Zero_Mask (Zn) /= 0 then
+            return Authentication_Failed;      --  the point at infinity
+         end if;
+
+         Zi := Inv_Mod (Zn, Low (Cv.P_Minus_2, Cv.P_Len),
+                        Low (Cv.P_Bytes, Cv.P_Len), Cv.Field);
+         X_Aff := Mont_Mul (Cv.Field, Sum.X, Zi);
+
+         if Equal_Mask
+              (Add (Cv.Order,
+                    From_Bytes (Cv.Order, To_Bytes (Cv.Field, X_Aff)), Zero),
+               R_Value) = All_Ones
+         then
+            return CryptoLib.Errors.Ok;
+         end if;
+         return Authentication_Failed;
+      end;
+   end Verify_Nistp384_Raw;
 
 end CryptoLib.ECDSA;

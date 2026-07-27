@@ -1066,6 +1066,37 @@ package body CryptoLib.Certificates is
       return False;
    end Extract_Common_Name;
 
+   --  A DER INTEGER carries no leading zeros and may have gained a sign byte;
+   --  the verifier wants a fixed-width big-endian value.
+   function Fixed_Width
+     (Value : String;
+      Out_Bytes : out Ada.Streams.Stream_Element_Array) return Boolean
+   is
+      First : Natural := Value'First;
+   begin
+      Out_Bytes := [others => 0];
+      while First <= Value'Last and then Value (First) = Character'Val (0) loop
+         First := First + 1;
+      end loop;
+      if First > Value'Last
+        or else Natural (Value'Last - First + 1) > Natural (Out_Bytes'Length)
+      then
+         return False;
+      end if;
+
+      declare
+         Width : constant Natural := Value'Last - First + 1;
+         Start : constant Ada.Streams.Stream_Element_Offset :=
+           Out_Bytes'Last - Ada.Streams.Stream_Element_Offset (Width) + 1;
+      begin
+         for I in 0 .. Width - 1 loop
+            Out_Bytes (Start + Ada.Streams.Stream_Element_Offset (I)) :=
+              Ada.Streams.Stream_Element (Character'Pos (Value (First + I)));
+         end loop;
+      end;
+      return True;
+   end Fixed_Width;
+
    function Extract_CSR
      (CSR_PEM    : String;
       Subject_CN : out Unbounded_String;
@@ -1085,13 +1116,26 @@ package body CryptoLib.Certificates is
       OID_Ed    : constant String :=
         Byte (16#06#) & Byte (16#03#) & Byte (16#2B#) & Byte (16#65#)
         & Byte (16#70#);
+      OID_P384  : constant String :=
+        Byte (16#06#) & Byte (16#05#) & Byte (16#2B#) & Byte (16#81#)
+        & Byte (16#04#) & Byte (16#00#) & Byte (16#22#);
+      OID_ECDSA_SHA384 : constant String :=
+        Byte (16#06#) & Byte (16#08#) & Byte (16#2A#) & Byte (16#86#)
+        & Byte (16#48#) & Byte (16#CE#) & Byte (16#3D#) & Byte (16#04#)
+        & Byte (16#03#) & Byte (16#03#);
+      Is_EC     : Boolean := False;
    begin
       Subject_CN := Null_Unbounded_String;
       Public_Key := [others => 0];
 
-      if DER = "" or else Public_Key'Length /= 32 then
+      --  The caller decides which shape it can take: a 32-byte buffer asks for
+      --  an Ed25519 request, a 97-byte one for P-384.
+      if DER = ""
+        or else (Public_Key'Length /= 32 and then Public_Key'Length /= 97)
+      then
          return False;
       end if;
+      Is_EC := Public_Key'Length = 97;
 
       if not Read_TLV (DER, Pos, 16#30#, Outer) then
          return False;
@@ -1107,7 +1151,13 @@ package body CryptoLib.Certificates is
          if not Read_TLV (Outer_Text, Outer_Pos, 16#30#, CSR_Alg) then
             return False;
          end if;
-         if not Contains (To_String (CSR_Alg), OID_Ed) then
+         --  The request's own signature algorithm, which is not the algorithm
+         --  of the key it carries -- though for these two shapes they agree.
+         if Is_EC then
+            if not Contains (To_String (CSR_Alg), OID_ECDSA_SHA384) then
+               return False;
+            end if;
+         elsif not Contains (To_String (CSR_Alg), OID_Ed) then
             return False;
          end if;
          if not Read_TLV (Outer_Text, Outer_Pos, 16#03#, CSR_Sig) then
@@ -1140,7 +1190,11 @@ package body CryptoLib.Certificates is
          if not Read_TLV (SPKI_Text, SPKI_Pos, 16#30#, Alg) then
             return False;
          end if;
-         if not Contains (To_String (Alg), OID_Ed) then
+         if Is_EC then
+            if not Contains (To_String (Alg), OID_P384) then
+               return False;
+            end if;
+         elsif not Contains (To_String (Alg), OID_Ed) then
             return False;
          end if;
          if not Read_TLV (SPKI_Text, SPKI_Pos, 16#03#, Bits_U) then
@@ -1151,7 +1205,7 @@ package body CryptoLib.Certificates is
       declare
          Bits_Text : constant String := To_String (Bits_U);
       begin
-         if Bits_Text'Length /= 33
+         if Bits_Text'Length /= Natural (Public_Key'Length) + 1
            or else Character'Pos (Bits_Text (Bits_Text'First)) /= 0
          then
             return False;
@@ -1168,28 +1222,73 @@ package body CryptoLib.Certificates is
 
       declare
          Signature_Text : constant String := To_String (CSR_Sig);
-         Signature      : Ada.Streams.Stream_Element_Array (1 .. 64);
       begin
-         if Signature_Text'Length /= 65
+         if Signature_Text'Length < 2
            or else Character'Pos (Signature_Text (Signature_Text'First)) /= 0
          then
             return False;
          end if;
 
-         for I in Signature'Range loop
-            Signature (I) :=
-              Ada.Streams.Stream_Element
-                (Character'Pos
-                   (Signature_Text
-                      (Signature_Text'First
-                       + Natural (I - Signature'First) + 1)));
-         end loop;
-
-         if CryptoLib.Ed25519.Verify
-           (Public_Key, Signature, To_Bytes (Seq (To_String (CRI))))
-           /= CryptoLib.Errors.Ok
-         then
-            return False;
+         if Is_EC then
+            --  ECDSA signs as two integers of their own lengths, so they are
+            --  read back and re-padded to the fixed width the verifier wants.
+            declare
+               Body_Text : constant String :=
+                 Signature_Text (Signature_Text'First + 1 .. Signature_Text'Last);
+               Pos    : Natural := Body_Text'First;
+               Pair   : Unbounded_String;
+               R_Int  : Unbounded_String;
+               S_Int  : Unbounded_String;
+               R      : Ada.Streams.Stream_Element_Array (1 .. 48);
+               S2     : Ada.Streams.Stream_Element_Array (1 .. 48);
+            begin
+               if not Read_TLV (Body_Text, Pos, 16#30#, Pair) then
+                  return False;
+               end if;
+               declare
+                  Pair_Text : constant String := To_String (Pair);
+                  Pair_Pos  : Natural := Pair_Text'First;
+               begin
+                  if not Read_TLV (Pair_Text, Pair_Pos, 16#02#, R_Int)
+                    or else not Read_TLV (Pair_Text, Pair_Pos, 16#02#, S_Int)
+                  then
+                     return False;
+                  end if;
+               end;
+               if not Fixed_Width (To_String (R_Int), R)
+                 or else not Fixed_Width (To_String (S_Int), S2)
+               then
+                  return False;
+               end if;
+               if CryptoLib.ECDSA.Verify_Nistp384_Raw
+                 (Public_Key, To_Bytes (Seq (To_String (CRI))), R, S2)
+                 /= CryptoLib.Errors.Ok
+               then
+                  return False;
+               end if;
+            end;
+         else
+            declare
+               Signature : Ada.Streams.Stream_Element_Array (1 .. 64);
+            begin
+               if Signature_Text'Length /= 65 then
+                  return False;
+               end if;
+               for I in Signature'Range loop
+                  Signature (I) :=
+                    Ada.Streams.Stream_Element
+                      (Character'Pos
+                         (Signature_Text
+                            (Signature_Text'First
+                             + Natural (I - Signature'First) + 1)));
+               end loop;
+               if CryptoLib.Ed25519.Verify
+                 (Public_Key, Signature, To_Bytes (Seq (To_String (CRI))))
+                 /= CryptoLib.Errors.Ok
+               then
+                  return False;
+               end if;
+            end;
          end if;
       end;
       return True;
@@ -1458,6 +1557,33 @@ package body CryptoLib.Certificates is
             return Internal_Error;
          end if;
       end if;
+
+      --  Which kind of request this is shows in the request itself, so try the
+      --  EC shape first and fall back rather than making the caller declare it.
+      declare
+         EC_Public : Ada.Streams.Stream_Element_Array (1 .. 97);
+      begin
+         if Extract_CSR (CSR_PEM, Subject, EC_Public) then
+            Cert :=
+              To_Unbounded_String
+                (Sign_Certificate
+                   (Serial      => 20,
+                    Issuer_CN   => "devcert-local-development-ca",
+                    Subject_CN  => To_String (Subject),
+                    Subject_Key => EC_Public,
+                    Sign_Seed   => CA_Seed,
+                    Sign_Public => CA_Public,
+                    Profile     => Server_Profile,
+                    Names       => [1 => Subject],
+                    Algorithm   => Algorithm,
+                    Subject_Algorithm => P384_Key));
+            if Length (Cert) = 0 then
+               return Internal_Error;
+            end if;
+            Certificate_PEM := PEM ("CERTIFICATE", To_String (Cert));
+            return Ok;
+         end if;
+      end;
 
       if not Extract_CSR (CSR_PEM, Subject, CSR_Public) then
          return Invalid_Input;

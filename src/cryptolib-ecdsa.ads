@@ -70,4 +70,19 @@ package CryptoLib.ECDSA is
       Public_Point   : out Ada.Streams.Stream_Element_Array)
       return CryptoLib.Errors.Status;
 
+   --  Verify a P-384 signature against a public point.
+   --  @param Public_Point 97 bytes: 16#04#, then X and Y as 48 bytes each
+   --  @param Message_Bytes the signed message (hashed internally with SHA-384)
+   --  @param R_Bytes the signature component r as 48 big-endian bytes
+   --  @param S_Bytes the signature component s as 48 big-endian bytes
+   --  @return Ok when the signature is that key's over that message,
+   --          Authentication_Failed when it is not, Handshake_Failed on a
+   --          wrong-length input
+   function Verify_Nistp384_Raw
+     (Public_Point  : Ada.Streams.Stream_Element_Array;
+      Message_Bytes : Ada.Streams.Stream_Element_Array;
+      R_Bytes       : Ada.Streams.Stream_Element_Array;
+      S_Bytes       : Ada.Streams.Stream_Element_Array)
+      return CryptoLib.Errors.Status;
+
 end CryptoLib.ECDSA;
