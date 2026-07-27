@@ -677,6 +677,121 @@ procedure Tests is
          "ECDSA P-384 keypair public point matches its own scalar");
    end Check_ECDSA_P384_Public_Key;
 
+   --  The certificate NSS refused was refused for its key: certutil would not
+   --  import an Ed25519 certificate at all, so a CA built that way is trusted
+   --  by no browser. This checks the P-384 path emits what a reader expects --
+   --  the curve OID in the key, and the ecdsa-with-SHA384 OID as the signature
+   --  algorithm -- rather than only that some bytes came back.
+   --  Enough base64 to look inside a PEM: the assertions below are about DER
+   --  bytes, and armoured text does not show them.
+   function Decode_PEM_Body (Text : String) return String is
+      Alphabet : constant String :=
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+      Result   : Ada.Strings.Unbounded.Unbounded_String;
+      Bits     : Natural := 0;
+      Held     : Natural := 0;
+      In_Body  : Boolean := False;
+      Line_End : Natural;
+      First    : Natural := Text'First;
+   begin
+      while First <= Text'Last loop
+         Line_End := First;
+         while Line_End <= Text'Last and then Text (Line_End) /= ASCII.LF loop
+            Line_End := Line_End + 1;
+         end loop;
+
+         declare
+            Line : constant String := Text (First .. Natural'Min (Line_End - 1, Text'Last));
+         begin
+            if Line'Length > 5 and then Line (Line'First .. Line'First + 4) = "-----" then
+               In_Body := not In_Body;
+            elsif In_Body then
+               for C of Line loop
+                  declare
+                     Position : Natural := 0;
+                  begin
+                     for I in Alphabet'Range loop
+                        if Alphabet (I) = C then
+                           Position := I - Alphabet'First;
+                           exit;
+                        end if;
+                     end loop;
+                     if C /= '=' and then (Position > 0 or else C = 'A') then
+                        Held := Held * 64 + Position;
+                        Bits := Bits + 6;
+                        if Bits >= 8 then
+                           Bits := Bits - 8;
+                           Ada.Strings.Unbounded.Append
+                             (Result, Character'Val ((Held / (2 ** Bits)) mod 256));
+                           Held := Held mod (2 ** Bits);
+                        end if;
+                     end if;
+                  end;
+               end loop;
+            end if;
+         end;
+         First := Line_End + 1;
+      end loop;
+      return Ada.Strings.Unbounded.To_String (Result);
+   end Decode_PEM_Body;
+
+   function Index_Of (Haystack : String; Needle : String) return Natural is
+   begin
+      if Needle'Length = 0 or else Haystack'Length < Needle'Length then
+         return 0;
+      end if;
+      for I in Haystack'First .. Haystack'Last - Needle'Length + 1 loop
+         if Haystack (I .. I + Needle'Length - 1) = Needle then
+            return I;
+         end if;
+      end loop;
+      return 0;
+   end Index_Of;
+
+   procedure Check_P384_Local_CA is
+      Cert, Key : Ada.Strings.Unbounded.Unbounded_String;
+      Status    : CryptoLib.Certificates.Certificate_Status;
+
+      Secp384r1 : constant String :=
+        Character'Val (16#2B#) & Character'Val (16#81#) & Character'Val (16#04#)
+        & Character'Val (16#00#) & Character'Val (16#22#);
+      Ecdsa_SHA384 : constant String :=
+        Character'Val (16#2A#) & Character'Val (16#86#) & Character'Val (16#48#)
+        & Character'Val (16#CE#) & Character'Val (16#3D#) & Character'Val (16#04#)
+        & Character'Val (16#03#) & Character'Val (16#03#);
+
+   begin
+      Status :=
+        CryptoLib.Certificates.Create_Local_CA
+          ("cryptolib-p384-ca", Cert, Key, CryptoLib.Certificates.P384_Key);
+      Check (Status = CryptoLib.Certificates.Ok, "P-384 local CA status");
+      Check
+        (Ada.Strings.Unbounded.Length (Cert) > 0
+         and then Ada.Strings.Unbounded.Length (Key) > 0,
+         "P-384 local CA emits both PEMs");
+
+      declare
+         DER : constant String :=
+           Decode_PEM_Body (Ada.Strings.Unbounded.To_String (Cert));
+      begin
+         Check
+           (Index_Of (DER, Secp384r1) > 0,
+            "P-384 certificate names secp384r1");
+         Check
+           (Index_Of (DER, Ecdsa_SHA384) > 0,
+            "P-384 certificate is signed with ecdsa-with-SHA384");
+      end;
+
+      declare
+         DER : constant String :=
+           Decode_PEM_Body (Ada.Strings.Unbounded.To_String (Key));
+      begin
+         Check
+           (Index_Of (DER, Secp384r1) > 0,
+            "P-384 private key names secp384r1");
+      end;
+   end Check_P384_Local_CA;
+
    procedure Check_ECDSA_P384_P521_Signing is
       Message : constant Ada.Streams.Stream_Element_Array :=
         Bytes_From_String ("cryptolib ecdsa signing");
@@ -715,6 +830,7 @@ begin
    Check_AES_CBC_Raw_Rejects_Bad_Sizes;
    Check_ECDSA_P384_P521_Signing;
    Check_ECDSA_P384_Public_Key;
+   Check_P384_Local_CA;
    Check_Certificates;
    Check_XXH3;
    Check_Adler32;

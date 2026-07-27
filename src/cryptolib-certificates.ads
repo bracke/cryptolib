@@ -11,12 +11,22 @@ package CryptoLib.Certificates is
 
    type Subject_Alternative_Name_List is array (Positive range <>) of Unbounded_String;
 
+   --  Which key a certificate carries.
+   --
+   --  Ed25519 is compact and fast, and no browser will accept it: NSS refuses
+   --  even to import such a certificate, so a CA built this way is trusted by
+   --  nothing that speaks TLS to a person. P-384 is what a certificate meant
+   --  for a browser has to be. The default stays Ed25519 so existing callers
+   --  keep what they had; a caller that wants to be trusted asks for P-384.
+   type Key_Algorithm is (Ed25519_Key, P384_Key);
+
    function Status_Image (Status : Certificate_Status) return String;
 
    function Create_Local_CA
      (Common_Name     : String;
       Certificate_PEM : out Unbounded_String;
-      Private_Key_PEM : out Unbounded_String) return Certificate_Status;
+      Private_Key_PEM : out Unbounded_String;
+      Algorithm       : Key_Algorithm := Ed25519_Key) return Certificate_Status;
 
    function Issue_Server_Certificate
      (CA_Certificate_PEM : String;

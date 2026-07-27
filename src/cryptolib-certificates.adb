@@ -2,6 +2,7 @@ with Ada.Streams;
 with Ada.Strings.Fixed;
 
 with CryptoLib.Ciphers;
+with CryptoLib.ECDSA;
 with CryptoLib.Ed25519;
 with CryptoLib.Errors;
 with CryptoLib.Hashes;
@@ -209,10 +210,63 @@ package body CryptoLib.Certificates is
          & Byte (16#2A#));
    end OID_AES_256_CBC;
 
-   function Algorithm_Identifier return String is
+   --  1.3.101.112 id-Ed25519
+   function Ed25519_Algorithm return String is
    begin
       return Seq (OID (Byte (16#2B#) & Byte (16#65#) & Byte (16#70#)));
+   end Ed25519_Algorithm;
+
+   --  1.2.840.10045.2.1 id-ecPublicKey with 1.3.132.0.34 secp384r1: an EC key
+   --  states its curve, where an Ed25519 key is only ever one thing.
+   function P384_Algorithm return String is
+   begin
+      return Seq
+        (OID (Byte (16#2A#) & Byte (16#86#) & Byte (16#48#) & Byte (16#CE#)
+              & Byte (16#3D#) & Byte (16#02#) & Byte (16#01#))
+         & OID (Byte (16#2B#) & Byte (16#81#) & Byte (16#04#) & Byte (16#00#)
+                & Byte (16#22#)));
+   end P384_Algorithm;
+
+   --  1.2.840.10045.4.3.3 ecdsa-with-SHA384. The signature algorithm is its
+   --  own identifier here: Ed25519 names the hash inside the scheme, ECDSA
+   --  pairs a curve with a digest and has to say which.
+   function P384_Signature_Algorithm return String is
+   begin
+      return Seq
+        (OID (Byte (16#2A#) & Byte (16#86#) & Byte (16#48#) & Byte (16#CE#)
+              & Byte (16#3D#) & Byte (16#04#) & Byte (16#03#) & Byte (16#03#)));
+   end P384_Signature_Algorithm;
+
+   function Algorithm_Identifier
+     (Algorithm : Key_Algorithm := Ed25519_Key) return String is
+   begin
+      return (case Algorithm is
+                 when Ed25519_Key => Ed25519_Algorithm,
+                 when P384_Key    => P384_Algorithm);
    end Algorithm_Identifier;
+
+   function Signature_Algorithm (Algorithm : Key_Algorithm) return String is
+   begin
+      return (case Algorithm is
+                 when Ed25519_Key => Ed25519_Algorithm,
+                 when P384_Key    => P384_Signature_Algorithm);
+   end Signature_Algorithm;
+
+   --  DER INTEGER from a big-endian magnitude: leading zeros are not part of
+   --  the value, and a top bit that is set needs a zero byte in front or the
+   --  integer reads as negative.
+   function Integer_From_Bytes (Value : String) return String is
+      First : Natural := Value'First;
+   begin
+      while First < Value'Last and then Value (First) = Character'Val (0) loop
+         First := First + 1;
+      end loop;
+
+      if Character'Pos (Value (First)) >= 16#80# then
+         return TLV (16#02#, Byte (0) & Value (First .. Value'Last));
+      end if;
+      return TLV (16#02#, Value (First .. Value'Last));
+   end Integer_From_Bytes;
 
    function Name_DER (Common_Name : String) return String is
    begin
@@ -228,9 +282,12 @@ package body CryptoLib.Certificates is
       return Seq (UTC ("260101000000Z") & UTC ("360101000000Z"));
    end Validity_DER;
 
-   function SPKI_DER (Public_Key : Ada.Streams.Stream_Element_Array) return String is
+   function SPKI_DER
+     (Public_Key : Ada.Streams.Stream_Element_Array;
+      Algorithm  : Key_Algorithm := Ed25519_Key) return String is
    begin
-      return Seq (Algorithm_Identifier & Bits (To_String (Public_Key)));
+      return Seq
+        (Algorithm_Identifier (Algorithm) & Bits (To_String (Public_Key)));
    end SPKI_DER;
 
    function Private_Key_DER
@@ -242,6 +299,23 @@ package body CryptoLib.Certificates is
          & Algorithm_Identifier
          & Octets (Octets (To_String (Seed))));
    end Private_Key_DER;
+
+   --  PKCS#8 around an RFC 5915 ECPrivateKey. The inner structure carries the
+   --  public point as well: a reader that has only the scalar would otherwise
+   --  have to multiply to learn the key it belongs to.
+   function P384_Private_Key_DER
+     (Scalar : Ada.Streams.Stream_Element_Array;
+      Public : Ada.Streams.Stream_Element_Array) return String
+   is
+      Inner : constant String :=
+        Seq
+          (Integer_DER (1)
+           & Octets (To_String (Scalar))
+           & Explicit (1, Bits (To_String (Public))));
+   begin
+      return Seq
+        (Integer_DER (0) & P384_Algorithm & Octets (Inner));
+   end P384_Private_Key_DER;
 
    function BMP_Password (Password : String) return Ada.Streams.Stream_Element_Array is
       Result : Ada.Streams.Stream_Element_Array
@@ -783,26 +857,57 @@ package body CryptoLib.Certificates is
       Sign_Seed   : Ada.Streams.Stream_Element_Array;
       Sign_Public : Ada.Streams.Stream_Element_Array;
       Profile     : Certificate_Profile;
-      Names       : Subject_Alternative_Name_List) return String
+      Names       : Subject_Alternative_Name_List;
+      Algorithm   : Key_Algorithm := Ed25519_Key) return String
    is
       TBS : constant String :=
         Seq
           (Explicit (0, Integer_DER (2))
            & Integer_DER (Serial)
-           & Algorithm_Identifier
+           & Signature_Algorithm (Algorithm)
            & Name_DER (Issuer_CN)
            & Validity_DER
            & Name_DER (Subject_CN)
-           & SPKI_DER (Subject_Key)
+           & SPKI_DER (Subject_Key, Algorithm)
            & Extensions_DER (Profile, Names));
-      Sig : Ada.Streams.Stream_Element_Array (1 .. 64);
-      St  : constant CryptoLib.Errors.Status :=
-        CryptoLib.Ed25519.Sign (Sign_Seed, Sign_Public, To_Bytes (TBS), Sig);
    begin
-      if St /= CryptoLib.Errors.Ok then
-         return "";
-      end if;
-      return Seq (TBS & Algorithm_Identifier & Bits (To_String (Sig)));
+      case Algorithm is
+         when Ed25519_Key =>
+            declare
+               Sig : Ada.Streams.Stream_Element_Array (1 .. 64);
+               St  : constant CryptoLib.Errors.Status :=
+                 CryptoLib.Ed25519.Sign
+                   (Sign_Seed, Sign_Public, To_Bytes (TBS), Sig);
+            begin
+               if St /= CryptoLib.Errors.Ok then
+                  return "";
+               end if;
+               return Seq
+                 (TBS & Signature_Algorithm (Algorithm)
+                  & Bits (To_String (Sig)));
+            end;
+
+         when P384_Key =>
+            --  ECDSA signs as two integers, not one fixed block, and DER wants
+            --  each of them minimally encoded.
+            declare
+               R  : Ada.Streams.Stream_Element_Array (1 .. 48);
+               S2 : Ada.Streams.Stream_Element_Array (1 .. 48);
+               St : constant CryptoLib.Errors.Status :=
+                 CryptoLib.ECDSA.Sign_Nistp384_Raw
+                   (Sign_Seed, To_Bytes (TBS), R, S2);
+            begin
+               if St /= CryptoLib.Errors.Ok then
+                  return "";
+               end if;
+               return Seq
+                 (TBS & Signature_Algorithm (Algorithm)
+                  & Bits
+                      (Seq
+                         (Integer_From_Bytes (To_String (R))
+                          & Integer_From_Bytes (To_String (S2)))));
+            end;
+      end case;
    end Sign_Certificate;
 
    function Read_Length
@@ -1049,12 +1154,20 @@ package body CryptoLib.Certificates is
    function Create_Local_CA
      (Common_Name     : String;
       Certificate_PEM : out Unbounded_String;
-      Private_Key_PEM : out Unbounded_String) return Certificate_Status
+      Private_Key_PEM : out Unbounded_String;
+      Algorithm       : Key_Algorithm := Ed25519_Key) return Certificate_Status
    is
-      Rng    : CryptoLib.Random.Random_Source;
-      Seed   : Ada.Streams.Stream_Element_Array (1 .. 32);
-      Public : Ada.Streams.Stream_Element_Array (1 .. 32);
-      Cert   : Unbounded_String;
+      Rng  : CryptoLib.Random.Random_Source;
+      Cert : Unbounded_String;
+
+      Seed_Length   : constant := 32;
+      Scalar_Length : constant := 48;
+      Point_Length  : constant := 97;
+
+      Seed   : Ada.Streams.Stream_Element_Array
+        (1 .. (if Algorithm = Ed25519_Key then Seed_Length else Scalar_Length));
+      Public : Ada.Streams.Stream_Element_Array
+        (1 .. (if Algorithm = Ed25519_Key then Seed_Length else Point_Length));
    begin
       Certificate_PEM := Null_Unbounded_String;
       Private_Key_PEM := Null_Unbounded_String;
@@ -1064,9 +1177,20 @@ package body CryptoLib.Certificates is
       end if;
 
       CryptoLib.Random.Initialize_Production (Rng);
-      if CryptoLib.Ed25519.Generate_Keypair (Rng, Seed, Public) /= CryptoLib.Errors.Ok then
-         return Internal_Error;
-      end if;
+      case Algorithm is
+         when Ed25519_Key =>
+            if CryptoLib.Ed25519.Generate_Keypair (Rng, Seed, Public)
+              /= CryptoLib.Errors.Ok
+            then
+               return Internal_Error;
+            end if;
+         when P384_Key =>
+            if CryptoLib.ECDSA.Generate_Nistp384_Keypair (Rng, Seed, Public)
+              /= CryptoLib.Errors.Ok
+            then
+               return Internal_Error;
+            end if;
+      end case;
 
       Cert :=
         To_Unbounded_String
@@ -1078,13 +1202,18 @@ package body CryptoLib.Certificates is
               Sign_Seed   => Seed,
               Sign_Public => Public,
               Profile     => CA_Profile,
-              Names       => [1 => To_Unbounded_String (Common_Name)]));
+              Names       => [1 => To_Unbounded_String (Common_Name)],
+              Algorithm   => Algorithm));
       if Length (Cert) = 0 then
          return Internal_Error;
       end if;
 
       Certificate_PEM := PEM ("CERTIFICATE", To_String (Cert));
-      Private_Key_PEM := PEM ("PRIVATE KEY", Private_Key_DER (Seed));
+      Private_Key_PEM :=
+        PEM ("PRIVATE KEY",
+             (case Algorithm is
+                 when Ed25519_Key => Private_Key_DER (Seed),
+                 when P384_Key    => P384_Private_Key_DER (Seed, Public)));
       return Ok;
    end Create_Local_CA;
 
