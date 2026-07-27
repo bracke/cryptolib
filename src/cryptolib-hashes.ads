@@ -27,8 +27,10 @@ package CryptoLib.Hashes is
    subtype XXH3_128_Digest_Index is Positive range 1 .. 16;
    type XXH3_128_Digest is array (XXH3_128_Digest_Index) of Ada.Streams.Stream_Element;
 
+   type MD5_Context is private;
    type SHA1_Context is private;
    type SHA256_Context is private;
+   type SHA384_Context is private;
    type SHA512_Context is private;
 
    --  Compute the MD5 digest of Data in one shot.
@@ -36,6 +38,27 @@ package CryptoLib.Hashes is
    --  @return the 16-byte MD5 digest
    function MD5
      (Data : Ada.Streams.Stream_Element_Array)
+      return MD5_Digest;
+
+   --  Reset an MD5 context to the initial state so it can accept Update
+   --  calls followed by a single Finalize.
+   --  @param Context_Item the MD5 streaming context to initialize
+   procedure Initialize_MD5 (Context_Item : out MD5_Context);
+
+   --  Absorb a further chunk of message bytes into an MD5 context; may be
+   --  called any number of times between Initialize and Finalize.
+   --  @param Context_Item the MD5 streaming context to update in place
+   --  @param Data         the next chunk of message bytes to hash
+   procedure Update
+     (Context_Item : in out MD5_Context;
+      Data         : Ada.Streams.Stream_Element_Array);
+
+   --  Pad and finish an MD5 context, producing the digest of all bytes
+   --  absorbed by prior Update calls.
+   --  @param Context_Item the MD5 streaming context to finalize
+   --  @return the 16-byte MD5 digest
+   function Finalize
+     (Context_Item : in out MD5_Context)
       return MD5_Digest;
 
    --  Compute the SHA-1 digest of Data in one shot.
@@ -101,6 +124,27 @@ package CryptoLib.Hashes is
      (Data : Ada.Streams.Stream_Element_Array)
       return SHA384_Digest;
 
+   --  Reset a SHA-384 context to the initial state so it can accept Update
+   --  calls followed by a single Finalize.
+   --  @param Context_Item the SHA-384 streaming context to initialize
+   procedure Initialize_SHA384 (Context_Item : out SHA384_Context);
+
+   --  Absorb a further chunk of message bytes into a SHA-384 context; may be
+   --  called any number of times between Initialize and Finalize.
+   --  @param Context_Item the SHA-384 streaming context to update in place
+   --  @param Data         the next chunk of message bytes to hash
+   procedure Update
+     (Context_Item : in out SHA384_Context;
+      Data         : Ada.Streams.Stream_Element_Array);
+
+   --  Pad and finish a SHA-384 context, producing the digest of all bytes
+   --  absorbed by prior Update calls.
+   --  @param Context_Item the SHA-384 streaming context to finalize
+   --  @return the 48-byte SHA-384 digest
+   function Finalize
+     (Context_Item : in out SHA384_Context)
+      return SHA384_Digest;
+
    --  Reset a SHA-512 context to the initial state so it can accept Update
    --  calls followed by a single Finalize.
    --  @param Context_Item the SHA-512 streaming context to initialize
@@ -144,6 +188,16 @@ package CryptoLib.Hashes is
       return XXH3_128_Digest;
 
 private
+   type MD5_Block is array (Natural range 0 .. 63) of Interfaces.Unsigned_8;
+   type MD5_State is array (Natural range 0 .. 3) of Interfaces.Unsigned_32;
+
+   type MD5_Context is record
+      State_Data  : MD5_State := [others => 0];
+      Block_Data  : MD5_Block := [others => 0];
+      Block_Used  : Natural range 0 .. 64 := 0;
+      Total_Bytes : Interfaces.Unsigned_64 := 0;
+   end record;
+
    type SHA1_Block is array (Natural range 0 .. 63) of Interfaces.Unsigned_8;
    type SHA1_State is array (Natural range 0 .. 4) of Interfaces.Unsigned_32;
 
@@ -173,5 +227,13 @@ private
       Block_Used       : Natural range 0 .. 128 := 0;
       Total_Bytes_High : Interfaces.Unsigned_64 := 0;
       Total_Bytes_Low  : Interfaces.Unsigned_64 := 0;
+   end record;
+
+   --  SHA-384 is SHA-512 with a different IV and a truncated digest, so it
+   --  reuses the SHA-512 machinery. The wrapper record keeps it a distinct
+   --  type, so Finalize resolves to the truncating SHA-384 overload rather
+   --  than returning a full 64-byte SHA-512 digest.
+   type SHA384_Context is record
+      Inner : SHA512_Context;
    end record;
 end CryptoLib.Hashes;

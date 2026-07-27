@@ -47,6 +47,111 @@ package CryptoLib.Macs is
       Message_Data : Ada.Streams.Stream_Element_Array)
       return HMAC_SHA512_Digest;
 
+   type HMAC_SHA1_Context is private;
+   type HMAC_SHA256_Context is private;
+   type HMAC_SHA384_Context is private;
+   type HMAC_SHA512_Context is private;
+
+   --  Key an HMAC-SHA1 context so it can accept Update calls followed by a
+   --  single Finalize. The key schedule is done once here, so a context may
+   --  authenticate a message far larger than memory.
+   --  @param Context_Item the HMAC-SHA1 streaming context to initialize
+   --  @param Key_Data     the HMAC secret key bytes (any length)
+   procedure Initialize_HMAC_SHA1
+     (Context_Item : out HMAC_SHA1_Context;
+      Key_Data     : Ada.Streams.Stream_Element_Array);
+
+   --  Absorb a further chunk of the message into an HMAC-SHA1 context; may be
+   --  called any number of times between Initialize and Finalize.
+   --  @param Context_Item the HMAC-SHA1 streaming context to update in place
+   --  @param Data         the next chunk of message bytes to authenticate
+   procedure Update
+     (Context_Item : in out HMAC_SHA1_Context;
+      Data         : Ada.Streams.Stream_Element_Array);
+
+   --  Finish an HMAC-SHA1 context, producing the tag over all bytes absorbed
+   --  by prior Update calls.
+   --  @param Context_Item the HMAC-SHA1 streaming context to finalize
+   --  @return the 20-byte HMAC-SHA1 tag
+   function Finalize
+     (Context_Item : in out HMAC_SHA1_Context)
+      return HMAC_SHA1_Digest;
+
+   --  Key an HMAC-SHA256 context so it can accept Update calls followed by a
+   --  single Finalize. The key schedule is done once here, so a context may
+   --  authenticate a message far larger than memory.
+   --  @param Context_Item the HMAC-SHA256 streaming context to initialize
+   --  @param Key_Data     the HMAC secret key bytes (any length)
+   procedure Initialize_HMAC_SHA256
+     (Context_Item : out HMAC_SHA256_Context;
+      Key_Data     : Ada.Streams.Stream_Element_Array);
+
+   --  Absorb a further chunk of the message into an HMAC-SHA256 context; may
+   --  be called any number of times between Initialize and Finalize.
+   --  @param Context_Item the HMAC-SHA256 streaming context to update in place
+   --  @param Data         the next chunk of message bytes to authenticate
+   procedure Update
+     (Context_Item : in out HMAC_SHA256_Context;
+      Data         : Ada.Streams.Stream_Element_Array);
+
+   --  Finish an HMAC-SHA256 context, producing the tag over all bytes absorbed
+   --  by prior Update calls.
+   --  @param Context_Item the HMAC-SHA256 streaming context to finalize
+   --  @return the 32-byte HMAC-SHA256 tag
+   function Finalize
+     (Context_Item : in out HMAC_SHA256_Context)
+      return HMAC_SHA256_Digest;
+
+   --  Key an HMAC-SHA384 context so it can accept Update calls followed by a
+   --  single Finalize. The key schedule is done once here, so a context may
+   --  authenticate a message far larger than memory.
+   --  @param Context_Item the HMAC-SHA384 streaming context to initialize
+   --  @param Key_Data     the HMAC secret key bytes (any length)
+   procedure Initialize_HMAC_SHA384
+     (Context_Item : out HMAC_SHA384_Context;
+      Key_Data     : Ada.Streams.Stream_Element_Array);
+
+   --  Absorb a further chunk of the message into an HMAC-SHA384 context; may
+   --  be called any number of times between Initialize and Finalize.
+   --  @param Context_Item the HMAC-SHA384 streaming context to update in place
+   --  @param Data         the next chunk of message bytes to authenticate
+   procedure Update
+     (Context_Item : in out HMAC_SHA384_Context;
+      Data         : Ada.Streams.Stream_Element_Array);
+
+   --  Finish an HMAC-SHA384 context, producing the tag over all bytes absorbed
+   --  by prior Update calls.
+   --  @param Context_Item the HMAC-SHA384 streaming context to finalize
+   --  @return the 48-byte HMAC-SHA384 tag
+   function Finalize
+     (Context_Item : in out HMAC_SHA384_Context)
+      return HMAC_SHA384_Digest;
+
+   --  Key an HMAC-SHA512 context so it can accept Update calls followed by a
+   --  single Finalize. The key schedule is done once here, so a context may
+   --  authenticate a message far larger than memory.
+   --  @param Context_Item the HMAC-SHA512 streaming context to initialize
+   --  @param Key_Data     the HMAC secret key bytes (any length)
+   procedure Initialize_HMAC_SHA512
+     (Context_Item : out HMAC_SHA512_Context;
+      Key_Data     : Ada.Streams.Stream_Element_Array);
+
+   --  Absorb a further chunk of the message into an HMAC-SHA512 context; may
+   --  be called any number of times between Initialize and Finalize.
+   --  @param Context_Item the HMAC-SHA512 streaming context to update in place
+   --  @param Data         the next chunk of message bytes to authenticate
+   procedure Update
+     (Context_Item : in out HMAC_SHA512_Context;
+      Data         : Ada.Streams.Stream_Element_Array);
+
+   --  Finish an HMAC-SHA512 context, producing the tag over all bytes absorbed
+   --  by prior Update calls.
+   --  @param Context_Item the HMAC-SHA512 streaming context to finalize
+   --  @return the 64-byte HMAC-SHA512 tag
+   function Finalize
+     (Context_Item : in out HMAC_SHA512_Context)
+      return HMAC_SHA512_Digest;
+
    --  Derive a key from a password with PBKDF2 using HMAC-SHA1 as the PRF
    --  (RFC 2898).
    --  @param Password_Data the password/passphrase bytes
@@ -189,4 +294,29 @@ package CryptoLib.Macs is
       Salt_Data        : Ada.Streams.Stream_Element_Array;
       Num_Cycles_Power : Natural)
       return Ada.Streams.Stream_Element_Array;
+
+private
+   --  An HMAC context holds only the two hash states, with the padded key
+   --  blocks already absorbed by Initialize. The pads themselves are wiped
+   --  there rather than retained, because K xor ipad reveals the key
+   --  directly.
+   type HMAC_SHA1_Context is record
+      Inner : CryptoLib.Hashes.SHA1_Context;
+      Outer : CryptoLib.Hashes.SHA1_Context;
+   end record;
+
+   type HMAC_SHA256_Context is record
+      Inner : CryptoLib.Hashes.SHA256_Context;
+      Outer : CryptoLib.Hashes.SHA256_Context;
+   end record;
+
+   type HMAC_SHA384_Context is record
+      Inner : CryptoLib.Hashes.SHA384_Context;
+      Outer : CryptoLib.Hashes.SHA384_Context;
+   end record;
+
+   type HMAC_SHA512_Context is record
+      Inner : CryptoLib.Hashes.SHA512_Context;
+      Outer : CryptoLib.Hashes.SHA512_Context;
+   end record;
 end CryptoLib.Macs;

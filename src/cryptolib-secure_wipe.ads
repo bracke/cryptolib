@@ -8,6 +8,9 @@ with System;
 --  material and secret intermediates before they leave scope; a plain
 --  "X := [others => 0]" on a dead local is removed by the optimizer.
 package CryptoLib.Secure_Wipe is
+   pragma Preelaborate;
+   --  Preelaborable (the body has no elaboration-time code), so preelaborated
+   --  units such as CryptoLib.Macs can scrub secrets with it.
 
    --  Zero Length bytes of memory starting at Address. The stores are volatile
    --  and cannot be optimized away even when the target memory is never read.

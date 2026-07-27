@@ -1,296 +1,319 @@
 with Ada.Streams; use Ada.Streams;
 with Interfaces;
+with CryptoLib.Secure_Wipe;
 
 package body CryptoLib.Macs is
    use type Interfaces.Unsigned_32;
+
+   --  Shared HMAC key schedule (RFC 2104): the effective key is the raw key
+   --  when it fits the hash block, or its digest when it does not. Both pads
+   --  start as the key padded with zeros, so the untouched tail is simply the
+   --  pad byte itself.
+   procedure Fill_HMAC_Pads
+     (Effective_Key : Ada.Streams.Stream_Element_Array;
+      Inner_Pad     : out Ada.Streams.Stream_Element_Array;
+      Outer_Pad     : out Ada.Streams.Stream_Element_Array)
+   is
+      Cursor_Value : Ada.Streams.Stream_Element_Offset := Inner_Pad'First;
+   begin
+      Inner_Pad := [others => 16#36#];
+      Outer_Pad := [others => 16#5C#];
+      for Index_Value in Effective_Key'Range loop
+         Inner_Pad (Cursor_Value) := Effective_Key (Index_Value) xor 16#36#;
+         Outer_Pad (Cursor_Value) := Effective_Key (Index_Value) xor 16#5C#;
+         Cursor_Value := Cursor_Value + 1;
+      end loop;
+   end Fill_HMAC_Pads;
+
+   procedure Initialize_HMAC_SHA1
+     (Context_Item : out HMAC_SHA1_Context;
+      Key_Data     : Ada.Streams.Stream_Element_Array)
+   is
+      Block_Size : constant := 64;
+      Inner_Pad  : Ada.Streams.Stream_Element_Array (1 .. Block_Size) :=
+        [others => 0];
+      Outer_Pad  : Ada.Streams.Stream_Element_Array (1 .. Block_Size) :=
+        [others => 0];
+   begin
+      if Key_Data'Length > Block_Size then
+         declare
+            Hashed_Key : CryptoLib.Hashes.SHA1_Digest :=
+              CryptoLib.Hashes.SHA1 (Key_Data);
+            Key_Bytes  : Ada.Streams.Stream_Element_Array (1 .. 20);
+         begin
+            for Index_Value in Hashed_Key'Range loop
+               Key_Bytes (Ada.Streams.Stream_Element_Offset (Index_Value)) :=
+                 Hashed_Key (Index_Value);
+            end loop;
+            Fill_HMAC_Pads (Key_Bytes, Inner_Pad, Outer_Pad);
+            CryptoLib.Secure_Wipe.Wipe (Key_Bytes'Address, Key_Bytes'Length);
+            CryptoLib.Secure_Wipe.Wipe (Hashed_Key'Address, Hashed_Key'Length);
+         end;
+      else
+         Fill_HMAC_Pads (Key_Data, Inner_Pad, Outer_Pad);
+      end if;
+
+      CryptoLib.Hashes.Initialize_SHA1 (Context_Item.Inner);
+      CryptoLib.Hashes.Update (Context_Item.Inner, Inner_Pad);
+      CryptoLib.Hashes.Initialize_SHA1 (Context_Item.Outer);
+      CryptoLib.Hashes.Update (Context_Item.Outer, Outer_Pad);
+
+      CryptoLib.Secure_Wipe.Wipe (Inner_Pad'Address, Inner_Pad'Length);
+      CryptoLib.Secure_Wipe.Wipe (Outer_Pad'Address, Outer_Pad'Length);
+   end Initialize_HMAC_SHA1;
+
+   procedure Update
+     (Context_Item : in out HMAC_SHA1_Context;
+      Data         : Ada.Streams.Stream_Element_Array)
+   is
+   begin
+      CryptoLib.Hashes.Update (Context_Item.Inner, Data);
+   end Update;
+
+   function Finalize
+     (Context_Item : in out HMAC_SHA1_Context)
+      return HMAC_SHA1_Digest
+   is
+      Inner_Digest : constant CryptoLib.Hashes.SHA1_Digest :=
+        CryptoLib.Hashes.Finalize (Context_Item.Inner);
+      Digest_Bytes : Ada.Streams.Stream_Element_Array (1 .. 20);
+   begin
+      for Index_Value in Inner_Digest'Range loop
+         Digest_Bytes (Ada.Streams.Stream_Element_Offset (Index_Value)) :=
+           Inner_Digest (Index_Value);
+      end loop;
+      CryptoLib.Hashes.Update (Context_Item.Outer, Digest_Bytes);
+      return CryptoLib.Hashes.Finalize (Context_Item.Outer);
+   end Finalize;
 
    function HMAC_SHA1
      (Key_Data     : Ada.Streams.Stream_Element_Array;
       Message_Data : Ada.Streams.Stream_Element_Array) return HMAC_SHA1_Digest
    is
-      Block_Size   : constant Natural := 64;
-      Key_Block    :
-        Ada.Streams.Stream_Element_Array
-          (1 .. Ada.Streams.Stream_Element_Offset (Block_Size)) :=
-          [others => 0];
-      Inner_Pad    :
-        Ada.Streams.Stream_Element_Array
-          (1 .. Ada.Streams.Stream_Element_Offset (Block_Size)) :=
-          [others => 0];
-      Outer_Pad    :
-        Ada.Streams.Stream_Element_Array
-          (1 .. Ada.Streams.Stream_Element_Offset (Block_Size)) :=
-          [others => 0];
-      Inner_Digest : CryptoLib.Hashes.SHA1_Digest;
+      Context_Item : HMAC_SHA1_Context;
+   begin
+      Initialize_HMAC_SHA1 (Context_Item, Key_Data);
+      Update (Context_Item, Message_Data);
+      return Finalize (Context_Item);
+   end HMAC_SHA1;
+
+   procedure Initialize_HMAC_SHA256
+     (Context_Item : out HMAC_SHA256_Context;
+      Key_Data     : Ada.Streams.Stream_Element_Array)
+   is
+      Block_Size : constant := 64;
+      Inner_Pad  : Ada.Streams.Stream_Element_Array (1 .. Block_Size) :=
+        [others => 0];
+      Outer_Pad  : Ada.Streams.Stream_Element_Array (1 .. Block_Size) :=
+        [others => 0];
    begin
       if Key_Data'Length > Block_Size then
          declare
-            Hashed_Key : constant CryptoLib.Hashes.SHA1_Digest :=
-              CryptoLib.Hashes.SHA1 (Key_Data);
+            Hashed_Key : CryptoLib.Hashes.SHA256_Digest :=
+              CryptoLib.Hashes.SHA256 (Key_Data);
+            Key_Bytes  : Ada.Streams.Stream_Element_Array (1 .. 32);
          begin
             for Index_Value in Hashed_Key'Range loop
-               Key_Block (Ada.Streams.Stream_Element_Offset (Index_Value)) :=
+               Key_Bytes (Ada.Streams.Stream_Element_Offset (Index_Value)) :=
                  Hashed_Key (Index_Value);
             end loop;
+            Fill_HMAC_Pads (Key_Bytes, Inner_Pad, Outer_Pad);
+            CryptoLib.Secure_Wipe.Wipe (Key_Bytes'Address, Key_Bytes'Length);
+            CryptoLib.Secure_Wipe.Wipe (Hashed_Key'Address, Hashed_Key'Length);
          end;
       else
-         for Offset_Value in 0 .. Key_Data'Length - 1 loop
-            Key_Block (Ada.Streams.Stream_Element_Offset (Offset_Value + 1)) :=
-              Key_Data
-                (Key_Data'First
-                 + Ada.Streams.Stream_Element_Offset (Offset_Value));
-         end loop;
+         Fill_HMAC_Pads (Key_Data, Inner_Pad, Outer_Pad);
       end if;
 
-      for Index_Value in Key_Block'Range loop
-         Inner_Pad (Index_Value) := Key_Block (Index_Value) xor 16#36#;
-         Outer_Pad (Index_Value) := Key_Block (Index_Value) xor 16#5C#;
+      CryptoLib.Hashes.Initialize_SHA256 (Context_Item.Inner);
+      CryptoLib.Hashes.Update (Context_Item.Inner, Inner_Pad);
+      CryptoLib.Hashes.Initialize_SHA256 (Context_Item.Outer);
+      CryptoLib.Hashes.Update (Context_Item.Outer, Outer_Pad);
+
+      CryptoLib.Secure_Wipe.Wipe (Inner_Pad'Address, Inner_Pad'Length);
+      CryptoLib.Secure_Wipe.Wipe (Outer_Pad'Address, Outer_Pad'Length);
+   end Initialize_HMAC_SHA256;
+
+   procedure Update
+     (Context_Item : in out HMAC_SHA256_Context;
+      Data         : Ada.Streams.Stream_Element_Array)
+   is
+   begin
+      CryptoLib.Hashes.Update (Context_Item.Inner, Data);
+   end Update;
+
+   function Finalize
+     (Context_Item : in out HMAC_SHA256_Context)
+      return HMAC_SHA256_Digest
+   is
+      Inner_Digest : constant CryptoLib.Hashes.SHA256_Digest :=
+        CryptoLib.Hashes.Finalize (Context_Item.Inner);
+      Digest_Bytes : Ada.Streams.Stream_Element_Array (1 .. 32);
+   begin
+      for Index_Value in Inner_Digest'Range loop
+         Digest_Bytes (Ada.Streams.Stream_Element_Offset (Index_Value)) :=
+           Inner_Digest (Index_Value);
       end loop;
-
-      declare
-         Inner_Data   :
-           Ada.Streams.Stream_Element_Array
-             (1
-              ..
-                Ada.Streams.Stream_Element_Offset
-                  (Block_Size + Message_Data'Length));
-         Cursor_Value : Ada.Streams.Stream_Element_Offset :=
-           Ada.Streams.Stream_Element_Offset (Block_Size) + 1;
-      begin
-         Inner_Data (1 .. Ada.Streams.Stream_Element_Offset (Block_Size)) :=
-           Inner_Pad;
-         for Index_Value in Message_Data'Range loop
-            Inner_Data (Cursor_Value) := Message_Data (Index_Value);
-            Cursor_Value := Cursor_Value + 1;
-         end loop;
-         Inner_Digest := CryptoLib.Hashes.SHA1 (Inner_Data);
-      end;
-
-      declare
-         Outer_Data : Ada.Streams.Stream_Element_Array (1 .. 84);
-      begin
-         Outer_Data (1 .. Ada.Streams.Stream_Element_Offset (Block_Size)) :=
-           Outer_Pad;
-         for Index_Value in Inner_Digest'Range loop
-            Outer_Data
-              (Ada.Streams.Stream_Element_Offset (Block_Size + Index_Value)) :=
-              Inner_Digest (Index_Value);
-         end loop;
-         return CryptoLib.Hashes.SHA1 (Outer_Data);
-      end;
-   end HMAC_SHA1;
+      CryptoLib.Hashes.Update (Context_Item.Outer, Digest_Bytes);
+      return CryptoLib.Hashes.Finalize (Context_Item.Outer);
+   end Finalize;
 
    function HMAC_SHA256
      (Key_Data     : Ada.Streams.Stream_Element_Array;
       Message_Data : Ada.Streams.Stream_Element_Array)
       return HMAC_SHA256_Digest
    is
-      Block_Size    : constant Natural := 64;
-      Key_Block     :
-        Ada.Streams.Stream_Element_Array
-          (1 .. Ada.Streams.Stream_Element_Offset (Block_Size)) :=
-          [others => 0];
-      Inner_Pad     :
-        Ada.Streams.Stream_Element_Array
-          (1 .. Ada.Streams.Stream_Element_Offset (Block_Size)) :=
-          [others => 0];
-      Outer_Pad     :
-        Ada.Streams.Stream_Element_Array
-          (1 .. Ada.Streams.Stream_Element_Offset (Block_Size)) :=
-          [others => 0];
-      Inner_Context : CryptoLib.Hashes.SHA256_Context;
-      Outer_Context : CryptoLib.Hashes.SHA256_Context;
-      Inner_Digest  : CryptoLib.Hashes.SHA256_Digest;
+      Context_Item : HMAC_SHA256_Context;
+   begin
+      Initialize_HMAC_SHA256 (Context_Item, Key_Data);
+      Update (Context_Item, Message_Data);
+      return Finalize (Context_Item);
+   end HMAC_SHA256;
+
+   procedure Initialize_HMAC_SHA384
+     (Context_Item : out HMAC_SHA384_Context;
+      Key_Data     : Ada.Streams.Stream_Element_Array)
+   is
+      Block_Size : constant := 128;
+      Inner_Pad  : Ada.Streams.Stream_Element_Array (1 .. Block_Size) :=
+        [others => 0];
+      Outer_Pad  : Ada.Streams.Stream_Element_Array (1 .. Block_Size) :=
+        [others => 0];
    begin
       if Key_Data'Length > Block_Size then
          declare
-            Hashed_Key : constant CryptoLib.Hashes.SHA256_Digest :=
-              CryptoLib.Hashes.SHA256 (Key_Data);
+            Hashed_Key : CryptoLib.Hashes.SHA384_Digest :=
+              CryptoLib.Hashes.SHA384 (Key_Data);
+            Key_Bytes  : Ada.Streams.Stream_Element_Array (1 .. 48);
          begin
             for Index_Value in Hashed_Key'Range loop
-               Key_Block (Ada.Streams.Stream_Element_Offset (Index_Value)) :=
+               Key_Bytes (Ada.Streams.Stream_Element_Offset (Index_Value)) :=
                  Hashed_Key (Index_Value);
             end loop;
+            Fill_HMAC_Pads (Key_Bytes, Inner_Pad, Outer_Pad);
+            CryptoLib.Secure_Wipe.Wipe (Key_Bytes'Address, Key_Bytes'Length);
+            CryptoLib.Secure_Wipe.Wipe (Hashed_Key'Address, Hashed_Key'Length);
          end;
       else
-         for Offset_Value in 0 .. Key_Data'Length - 1 loop
-            Key_Block (Ada.Streams.Stream_Element_Offset (Offset_Value + 1)) :=
-              Key_Data
-                (Key_Data'First
-                 + Ada.Streams.Stream_Element_Offset (Offset_Value));
-         end loop;
+         Fill_HMAC_Pads (Key_Data, Inner_Pad, Outer_Pad);
       end if;
 
-      for Index_Value in Key_Block'Range loop
-         Inner_Pad (Index_Value) := Key_Block (Index_Value) xor 16#36#;
-         Outer_Pad (Index_Value) := Key_Block (Index_Value) xor 16#5C#;
+      CryptoLib.Hashes.Initialize_SHA384 (Context_Item.Inner);
+      CryptoLib.Hashes.Update (Context_Item.Inner, Inner_Pad);
+      CryptoLib.Hashes.Initialize_SHA384 (Context_Item.Outer);
+      CryptoLib.Hashes.Update (Context_Item.Outer, Outer_Pad);
+
+      CryptoLib.Secure_Wipe.Wipe (Inner_Pad'Address, Inner_Pad'Length);
+      CryptoLib.Secure_Wipe.Wipe (Outer_Pad'Address, Outer_Pad'Length);
+   end Initialize_HMAC_SHA384;
+
+   procedure Update
+     (Context_Item : in out HMAC_SHA384_Context;
+      Data         : Ada.Streams.Stream_Element_Array)
+   is
+   begin
+      CryptoLib.Hashes.Update (Context_Item.Inner, Data);
+   end Update;
+
+   function Finalize
+     (Context_Item : in out HMAC_SHA384_Context)
+      return HMAC_SHA384_Digest
+   is
+      Inner_Digest : constant CryptoLib.Hashes.SHA384_Digest :=
+        CryptoLib.Hashes.Finalize (Context_Item.Inner);
+      Digest_Bytes : Ada.Streams.Stream_Element_Array (1 .. 48);
+   begin
+      for Index_Value in Inner_Digest'Range loop
+         Digest_Bytes (Ada.Streams.Stream_Element_Offset (Index_Value)) :=
+           Inner_Digest (Index_Value);
       end loop;
-
-      CryptoLib.Hashes.Initialize_SHA256 (Inner_Context);
-      CryptoLib.Hashes.Update (Inner_Context, Inner_Pad);
-      CryptoLib.Hashes.Update (Inner_Context, Message_Data);
-      Inner_Digest := CryptoLib.Hashes.Finalize (Inner_Context);
-
-      CryptoLib.Hashes.Initialize_SHA256 (Outer_Context);
-      CryptoLib.Hashes.Update (Outer_Context, Outer_Pad);
-      declare
-         Inner_Digest_Bytes : Ada.Streams.Stream_Element_Array (1 .. 32);
-      begin
-         for Index_Value in Inner_Digest'Range loop
-            Inner_Digest_Bytes
-              (Ada.Streams.Stream_Element_Offset (Index_Value)) :=
-              Inner_Digest (Index_Value);
-         end loop;
-         CryptoLib.Hashes.Update (Outer_Context, Inner_Digest_Bytes);
-      end;
-
-      return CryptoLib.Hashes.Finalize (Outer_Context);
-   end HMAC_SHA256;
+      CryptoLib.Hashes.Update (Context_Item.Outer, Digest_Bytes);
+      return CryptoLib.Hashes.Finalize (Context_Item.Outer);
+   end Finalize;
 
    function HMAC_SHA384
      (Key_Data     : Ada.Streams.Stream_Element_Array;
       Message_Data : Ada.Streams.Stream_Element_Array)
       return HMAC_SHA384_Digest
    is
-      Block_Size    : constant Natural := 128;
-      Key_Block     :
-        Ada.Streams.Stream_Element_Array
-          (1 .. Ada.Streams.Stream_Element_Offset (Block_Size)) :=
-          [others => 0];
-      Inner_Pad     :
-        Ada.Streams.Stream_Element_Array
-          (1 .. Ada.Streams.Stream_Element_Offset (Block_Size)) :=
-          [others => 0];
-      Outer_Pad     :
-        Ada.Streams.Stream_Element_Array
-          (1 .. Ada.Streams.Stream_Element_Offset (Block_Size)) :=
-          [others => 0];
+      Context_Item : HMAC_SHA384_Context;
+   begin
+      Initialize_HMAC_SHA384 (Context_Item, Key_Data);
+      Update (Context_Item, Message_Data);
+      return Finalize (Context_Item);
+   end HMAC_SHA384;
+
+   procedure Initialize_HMAC_SHA512
+     (Context_Item : out HMAC_SHA512_Context;
+      Key_Data     : Ada.Streams.Stream_Element_Array)
+   is
+      Block_Size : constant := 128;
+      Inner_Pad  : Ada.Streams.Stream_Element_Array (1 .. Block_Size) :=
+        [others => 0];
+      Outer_Pad  : Ada.Streams.Stream_Element_Array (1 .. Block_Size) :=
+        [others => 0];
    begin
       if Key_Data'Length > Block_Size then
          declare
-            Hashed_Key : constant CryptoLib.Hashes.SHA384_Digest :=
-              CryptoLib.Hashes.SHA384 (Key_Data);
+            Hashed_Key : CryptoLib.Hashes.SHA512_Digest :=
+              CryptoLib.Hashes.SHA512 (Key_Data);
+            Key_Bytes  : Ada.Streams.Stream_Element_Array (1 .. 64);
          begin
             for Index_Value in Hashed_Key'Range loop
-               Key_Block (Ada.Streams.Stream_Element_Offset (Index_Value)) :=
+               Key_Bytes (Ada.Streams.Stream_Element_Offset (Index_Value)) :=
                  Hashed_Key (Index_Value);
             end loop;
+            Fill_HMAC_Pads (Key_Bytes, Inner_Pad, Outer_Pad);
+            CryptoLib.Secure_Wipe.Wipe (Key_Bytes'Address, Key_Bytes'Length);
+            CryptoLib.Secure_Wipe.Wipe (Hashed_Key'Address, Hashed_Key'Length);
          end;
       else
-         for Offset_Value in 0 .. Key_Data'Length - 1 loop
-            Key_Block (Ada.Streams.Stream_Element_Offset (Offset_Value + 1)) :=
-              Key_Data
-                (Key_Data'First
-                 + Ada.Streams.Stream_Element_Offset (Offset_Value));
-         end loop;
+         Fill_HMAC_Pads (Key_Data, Inner_Pad, Outer_Pad);
       end if;
 
-      for Index_Value in Key_Block'Range loop
-         Inner_Pad (Index_Value) := Key_Block (Index_Value) xor 16#36#;
-         Outer_Pad (Index_Value) := Key_Block (Index_Value) xor 16#5C#;
+      CryptoLib.Hashes.Initialize_SHA512 (Context_Item.Inner);
+      CryptoLib.Hashes.Update (Context_Item.Inner, Inner_Pad);
+      CryptoLib.Hashes.Initialize_SHA512 (Context_Item.Outer);
+      CryptoLib.Hashes.Update (Context_Item.Outer, Outer_Pad);
+
+      CryptoLib.Secure_Wipe.Wipe (Inner_Pad'Address, Inner_Pad'Length);
+      CryptoLib.Secure_Wipe.Wipe (Outer_Pad'Address, Outer_Pad'Length);
+   end Initialize_HMAC_SHA512;
+
+   procedure Update
+     (Context_Item : in out HMAC_SHA512_Context;
+      Data         : Ada.Streams.Stream_Element_Array)
+   is
+   begin
+      CryptoLib.Hashes.Update (Context_Item.Inner, Data);
+   end Update;
+
+   function Finalize
+     (Context_Item : in out HMAC_SHA512_Context)
+      return HMAC_SHA512_Digest
+   is
+      Inner_Digest : constant CryptoLib.Hashes.SHA512_Digest :=
+        CryptoLib.Hashes.Finalize (Context_Item.Inner);
+      Digest_Bytes : Ada.Streams.Stream_Element_Array (1 .. 64);
+   begin
+      for Index_Value in Inner_Digest'Range loop
+         Digest_Bytes (Ada.Streams.Stream_Element_Offset (Index_Value)) :=
+           Inner_Digest (Index_Value);
       end loop;
-
-      declare
-         Inner_Data :
-           Ada.Streams.Stream_Element_Array
-             (1 ..
-                Ada.Streams.Stream_Element_Offset
-                  (Block_Size + Message_Data'Length));
-         Inner_Digest : CryptoLib.Hashes.SHA384_Digest;
-         Cursor_Value : Ada.Streams.Stream_Element_Offset :=
-           Ada.Streams.Stream_Element_Offset (Block_Size) + 1;
-      begin
-         Inner_Data (1 .. Ada.Streams.Stream_Element_Offset (Block_Size)) :=
-           Inner_Pad;
-         for Index_Value in Message_Data'Range loop
-            Inner_Data (Cursor_Value) := Message_Data (Index_Value);
-            Cursor_Value := Cursor_Value + 1;
-         end loop;
-         Inner_Digest := CryptoLib.Hashes.SHA384 (Inner_Data);
-
-         declare
-            Outer_Data :
-              Ada.Streams.Stream_Element_Array
-                (1 .. Ada.Streams.Stream_Element_Offset (Block_Size + 48));
-            Outer_Cursor : Ada.Streams.Stream_Element_Offset :=
-              Ada.Streams.Stream_Element_Offset (Block_Size) + 1;
-         begin
-            Outer_Data (1 .. Ada.Streams.Stream_Element_Offset (Block_Size)) :=
-              Outer_Pad;
-            for Index_Value in Inner_Digest'Range loop
-               Outer_Data (Outer_Cursor) := Inner_Digest (Index_Value);
-               Outer_Cursor := Outer_Cursor + 1;
-            end loop;
-            return CryptoLib.Hashes.SHA384 (Outer_Data);
-         end;
-      end;
-   end HMAC_SHA384;
+      CryptoLib.Hashes.Update (Context_Item.Outer, Digest_Bytes);
+      return CryptoLib.Hashes.Finalize (Context_Item.Outer);
+   end Finalize;
 
    function HMAC_SHA512
      (Key_Data     : Ada.Streams.Stream_Element_Array;
       Message_Data : Ada.Streams.Stream_Element_Array)
       return HMAC_SHA512_Digest
    is
-      Block_Size    : constant Natural := 128;
-      Key_Block     :
-        Ada.Streams.Stream_Element_Array
-          (1 .. Ada.Streams.Stream_Element_Offset (Block_Size)) :=
-          [others => 0];
-      Inner_Pad     :
-        Ada.Streams.Stream_Element_Array
-          (1 .. Ada.Streams.Stream_Element_Offset (Block_Size)) :=
-          [others => 0];
-      Outer_Pad     :
-        Ada.Streams.Stream_Element_Array
-          (1 .. Ada.Streams.Stream_Element_Offset (Block_Size)) :=
-          [others => 0];
-      Inner_Context : CryptoLib.Hashes.SHA512_Context;
-      Outer_Context : CryptoLib.Hashes.SHA512_Context;
-      Inner_Digest  : CryptoLib.Hashes.SHA512_Digest;
+      Context_Item : HMAC_SHA512_Context;
    begin
-      if Key_Data'Length > Block_Size then
-         declare
-            Hashed_Key : constant CryptoLib.Hashes.SHA512_Digest :=
-              CryptoLib.Hashes.SHA512 (Key_Data);
-         begin
-            for Index_Value in Hashed_Key'Range loop
-               Key_Block (Ada.Streams.Stream_Element_Offset (Index_Value)) :=
-                 Hashed_Key (Index_Value);
-            end loop;
-         end;
-      else
-         for Offset_Value in 0 .. Key_Data'Length - 1 loop
-            Key_Block (Ada.Streams.Stream_Element_Offset (Offset_Value + 1)) :=
-              Key_Data
-                (Key_Data'First
-                 + Ada.Streams.Stream_Element_Offset (Offset_Value));
-         end loop;
-      end if;
-
-      for Index_Value in Key_Block'Range loop
-         Inner_Pad (Index_Value) := Key_Block (Index_Value) xor 16#36#;
-         Outer_Pad (Index_Value) := Key_Block (Index_Value) xor 16#5C#;
-      end loop;
-
-      CryptoLib.Hashes.Initialize_SHA512 (Inner_Context);
-      CryptoLib.Hashes.Update (Inner_Context, Inner_Pad);
-      CryptoLib.Hashes.Update (Inner_Context, Message_Data);
-      Inner_Digest := CryptoLib.Hashes.Finalize (Inner_Context);
-
-      CryptoLib.Hashes.Initialize_SHA512 (Outer_Context);
-      CryptoLib.Hashes.Update (Outer_Context, Outer_Pad);
-      declare
-         Inner_Digest_Bytes : Ada.Streams.Stream_Element_Array (1 .. 64);
-      begin
-         for Index_Value in Inner_Digest'Range loop
-            Inner_Digest_Bytes
-              (Ada.Streams.Stream_Element_Offset (Index_Value)) :=
-              Inner_Digest (Index_Value);
-         end loop;
-         CryptoLib.Hashes.Update (Outer_Context, Inner_Digest_Bytes);
-      end;
-
-      return CryptoLib.Hashes.Finalize (Outer_Context);
+      Initialize_HMAC_SHA512 (Context_Item, Key_Data);
+      Update (Context_Item, Message_Data);
+      return Finalize (Context_Item);
    end HMAC_SHA512;
 
    procedure Store_U32_BE

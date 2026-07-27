@@ -19,17 +19,16 @@ package body CryptoLib.Hashes is
 
    subtype Word is Unsigned_32;
 
-   function MD5
-     (Data : Ada.Streams.Stream_Element_Array)
-      return MD5_Digest
-   is
-      subtype Word32 is Unsigned_32;
-      S : constant array (Natural range 0 .. 63) of Natural :=
+   --  Streaming MD5 (RFC 1321), block-at-a-time so callers can hash large
+   --  inputs without buffering the padded message. The one-shot MD5 below is
+   --  a thin wrapper over this context, so there is only one implementation.
+   MD5_Shifts : constant array (Natural range 0 .. 63) of Natural :=
         [7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22,
          5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20,
          4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23,
          6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21];
-      K : constant array (Natural range 0 .. 63) of Word32 :=
+
+   MD5_Sines : constant array (Natural range 0 .. 63) of Word :=
         [16#D76AA478#, 16#E8C7B756#, 16#242070DB#, 16#C1BDCEEE#,
          16#F57C0FAF#, 16#4787C62A#, 16#A8304613#, 16#FD469501#,
          16#698098D8#, 16#8B44F7AF#, 16#FFFF5BB1#, 16#895CD7BE#,
@@ -46,124 +45,137 @@ package body CryptoLib.Hashes is
          16#655B59C3#, 16#8F0CCC92#, 16#FFEFF47D#, 16#85845DD1#,
          16#6FA87E4F#, 16#FE2CE6E0#, 16#A3014314#, 16#4E0811A1#,
          16#F7537E82#, 16#BD3AF235#, 16#2AD7D2BB#, 16#EB86D391#];
-      Total_Length : constant Natural :=
-        Data'Length
-        + 1
-        + Natural ((56 - ((Data'Length + 1) mod 64)) mod 64)
-        + 8;
-      Padded : Ada.Streams.Stream_Element_Array
-        (1 .. Ada.Streams.Stream_Element_Offset (Total_Length)) :=
-          [others => 0];
-      Bit_Length : constant Unsigned_64 :=
-        Unsigned_64 (Data'Length) * 8;
-      A0 : Word32 := 16#67452301#;
-      B0 : Word32 := 16#EFCDAB89#;
-      C0 : Word32 := 16#98BADCFE#;
-      D0 : Word32 := 16#10325476#;
 
-      function LE_Word
-        (Offset_Value : Ada.Streams.Stream_Element_Offset) return Word32 is
-      begin
-         return Word32 (Padded (Offset_Value))
-           or Shift_Left (Word32 (Padded (Offset_Value + 1)), 8)
-           or Shift_Left (Word32 (Padded (Offset_Value + 2)), 16)
-           or Shift_Left (Word32 (Padded (Offset_Value + 3)), 24);
-      end LE_Word;
-
-      procedure Store_MD5_LE
-        (Output      : in out MD5_Digest;
-         First_Index : MD5_Digest_Index;
-         Value       : Word32) is
-      begin
-         Output (First_Index) := Ada.Streams.Stream_Element (Value and 16#FF#);
-         Output (First_Index + 1) :=
-           Ada.Streams.Stream_Element
-             (Shift_Right (Value, 8) and 16#FF#);
-         Output (First_Index + 2) :=
-           Ada.Streams.Stream_Element
-             (Shift_Right (Value, 16) and 16#FF#);
-         Output (First_Index + 3) :=
-           Ada.Streams.Stream_Element
-             (Shift_Right (Value, 24) and 16#FF#);
-      end Store_MD5_LE;
+   procedure Process_MD5_Block (Context_Item : in out MD5_Context) is
+      M       : array (Natural range 0 .. 15) of Word := [others => 0];
+      A       : Word := Context_Item.State_Data (0);
+      B       : Word := Context_Item.State_Data (1);
+      C       : Word := Context_Item.State_Data (2);
+      D       : Word := Context_Item.State_Data (3);
+      F_Value : Word;
+      G_Value : Natural;
+      Temp    : Word;
    begin
-      for Offset_Value in 0 .. Data'Length - 1 loop
-         Padded (Padded'First + Ada.Streams.Stream_Element_Offset (Offset_Value)) :=
-           Data (Data'First + Ada.Streams.Stream_Element_Offset (Offset_Value));
-      end loop;
-      Padded (Padded'First + Ada.Streams.Stream_Element_Offset (Data'Length)) :=
-        16#80#;
-      for Offset_Value in 0 .. 7 loop
-         Padded (Padded'Last - Ada.Streams.Stream_Element_Offset (7 - Offset_Value)) :=
-           Ada.Streams.Stream_Element
-             (Shift_Right (Bit_Length, 8 * Offset_Value) and 16#FF#);
+      for Word_Index in 0 .. 15 loop
+         M (Word_Index) :=
+           Word (Context_Item.Block_Data (Word_Index * 4)) or
+           Shift_Left (Word (Context_Item.Block_Data (Word_Index * 4 + 1)), 8) or
+           Shift_Left (Word (Context_Item.Block_Data (Word_Index * 4 + 2)), 16) or
+           Shift_Left (Word (Context_Item.Block_Data (Word_Index * 4 + 3)), 24);
       end loop;
 
-      declare
-         Block_First : Ada.Streams.Stream_Element_Offset := Padded'First;
-      begin
-         while Block_First <= Padded'Last loop
-            declare
-               M       : array (Natural range 0 .. 15) of Word32 :=
-                 [others => 0];
-               A       : Word32 := A0;
-               B       : Word32 := B0;
-               C       : Word32 := C0;
-               D       : Word32 := D0;
-               F_Value : Word32;
-               G_Value : Natural;
-               Temp    : Word32;
-            begin
-               for Word_Index in 0 .. 15 loop
-                  M (Word_Index) :=
-                    LE_Word
-                      (Block_First +
-                       Ada.Streams.Stream_Element_Offset (Word_Index * 4));
-               end loop;
-               for Round_Index in 0 .. 63 loop
-                  if Round_Index < 16 then
-                     F_Value := (B and C) or ((not B) and D);
-                     G_Value := Round_Index;
-                  elsif Round_Index < 32 then
-                     F_Value := (D and B) or ((not D) and C);
-                     G_Value := (5 * Round_Index + 1) mod 16;
-                  elsif Round_Index < 48 then
-                     F_Value := B xor C xor D;
-                     G_Value := (3 * Round_Index + 5) mod 16;
-                  else
-                     F_Value := C xor (B or (not D));
-                     G_Value := (7 * Round_Index) mod 16;
-                  end if;
-                  Temp := D;
-                  D := C;
-                  C := B;
-                  B :=
-                    B + Rotate_Left
-                      (A + F_Value + K (Round_Index) + M (G_Value),
-                       S (Round_Index));
-                  A := Temp;
-               end loop;
-               A0 := A0 + A;
-               B0 := B0 + B;
-               C0 := C0 + C;
-               D0 := D0 + D;
-            end;
-            Block_First := Block_First + 64;
+      for Round_Index in 0 .. 63 loop
+         if Round_Index < 16 then
+            F_Value := (B and C) or ((not B) and D);
+            G_Value := Round_Index;
+         elsif Round_Index < 32 then
+            F_Value := (D and B) or ((not D) and C);
+            G_Value := (5 * Round_Index + 1) mod 16;
+         elsif Round_Index < 48 then
+            F_Value := B xor C xor D;
+            G_Value := (3 * Round_Index + 5) mod 16;
+         else
+            F_Value := C xor (B or (not D));
+            G_Value := (7 * Round_Index) mod 16;
+         end if;
+         Temp := D;
+         D := C;
+         C := B;
+         B :=
+           B + Rotate_Left
+             (A + F_Value + MD5_Sines (Round_Index) + M (G_Value),
+              MD5_Shifts (Round_Index));
+         A := Temp;
+      end loop;
+
+      Context_Item.State_Data (0) := Context_Item.State_Data (0) + A;
+      Context_Item.State_Data (1) := Context_Item.State_Data (1) + B;
+      Context_Item.State_Data (2) := Context_Item.State_Data (2) + C;
+      Context_Item.State_Data (3) := Context_Item.State_Data (3) + D;
+      Context_Item.Block_Data := [others => 0];
+      Context_Item.Block_Used := 0;
+   end Process_MD5_Block;
+
+   procedure Initialize_MD5 (Context_Item : out MD5_Context) is
+   begin
+      Context_Item.State_Data :=
+        [16#6745_2301#, 16#EFCD_AB89#, 16#98BA_DCFE#, 16#1032_5476#];
+      Context_Item.Block_Data := [others => 0];
+      Context_Item.Block_Used := 0;
+      Context_Item.Total_Bytes := 0;
+   end Initialize_MD5;
+
+   procedure Update
+     (Context_Item : in out MD5_Context;
+      Data         : Ada.Streams.Stream_Element_Array)
+   is
+   begin
+      for Byte_Value of Data loop
+         Context_Item.Block_Data (Context_Item.Block_Used) := Unsigned_8 (Byte_Value);
+         Context_Item.Block_Used := Context_Item.Block_Used + 1;
+         Context_Item.Total_Bytes := Context_Item.Total_Bytes + 1;
+         if Context_Item.Block_Used = 64 then
+            Process_MD5_Block (Context_Item);
+         end if;
+      end loop;
+   end Update;
+
+   function Finalize
+     (Context_Item : in out MD5_Context)
+      return MD5_Digest
+   is
+      Length_Bits : constant Unsigned_64 := Context_Item.Total_Bytes * 8;
+      Result      : MD5_Digest := [others => 0];
+      Byte_Index  : Natural := 1;
+   begin
+      Context_Item.Block_Data (Context_Item.Block_Used) := 16#80#;
+      Context_Item.Block_Used := Context_Item.Block_Used + 1;
+
+      if Context_Item.Block_Used > 56 then
+         while Context_Item.Block_Used < 64 loop
+            Context_Item.Block_Data (Context_Item.Block_Used) := 0;
+            Context_Item.Block_Used := Context_Item.Block_Used + 1;
          end loop;
-      end;
+         Process_MD5_Block (Context_Item);
+      end if;
 
-      return Result : MD5_Digest :=
-        [others => 0]
-      do
-         Store_MD5_LE (Result, 1, A0);
-         Store_MD5_LE (Result, 5, B0);
-         Store_MD5_LE (Result, 9, C0);
-         Store_MD5_LE (Result, 13, D0);
-         Padded := [others => 0];
-      end return;
-   exception
-      when others =>
-         return [others => 0];
+      while Context_Item.Block_Used < 56 loop
+         Context_Item.Block_Data (Context_Item.Block_Used) := 0;
+         Context_Item.Block_Used := Context_Item.Block_Used + 1;
+      end loop;
+
+      --  MD5 encodes the message length little-endian, unlike SHA-1/SHA-2.
+      for Index_Value in 0 .. 7 loop
+         Context_Item.Block_Data (56 + Index_Value) :=
+           Unsigned_8 (Shift_Right (Length_Bits, Index_Value * 8) and 16#FF#);
+      end loop;
+      Context_Item.Block_Used := 64;
+      Process_MD5_Block (Context_Item);
+
+      for Word_Index in 0 .. 3 loop
+         Result (MD5_Digest_Index (Byte_Index)) := Ada.Streams.Stream_Element
+           (Context_Item.State_Data (Word_Index) and 16#FF#);
+         Result (MD5_Digest_Index (Byte_Index + 1)) := Ada.Streams.Stream_Element
+           (Shift_Right (Context_Item.State_Data (Word_Index), 8) and 16#FF#);
+         Result (MD5_Digest_Index (Byte_Index + 2)) := Ada.Streams.Stream_Element
+           (Shift_Right (Context_Item.State_Data (Word_Index), 16) and 16#FF#);
+         Result (MD5_Digest_Index (Byte_Index + 3)) := Ada.Streams.Stream_Element
+           (Shift_Right (Context_Item.State_Data (Word_Index), 24) and 16#FF#);
+         Byte_Index := Byte_Index + 4;
+      end loop;
+
+      return Result;
+   end Finalize;
+
+   function MD5
+     (Data : Ada.Streams.Stream_Element_Array)
+      return MD5_Digest
+   is
+      Context_Item : MD5_Context;
+   begin
+      Initialize_MD5 (Context_Item);
+      Update (Context_Item, Data);
+      return Finalize (Context_Item);
    end MD5;
 
    K_Values : constant array (Natural range 0 .. 63) of Word :=
@@ -765,21 +777,43 @@ package body CryptoLib.Hashes is
       return Result;
    end Finalize;
 
-   function SHA384
-     (Data : Ada.Streams.Stream_Element_Array)
+   --  Streaming SHA-384: the SHA-512 compression, the SHA-384 IV, and a
+   --  digest truncated to the leftmost 48 bytes (FIPS 180-4 section 6.5).
+   procedure Initialize_SHA384 (Context_Item : out SHA384_Context) is
+   begin
+      Initialize_SHA384_Internal (Context_Item.Inner);
+   end Initialize_SHA384;
+
+   procedure Update
+     (Context_Item : in out SHA384_Context;
+      Data         : Ada.Streams.Stream_Element_Array)
+   is
+   begin
+      Update (Context_Item.Inner, Data);
+   end Update;
+
+   function Finalize
+     (Context_Item : in out SHA384_Context)
       return SHA384_Digest
    is
-      Context_Item : SHA512_Context;
-      Full_Digest  : SHA512_Digest;
-      Result_Item  : SHA384_Digest := [others => 0];
+      Full_Digest : constant SHA512_Digest := Finalize (Context_Item.Inner);
+      Result_Item : SHA384_Digest := [others => 0];
    begin
-      Initialize_SHA384_Internal (Context_Item);
-      Update (Context_Item, Data);
-      Full_Digest := Finalize (Context_Item);
       for Index_Value in Result_Item'Range loop
          Result_Item (Index_Value) := Full_Digest (Index_Value);
       end loop;
       return Result_Item;
+   end Finalize;
+
+   function SHA384
+     (Data : Ada.Streams.Stream_Element_Array)
+      return SHA384_Digest
+   is
+      Context_Item : SHA384_Context;
+   begin
+      Initialize_SHA384 (Context_Item);
+      Update (Context_Item, Data);
+      return Finalize (Context_Item);
    end SHA384;
 
    function SHA512
