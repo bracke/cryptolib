@@ -43,6 +43,53 @@ package CryptoLib.PKCS8 is
       Item   : out Private_Key;
       Status : out Decode_Status);
 
+   --  Why an encrypted key could not be opened.
+   --
+   --  A wrong password and a corrupted file are one answer on purpose. They
+   --  cannot be told apart without leaking which it was: the only signal is
+   --  whether the decrypted bytes look like padding and a key, and reporting
+   --  that separately is an oracle. It is also of no use to a caller, who
+   --  must retry or give up either way.
+   type Unlock_Status is
+     (Ok,
+      Not_Encrypted,
+      --  A plain PrivateKeyInfo, which Decode_DER reads without a password.
+      Unsupported_Scheme,
+      --  Not PBES2, or a derivation or cipher this crate does not implement.
+      --  The key may be perfectly good; this cannot open it.
+      Excessive_Iterations,
+      --  More work than the caller's limit allows. An iteration count is a
+      --  number in a file somebody else wrote, and honouring an enormous one
+      --  is doing what that file says.
+      Wrong_Password_Or_Corrupt,
+      Malformed);
+
+   --  The most derivation work this will do without being asked otherwise.
+   Default_Maximum_Iterations : constant := 10_000_000;
+
+   --  Render an unlock status as short diagnostic text.
+   --  @param Status the status to describe
+   --  @return lower-case text naming the status
+   function Unlock_Image (Status : Unlock_Status) return String;
+
+   --  Open an encrypted PKCS#8 key.
+   --
+   --  PBES2 only, with PBKDF2 over HMAC-SHA1/256/384/512 and AES-CBC, which
+   --  is what every current tool writes.
+   --  @param Data the DER encoding of an EncryptedPrivateKeyInfo
+   --  @param Password the password protecting it
+   --  @param Limits the bounds the caller is willing to decode within
+   --  @param Maximum_Iterations the most derivation work to do
+   --  @param Item receives the decoded key
+   --  @param Status Ok on success, otherwise why the key was not opened
+   procedure Decode_Encrypted_DER
+     (Data               : Octets;
+      Password           : String;
+      Limits             : Decode_Limits;
+      Item               : out Private_Key;
+      Status             : out Unlock_Status;
+      Maximum_Iterations : Natural := Default_Maximum_Iterations);
+
    --  Did this decode?
    --  @param Item the key to inspect
    --  @return True when it holds a decoded key

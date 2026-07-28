@@ -119,6 +119,29 @@ package CryptoLib.ASN1.OIDs is
    SHA512_Digest_Algorithm : constant Octets :=
      [16#60#, 16#86#, 16#48#, 16#01#, 16#65#, 16#03#, 16#04#, 16#02#, 16#03#];
 
+   --  Password-based encryption, as an encrypted PKCS#8 key uses it. The
+   --  scheme, the derivation, the pseudo-random function and the cipher are
+   --  four separate identifiers, because PBES2 composes them rather than
+   --  naming a combination.
+   PBES2 : constant Octets :=
+     [16#2A#, 16#86#, 16#48#, 16#86#, 16#F7#, 16#0D#, 16#01#, 16#05#, 16#0D#];
+   PBKDF2 : constant Octets :=
+     [16#2A#, 16#86#, 16#48#, 16#86#, 16#F7#, 16#0D#, 16#01#, 16#05#, 16#0C#];
+   HMAC_With_SHA1 : constant Octets :=
+     [16#2A#, 16#86#, 16#48#, 16#86#, 16#F7#, 16#0D#, 16#02#, 16#07#];
+   HMAC_With_SHA256 : constant Octets :=
+     [16#2A#, 16#86#, 16#48#, 16#86#, 16#F7#, 16#0D#, 16#02#, 16#09#];
+   HMAC_With_SHA384 : constant Octets :=
+     [16#2A#, 16#86#, 16#48#, 16#86#, 16#F7#, 16#0D#, 16#02#, 16#0A#];
+   HMAC_With_SHA512 : constant Octets :=
+     [16#2A#, 16#86#, 16#48#, 16#86#, 16#F7#, 16#0D#, 16#02#, 16#0B#];
+   AES128_CBC : constant Octets :=
+     [16#60#, 16#86#, 16#48#, 16#01#, 16#65#, 16#03#, 16#04#, 16#01#, 16#02#];
+   AES192_CBC : constant Octets :=
+     [16#60#, 16#86#, 16#48#, 16#01#, 16#65#, 16#03#, 16#04#, 16#01#, 16#16#];
+   AES256_CBC : constant Octets :=
+     [16#60#, 16#86#, 16#48#, 16#01#, 16#65#, 16#03#, 16#04#, 16#01#, 16#2A#];
+
    --  Is the identifier at Item within Data this one?
    --
    --  Takes the element rather than a slice so that a caller cannot

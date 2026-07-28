@@ -4542,6 +4542,162 @@ procedure Tests is
    end Check_Revocation;
 
 
+   --  Encrypted PKCS#8, which is how a private key is usually stored when it
+   --  is stored at all.
+   procedure Check_PKCS8_Encrypted is
+      use type CryptoLib.ASN1.Errors.Decode_Status;
+      use type CryptoLib.PKCS8.Unlock_Status;
+      use type CryptoLib.X509.Public_Key_Algorithm;
+
+      package P8 renames CryptoLib.PKCS8;
+
+      Enc_AES256_SHA256 : constant String :=
+        "3082011c305706092a864886f70d01050d304a302906092a864886f70d01050c301c0408df34818c3c3c80a202" &
+        "020800300c06082a864886f70d02090500301d060960864801650304012a041006fdcf33c7464bdca2fa561a76" &
+        "a00ef70481c00128f1659941272ed217c3593b453df712ac47e26e769eba6219b81be2c99312221bac341c46bb" &
+        "d4ce9679b6709504ab612214d770f8851d4acab66a78860b54ec047a5f2918be4cac36033411285de399123f34" &
+        "9a35ed38497670f0cc9b18311cf771e3df5a5c9af377d7b62dbbd83c16bc4444d14102424b8c9d6e9895987cb6" &
+        "5c1a27a6add7f081ff703de76aacc7dfa40852ee6dd6110ddb32e5dc91346c1ff29d8b0285647c14357de6972e" &
+        "59437e826e896351c0430a25151763d60a41";
+
+      Enc_AES128_SHA256 : constant String :=
+        "3082011c305706092a864886f70d01050d304a302906092a864886f70d01050c301c040857868de5f9d6e0c102" &
+        "020800300c06082a864886f70d02090500301d06096086480165030401020410247e74d67631454ced2016b9b4" &
+        "65b8380481c0992e4ccba11bb6d3c02440b5b71aef8528f7cd55fb1294aee05f338b05eea055112bdb5b312053" &
+        "5ac985bcdd51a0a7fafafac751766e6c5e636818a5ab3ef1fa0b557f90fcf90d2565d50263bedd270bd0af4dbb" &
+        "76150606db97ad3486e0509a20f75a8015e6cde6aad9ea451e13be85f66159a0f66899c1b345f15199e50d98e9" &
+        "3230073ee61c4826680cb09dd94f088d0e411487ad611d1179afe4d928befa8f2000e20b39e2acaedf1a86a4e2" &
+        "8385bdde0e38a759d3bbf49f291453aa319a";
+
+      Enc_AES256_SHA1 : constant String :=
+        "3082011c305706092a864886f70d01050d304a302906092a864886f70d01050c301c04088effc7d368f0ae4202" &
+        "020800300c06082a864886f70d02090500301d060960864801650304012a0410adbe6acbca7a9cd8c22c289b3c" &
+        "5a14750481c0e2c9a9c43c182a05c1613d30c9127642b2a65aebdb9b53a45cb3aa9aeb9d85747664d70aa8125a" &
+        "b29562acf5e96cdbfd904c445c23725b9fe42ab9e092dcdca993a70c73150a6c220fae6858905bc804df74f605" &
+        "43236a390b5707858caf30d8489ac4cd0643841ce658f997fd483b359a59b9047c775f242752b05d59be6318ec" &
+        "62b44723e089039e77340800cc7f1b7d44c2bc9e535bbff3aa0f327e5c7024b6c997472faf6839daa7a92ca09d" &
+        "7e6823d3f34e04b2dc0bac4c946dfce8c062";
+
+      Enc_Ed25519 : constant String :=
+        "30819b305706092a864886f70d01050d304a302906092a864886f70d01050c301c040806b7d23f573e40950202" &
+        "0800300c06082a864886f70d020b0500301d060960864801650304012a041033efd4612f61a77cf17e2a339875" &
+        "bc800440ef28f1ea1c4b1dbfc9d4e6eb9eaa0e629d4ca045484862db42fcfa101bf3ced85fd0ae9862399c8716" &
+        "4bda482f82cb02b73538967572ac02ec051ada2d0a9aee";
+
+      Expected_Scalar : constant String :=
+        "0dbe7e740d398458dc39a3f0d7e71e7132b65e26af9a13766441d3b1c79a30f141700119bb0be582c54a8f09fad2815b";
+
+      P8_EC : constant String :=
+        "3081b6020100301006072a8648ce3d020106052b8104002204819e30819b02010104300dbe7e740d398458dc39" &
+        "a3f0d7e71e7132b65e26af9a13766441d3b1c79a30f141700119bb0be582c54a8f09fad2815ba16403620004d8" &
+        "e1d6e84534ed29f11bc644c46499728c15b025b8bfbaa8238d053946fed7f22fced5751f61c20208bf534ec12e" &
+        "1a8abf3ed710988a642539fd5e33f5da33755b63aad074d171ba133c82b99bfca240d3fd6e5408e0f2ca6b82d5" &
+        "c721f9e7d8";
+
+      function From_Hex
+        (Text : String) return Ada.Streams.Stream_Element_Array
+      is
+         Result : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (Text'Length / 2));
+         function Nibble (C : Character) return Natural
+         is (case C is
+                when '0' .. '9' => Character'Pos (C) - Character'Pos ('0'),
+                when others     => Character'Pos (C) - Character'Pos ('a') + 10);
+      begin
+         for I in Result'Range loop
+            Result (I) :=
+              Ada.Streams.Stream_Element
+                (Nibble (Text (Text'First + 2 * Natural (I - 1))) * 16
+                 + Nibble (Text (Text'First + 2 * Natural (I - 1) + 1)));
+         end loop;
+         return Result;
+      end From_Hex;
+
+      procedure Check_Scheme (Encoded : String; Label : String) is
+         Item : P8.Private_Key;
+         St   : P8.Unlock_Status;
+      begin
+         P8.Decode_Encrypted_DER
+           (From_Hex (Encoded), "secret", CryptoLib.ASN1.Default_Limits,
+            Item, St);
+         Check (St = P8.Ok,
+                Label & " opens with the right password, got "
+                & P8.Unlock_Image (St));
+
+         --  The right key, not merely something that parses. A wrong key that
+         --  happened to decode would pass every test but this one.
+         Check (P8.Private_Value (Item) = From_Hex (Expected_Scalar),
+                Label & " recovers the scalar OpenSSL holds");
+
+         P8.Decode_Encrypted_DER
+           (From_Hex (Encoded), "wrong", CryptoLib.ASN1.Default_Limits,
+            Item, St);
+         Check (St = P8.Wrong_Password_Or_Corrupt,
+                Label & " refuses a wrong password, got "
+                & P8.Unlock_Image (St));
+         Check (not P8.Is_Present (Item),
+                Label & " leaves nothing behind after refusing");
+      end Check_Scheme;
+   begin
+      --  The combinations OpenSSL writes: two key sizes, and the PRF both
+      --  named and defaulted.
+      Check_Scheme (Enc_AES256_SHA256, "AES-256 with HMAC-SHA256");
+      Check_Scheme (Enc_AES128_SHA256, "AES-128 with HMAC-SHA256");
+      Check_Scheme (Enc_AES256_SHA1, "AES-256 with the default PRF");
+
+      declare
+         Item : P8.Private_Key;
+         St   : P8.Unlock_Status;
+      begin
+         P8.Decode_Encrypted_DER
+           (From_Hex (Enc_Ed25519), "secret", CryptoLib.ASN1.Default_Limits,
+            Item, St);
+         Check (St = P8.Ok
+                and then P8.Algorithm_Of (Item) = CryptoLib.X509.Ed25519
+                and then P8.Private_Value (Item)'Length = 32,
+                "an encrypted Ed25519 key opens to its seed, got "
+                & P8.Unlock_Image (St));
+      end;
+
+      --  An iteration count is a number in a file somebody else wrote.
+      --  Honouring an enormous one is doing what that file says.
+      declare
+         Item : P8.Private_Key;
+         St   : P8.Unlock_Status;
+      begin
+         P8.Decode_Encrypted_DER
+           (From_Hex (Enc_AES256_SHA256), "secret",
+            CryptoLib.ASN1.Default_Limits, Item, St,
+            Maximum_Iterations => 1);
+         Check (St = P8.Excessive_Iterations,
+                "work beyond the caller's limit is refused before it is "
+                & "done, got " & P8.Unlock_Image (St));
+      end;
+
+      --  A plain key handed to the encrypted reader, and an encrypted one
+      --  handed to the plain reader. Neither should be mistaken for the
+      --  other.
+      declare
+         Item   : P8.Private_Key;
+         St     : P8.Unlock_Status;
+         Parse  : CryptoLib.ASN1.Errors.Decode_Status;
+      begin
+         P8.Decode_Encrypted_DER
+           (From_Hex (P8_EC), "secret", CryptoLib.ASN1.Default_Limits,
+            Item, St);
+         Check (St /= P8.Ok,
+                "a plain key is not opened as an encrypted one");
+
+         P8.Decode_DER
+           (From_Hex (Enc_AES256_SHA256), CryptoLib.ASN1.Default_Limits,
+            Item, Parse);
+         Check (Parse = CryptoLib.ASN1.Errors.Unsupported_Encoding,
+                "an encrypted key is refused by the plain reader rather "
+                & "than read as though it were plain");
+      end;
+   end Check_PKCS8_Encrypted;
+
+
 begin
    Check_PBKDF2_SHA1;
    Check_PBKDF2_SHA2;
@@ -4577,6 +4733,7 @@ begin
    Check_Identities;
    Check_RSA_PSS;
    Check_Revocation;
+   Check_PKCS8_Encrypted;
    Check_Identity_Predicates;
    Check_PKCS12_Mac_Key;
    Check_ECDSA_P384_Verify;
