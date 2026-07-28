@@ -108,6 +108,13 @@ The RNG **fails closed**: if no OS source is available it returns
 - GNAT `Ada.Numerics.Big_Numbers.Big_Integers` caps at ~6400 bits, which is why
   DH group16/18 use `Modexp` (fixed-width Montgomery) rather than `Big_Integers`.
 - CT holds at the source level only; there is no formal or automated guarantee.
+- **A configured identity is checked, not trusted.** `CryptoLib.Identities`
+  confirms a chain decodes, hangs together by issuer and subject name, and
+  that the private key derives the leaf's public key. It says nothing about
+  whether the chain should be believed, which is `X509.Validation`'s question
+  and needs trust anchors. A key this crate cannot derive a public key from --
+  RSA, and ECDSA on P-256 and P-521 -- reports `Unsupported_Key` rather than
+  `Ok`, so an unchecked identity is never mistaken for a checked one.
 - **RSA is verification only** — there is no RSA signing, key generation, or
   private-key operation, and no RSA-PSS. `X509.Signatures` reports
   `Unsupported_Algorithm` for RSA-PSS rather than failing it, so "we did not

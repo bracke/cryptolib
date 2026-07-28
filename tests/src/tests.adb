@@ -17,6 +17,7 @@ with CryptoLib.X509.CRLs;
 with CryptoLib.OCSP;
 with CryptoLib.PKCS10;
 with CryptoLib.PKCS8;
+with CryptoLib.Identities;
 with CryptoLib.X509.Validation;
 with CryptoLib.X509.Path_Building;
 with CryptoLib.X509.Signatures;
@@ -4024,6 +4025,131 @@ procedure Tests is
    end Check_ECDSA_Scalar_Encodings;
 
 
+   --  A configured identity: a chain and the key that goes with it, checked
+   --  before anything tries to use them.
+   --
+   --  The two failures worth catching are a key that does not belong to the
+   --  certificate and a chain assembled the wrong way round. Both are
+   --  ordinary configuration mistakes that otherwise surface as a handshake
+   --  failing somewhere far from the cause.
+   procedure Check_Identities is
+      use type CryptoLib.Identities.Identity_Status;
+      use type CryptoLib.X509.Public_Key_Algorithm;
+
+      package ID renames CryptoLib.Identities;
+
+      CA_PEM    : Unbounded_String;
+      CA_Key    : Unbounded_String;
+      Leaf_PEM  : Unbounded_String;
+      Leaf_Key  : Unbounded_String;
+      Other_PEM : Unbounded_String;
+      Other_Key : Unbounded_String;
+      Outcome   : CryptoLib.Certificates.Certificate_Status;
+   begin
+      Outcome :=
+        CryptoLib.Certificates.Create_Local_CA
+          ("identity-chain-ca", CA_PEM, CA_Key,
+           CryptoLib.Certificates.P384_Key);
+      Check (Outcome = CryptoLib.Certificates.Ok, "fixture: CA created");
+
+      Outcome :=
+        CryptoLib.Certificates.Issue_Server_Certificate
+          (To_String (CA_PEM), To_String (CA_Key), "host.example",
+           [1 => To_Unbounded_String ("host.example")],
+           Leaf_PEM, Leaf_Key);
+      Check (Outcome = CryptoLib.Certificates.Ok, "fixture: leaf issued");
+
+      Outcome :=
+        CryptoLib.Certificates.Issue_Server_Certificate
+          (To_String (CA_PEM), To_String (CA_Key), "other.example",
+           [1 => To_Unbounded_String ("other.example")],
+           Other_PEM, Other_Key);
+      Check (Outcome = CryptoLib.Certificates.Ok, "fixture: other leaf");
+
+      --  Leaf then issuer, which is the order a PEM file and a TLS handshake
+      --  both use.
+      declare
+         Item : ID.Local_Identity;
+         St   : ID.Identity_Status;
+      begin
+         ID.Decode
+           (To_String (Leaf_PEM) & To_String (CA_PEM),
+            To_String (Leaf_Key), Item, St);
+         Check (St = ID.Ok,
+                "a chain and its own key check out, got "
+                & ID.Status_Image (St));
+         Check (ID.Is_Present (Item), "and the identity is present");
+         Check (ID.Chain_Length (Item) = 2,
+                "both certificates are held, got"
+                & Natural'Image (ID.Chain_Length (Item)));
+         Check (ID.Key_Algorithm_Of (Item) = CryptoLib.X509.ECDSA_P384,
+                "the key algorithm is reported");
+         Check (ID.Certificate_Bytes (Item, 1)'Length > 0
+                and then ID.Certificate_Bytes (Item, 3)'Length = 0,
+                "certificates are addressable and asking past the end is "
+                & "empty");
+
+         --  Wiping is not only end of scope.
+         ID.Wipe (Item);
+         Check (not ID.Is_Present (Item), "a wiped identity is not present");
+         Check (ID.Chain_Length (Item) = 0, "and holds no chain");
+      end;
+
+      --  A leaf alone is a chain of one, which is ordinary.
+      declare
+         Item : ID.Local_Identity;
+         St   : ID.Identity_Status;
+      begin
+         ID.Decode (To_String (Leaf_PEM), To_String (Leaf_Key), Item, St);
+         Check (St = ID.Ok and then ID.Chain_Length (Item) = 1,
+                "a single certificate and its key check out");
+      end;
+
+      --  The mistake this exists for: the wrong key.
+      declare
+         Item : ID.Local_Identity;
+         St   : ID.Identity_Status;
+      begin
+         ID.Decode (To_String (Leaf_PEM), To_String (Other_Key), Item, St);
+         Check (St = ID.Key_Mismatch,
+                "a key from another certificate is refused, got "
+                & ID.Status_Image (St));
+         Check (not ID.Is_Present (Item),
+                "and nothing is left usable behind it");
+      end;
+
+      --  And the other one: the chain upside down.
+      declare
+         Item : ID.Local_Identity;
+         St   : ID.Identity_Status;
+      begin
+         ID.Decode
+           (To_String (CA_PEM) & To_String (Leaf_PEM),
+            To_String (Leaf_Key), Item, St);
+         Check (St = ID.Chain_Out_Of_Order,
+                "a chain in the wrong order is refused, got "
+                & ID.Status_Image (St));
+      end;
+
+      --  Material that is not there, or not a key.
+      declare
+         Item : ID.Local_Identity;
+         St   : ID.Identity_Status;
+      begin
+         ID.Decode ("", To_String (Leaf_Key), Item, St);
+         Check (St = ID.Empty_Chain, "no certificate is an empty chain");
+
+         ID.Decode (To_String (Leaf_PEM), "", Item, St);
+         Check (St = ID.Malformed_Private_Key,
+                "no key is a malformed key, got " & ID.Status_Image (St));
+
+         ID.Decode (To_String (Leaf_PEM), To_String (Leaf_PEM), Item, St);
+         Check (St = ID.Malformed_Private_Key,
+                "a certificate offered as a key is refused");
+      end;
+   end Check_Identities;
+
+
 begin
    Check_PBKDF2_SHA1;
    Check_PBKDF2_SHA2;
@@ -4056,6 +4182,7 @@ begin
    Check_PKCS10;
    Check_PKCS8;
    Check_ECDSA_Scalar_Encodings;
+   Check_Identities;
    Check_Identity_Predicates;
    Check_PKCS12_Mac_Key;
    Check_ECDSA_P384_Verify;
