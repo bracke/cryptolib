@@ -774,6 +774,19 @@ procedure Tests is
         (not CryptoLib.Certificates.Valid_DNS_Name ("under_score.example"),
          "an underscore is not a DNS character");
 
+      Check
+        (CryptoLib.Certificates.Valid_DNS_Name ("*.example.test"),
+         "a wildcard qualifying a domain");
+      Check
+        (not CryptoLib.Certificates.Valid_DNS_Name ("*"),
+         "a wildcard alone names everything");
+      Check
+        (not CryptoLib.Certificates.Valid_DNS_Name ("*.test"),
+         "a wildcard needs more than a single label under it");
+      Check
+        (not CryptoLib.Certificates.Valid_DNS_Name ("a*b.example.test"),
+         "a star inside a label is not a wildcard");
+
       Check (CryptoLib.Certificates.Valid_IP_Address ("127.0.0.1"), "IPv4");
       Check (CryptoLib.Certificates.Valid_IP_Address ("::1"), "IPv6");
       Check

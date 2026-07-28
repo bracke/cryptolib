@@ -1641,6 +1641,23 @@ package body CryptoLib.Certificates is
          return False;
       end if;
 
+      --  A wildcard stands for one label and only the leftmost, and only where
+      --  something remains for it to qualify: "*.example.test" names hosts in a
+      --  domain, "*" and "*.test" name far too much, and "a*b" is not a
+      --  wildcard at all.
+      if Text = "*" then
+         return False;
+      elsif Text'Length > 2
+        and then Text (Text'First) = '*'
+        and then Text (Text'First + 1) = '.'
+      then
+         return Ada.Strings.Fixed.Index
+                  (Text (Text'First + 2 .. Text'Last), ".") /= 0
+           and then Valid_DNS_Name (Text (Text'First + 2 .. Text'Last));
+      elsif Ada.Strings.Fixed.Index (Text, "*") /= 0 then
+         return False;
+      end if;
+
       Label_Start := Text'First;
       for I in Text'Range loop
          if Text (I) = '.' then
