@@ -257,6 +257,135 @@ package body CryptoLib.OCSP is
       Position := Cursor;
    end Read_Algorithm;
 
+   --  Read one SingleResponse: which certificate it is about, what it says,
+   --  and for how long. One reader, used to validate the list at decode and
+   --  to pick from it at verify, so the two cannot disagree about what an
+   --  entry means.
+   procedure Read_Single_Response
+     (Data      : Octets;
+      Position  : in out Offset;
+      Last      : Offset;
+      Limits    : Decode_Limits;
+      Name_Hash : out Span;
+      Key_Hash  : out Span;
+      Serial    : out Span;
+      State     : out Certificate_Status;
+      Issued    : out Certificate_Time;
+      Due       : out Certificate_Time;
+      Due_Given : out Boolean;
+      Status    : out Decode_Status)
+   is
+      Single  : Element;
+      Cert_ID : Element;
+      Field   : Element;
+      Inner   : Offset;
+      Value   : Element;
+   begin
+      Name_Hash := (First => 1, Last => 0);
+      Key_Hash := (First => 1, Last => 0);
+      Serial := (First => 1, Last => 0);
+      State := Unknown;
+      Issued := (others => 0);
+      Due := (others => 0);
+      Due_Given := False;
+
+      DER_Reader.Read_Sequence
+        (Data, Position, Last, 7, Limits, Single, Status);
+      if Status /= Ok then
+         return;
+      end if;
+
+      Inner := Single.First;
+      DER_Reader.Read_Sequence
+        (Data, Inner, Single.Last, 8, Limits, Cert_ID, Status);
+      if Status /= Ok then
+         return;
+      end if;
+
+      declare
+         Part  : Offset := Cert_ID.First;
+         Alg   : Element;
+         Minus : Boolean;
+      begin
+         Read_Algorithm (Data, Part, Cert_ID.Last, 9, Limits, Alg, Status);
+         if Status /= Ok then
+            return;
+         end if;
+
+         DER_Reader.Read_Octet_String
+           (Data, Part, Cert_ID.Last, 9, Limits, Field, Status);
+         if Status /= Ok then
+            return;
+         end if;
+         Name_Hash := (First => Field.First, Last => Field.Last);
+
+         DER_Reader.Read_Octet_String
+           (Data, Part, Cert_ID.Last, 9, Limits, Field, Status);
+         if Status /= Ok then
+            return;
+         end if;
+         Key_Hash := (First => Field.First, Last => Field.Last);
+
+         DER_Reader.Read_Integer
+           (Data, Part, Cert_ID.Last, 9, Limits, Field, Minus, Status);
+         if Status /= Ok then
+            return;
+         end if;
+         Serial := (First => Field.First, Last => Field.Last);
+      end;
+
+      --  certStatus is a CHOICE of context tags: [0] good, [1] revoked,
+      --  [2] unknown.
+      DER_Reader.Read (Data, Inner, Single.Last, 8, Limits, Value, Status);
+      if Status /= Ok then
+         return;
+      end if;
+
+      if Value.Class /= Context_Specific then
+         Status := Invalid_Tag;
+         return;
+      end if;
+
+      case Value.Number is
+         when 0      => State := Good;
+         when 1      => State := Revoked;
+         when others => State := Unknown;
+      end case;
+
+      CryptoLib.X509.Times.Read
+        (Data, Inner, Single.Last, 8, Limits, Issued, Status);
+      if Status /= Ok then
+         return;
+      end if;
+
+      if not DER_Reader.At_End (Inner, Single.Last) then
+         declare
+            Look : Offset := Inner;
+            Tag  : Element;
+            Try  : Decode_Status;
+         begin
+            DER_Reader.Read (Data, Look, Single.Last, 8, Limits, Tag, Try);
+            if Try = Ok
+              and then Tag.Class = Context_Specific
+              and then Tag.Number = 0
+              and then Tag.Constructed
+            then
+               declare
+                  Within : Offset := Tag.First;
+               begin
+                  CryptoLib.X509.Times.Read
+                    (Data, Within, Tag.Last, 9, Limits, Due, Status);
+                  if Status = Ok then
+                     Due_Given := True;
+                  else
+                     Status := Ok;
+                  end if;
+               end;
+            end if;
+         end;
+      end if;
+   end Read_Single_Response;
+
    function Decode_Response
      (Data   : Octets;
       Limits : Decode_Limits;
@@ -473,128 +602,50 @@ package body CryptoLib.OCSP is
                   return Result;
                end if;
 
-               --  responses SEQUENCE OF SingleResponse; the first is the one
-               --  asked about, and a response bundling others is not
-               --  interpreted here.
+               --  responses SEQUENCE OF SingleResponse. A responder may
+               --  answer about several certificates in one response, so
+               --  which one applies is not knowable here -- it depends on
+               --  the certificate the caller asks about. The list is kept
+               --  and Verify picks from it. Reading only the first would
+               --  answer about somebody else's certificate whenever a
+               --  responder bundled its replies.
                DER_Reader.Read_Sequence
                  (Work, Part, TBS.Last, 6, Limits, Skip, Status);
                if Status /= Ok then
                   return Result;
                end if;
+               Result.Responses := (First => Skip.First, Last => Skip.Last);
 
+               --  Walked once here so that a malformed entry anywhere in the
+               --  list is refused at decode rather than found later by a
+               --  caller who happened to ask about that certificate.
                declare
-                  Single : Element;
-                  Row    : Offset := Skip.First;
-                  Cert_ID : Element;
-                  Field2 : Element;
-                  Inner2 : Offset;
-                  State  : Element;
+                  Row   : Offset := Skip.First;
+                  Row_ID : Span;
+                  Row_State : Certificate_Status;
+                  Row_From  : Certificate_Time;
+                  Row_To    : Certificate_Time;
+                  Row_Due   : Boolean;
+                  Name_H, Key_H, Serial_S : Span;
+                  Seen  : Natural := 0;
                begin
-                  DER_Reader.Read_Sequence
-                    (Work, Row, Skip.Last, 7, Limits, Single, Status);
-                  if Status /= Ok then
-                     return Result;
-                  end if;
-
-                  Inner2 := Single.First;
-                  DER_Reader.Read_Sequence
-                    (Work, Inner2, Single.Last, 8, Limits, Cert_ID, Status);
-                  if Status /= Ok then
-                     return Result;
-                  end if;
-
-                  declare
-                     Part2 : Offset := Cert_ID.First;
-                     Alg2  : Element;
-                     Minus : Boolean;
-                  begin
-                     Read_Algorithm
-                       (Work, Part2, Cert_ID.Last, 9, Limits, Alg2, Status);
-                     if Status /= Ok then
-                        return Result;
-                     end if;
-
-                     DER_Reader.Read_Octet_String
-                       (Work, Part2, Cert_ID.Last, 9, Limits, Field2, Status);
-                     if Status /= Ok then
-                        return Result;
-                     end if;
-                     Result.Name_Hash :=
-                       (First => Field2.First, Last => Field2.Last);
-
-                     DER_Reader.Read_Octet_String
-                       (Work, Part2, Cert_ID.Last, 9, Limits, Field2, Status);
-                     if Status /= Ok then
-                        return Result;
-                     end if;
-                     Result.Key_Hash :=
-                       (First => Field2.First, Last => Field2.Last);
-
-                     DER_Reader.Read_Integer
-                       (Work, Part2, Cert_ID.Last, 9, Limits, Field2, Minus,
+                  while not DER_Reader.At_End (Row, Skip.Last) loop
+                     Read_Single_Response
+                       (Work, Row, Skip.Last, Limits, Name_H, Key_H,
+                        Serial_S, Row_State, Row_From, Row_To, Row_Due,
                         Status);
-                     if Status /= Ok then
-                        return Result;
+                     exit when Status /= Ok;
+                     Seen := Seen + 1;
+                  end loop;
+
+                  if Status /= Ok or else Seen = 0 then
+                     if Status = Ok then
+                        Status := Invalid_Value;
                      end if;
-                     Result.Serial :=
-                       (First => Field2.First, Last => Field2.Last);
-                  end;
-
-                  --  certStatus is a CHOICE of context tags: [0] good,
-                  --  [1] revoked, [2] unknown.
-                  DER_Reader.Read
-                    (Work, Inner2, Single.Last, 8, Limits, State, Status);
-                  if Status /= Ok then
                      return Result;
                   end if;
 
-                  if State.Class /= Context_Specific then
-                     Status := Invalid_Tag;
-                     return Result;
-                  end if;
-
-                  case State.Number is
-                     when 0      => Result.Cert_State := Good;
-                     when 1      => Result.Cert_State := Revoked;
-                     when others => Result.Cert_State := Unknown;
-                  end case;
-
-                  CryptoLib.X509.Times.Read
-                    (Work, Inner2, Single.Last, 8, Limits, Result.Issued,
-                     Status);
-                  if Status /= Ok then
-                     return Result;
-                  end if;
-
-                  --  nextUpdate is [0] EXPLICIT and optional.
-                  if not DER_Reader.At_End (Inner2, Single.Last) then
-                     declare
-                        Look2 : Offset := Inner2;
-                        Tag2  : Element;
-                        Try2  : Decode_Status;
-                     begin
-                        DER_Reader.Read
-                          (Work, Look2, Single.Last, 8, Limits, Tag2, Try2);
-                        if Try2 = Ok
-                          and then Tag2.Class = Context_Specific
-                          and then Tag2.Number = 0
-                          and then Tag2.Constructed
-                        then
-                           declare
-                              Within : Offset := Tag2.First;
-                           begin
-                              CryptoLib.X509.Times.Read
-                                (Work, Within, Tag2.Last, 9, Limits,
-                                 Result.Due, Status);
-                              if Status = Ok then
-                                 Result.Due_Present := True;
-                              else
-                                 Status := Ok;
-                              end if;
-                           end;
-                        end if;
-                     end;
-                  end if;
+                  pragma Unreferenced (Row_ID);
                end;
             end;
          end;
@@ -658,21 +709,57 @@ package body CryptoLib.OCSP is
          return Not_Successful;
       end if;
 
-      --  The response has to be about this certificate, under this issuer.
-      --  A response that verifies beautifully and concerns somebody else is
-      --  the failure this catches.
+      --  Which of the responses is about this certificate. A responder may
+      --  answer about several at once, so the list is searched rather than
+      --  its first entry assumed: taking the first would answer about
+      --  somebody else's certificate whenever a responder bundled its
+      --  replies, and answer confidently.
       declare
          Name_Hash : constant Octets :=
            Octets (CryptoLib.Hashes.SHA1 (X509C.Subject_Bytes (Issuer)));
          Key_Hash  : constant Octets :=
            Octets (CryptoLib.Hashes.SHA1 (X509C.Public_Key (Issuer)));
+         Serial    : constant Octets := X509C.Serial_Number (Subject);
+
+         Row    : Offset := Item.Responses.First;
+         Parse  : Decode_Status;
+         Found  : Boolean := False;
+
+         Row_Name, Row_Key, Row_Serial : Span;
+         Row_State : Certificate_Status;
+         Row_From, Row_To : Certificate_Time;
+         Row_Due   : Boolean;
       begin
-         if not Same_Bytes (Slice (Item, Item.Name_Hash), Name_Hash)
-           or else not Same_Bytes (Slice (Item, Item.Key_Hash), Key_Hash)
-           or else not Same_Bytes
-                         (Slice (Item, Item.Serial),
-                          X509C.Serial_Number (Subject))
-         then
+         if Item.Responses.Last < Item.Responses.First then
+            return Malformed_Response;
+         end if;
+
+         while not DER_Reader.At_End (Row, Item.Responses.Last) loop
+            Read_Single_Response
+              (Item.DER, Row, Item.Responses.Last, Default_Limits,
+               Row_Name, Row_Key, Row_Serial, Row_State, Row_From, Row_To,
+               Row_Due, Parse);
+            exit when Parse /= Ok;
+
+            if Same_Bytes (Slice (Item, Row_Name), Name_Hash)
+              and then Same_Bytes (Slice (Item, Row_Key), Key_Hash)
+              and then Same_Bytes (Slice (Item, Row_Serial), Serial)
+            then
+               --  This is the answer that was asked for; the rest are about
+               --  other certificates and say nothing about this one.
+               Item.Name_Hash := Row_Name;
+               Item.Key_Hash := Row_Key;
+               Item.Serial := Row_Serial;
+               Item.Cert_State := Row_State;
+               Item.Issued := Row_From;
+               Item.Due := Row_To;
+               Item.Due_Present := Row_Due;
+               Found := True;
+               exit;
+            end if;
+         end loop;
+
+         if not Found then
             return Wrong_Certificate;
          end if;
       end;

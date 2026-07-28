@@ -162,8 +162,10 @@ The RNG **fails closed**: if no OS source is available it returns
   serial is on it; `Validate_Path` does not consult one. Nothing here fetches a
   CRL -- retrieval is the application's. `CryptoLib.OCSP` builds requests and
   checks responses, including whether the signer was the issuer or a delegate
-  the issuer authorised with the OCSP-signing extended key usage; it makes no
-  network requests either, and is likewise not consulted by `Validate_Path`.
+  the issuer authorised with the OCSP-signing extended key usage; a response
+  covering several certificates is searched for the one asked about rather than
+  answered from its first entry. It makes no network requests either, and is
+  likewise not consulted by `Validate_Path`.
   `X509.Revocation` puts the two behind one question and judges freshness: a
   statement outside its own `thisUpdate`/`nextUpdate` window answers `Stale`
   rather than `Not_Revoked`, since reading "not revoked" off a statement made

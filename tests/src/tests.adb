@@ -3337,6 +3337,56 @@ procedure Tests is
         "6222b02f13b0a8a6cee43751a074c55dc7e0445117a02ae476d349bc164c136518fe15bbb3c9578baaeccee905" &
         "1cf77a0bb0b44ed31349a77fc4353a468cb1f1fc3555515f67c4c530a75e";
 
+      OCSP_Multi : constant String :=
+        "308205310a0100a082052a3082052606092b060105050730010104820517308205133081e3a118301631143012" &
+        "06035504030c0b63726c2d746573742d6361180f32303236303732383232313431375a3081b53061303b300906" &
+        "052b0e03021a05000414c62b1a2f4dac7a6728a9d9bcec42380ae44dbd360414a1f6d41f7e7b24380aa8a0cd33" &
+        "926e4452de852f02021000a111180f32303236303732383230313534375a180f32303236303732383232313431" &
+        "375a3050303b300906052b0e03021a05000414c62b1a2f4dac7a6728a9d9bcec42380ae44dbd360414a1f6d41f" &
+        "7e7b24380aa8a0cd33926e4452de852f020210018000180f32303236303732383232313431375a300d06092a86" &
+        "4886f70d01010b0500038201010066d7702b438d1c953ceff5ac8fde94cdce5a59909635095ff97bc3ab45bfbd" &
+        "9763ac36de742e8514e2ab4acd9f3e91fde41c95cf47a7ac51ece4d9b9ded05de39a5b5a2e1192414362342c9e" &
+        "2f2e563f4750185010bcbaefc6836a83a2a23d1d9f6e6c863a26744dbb9447978d60825d4dfc3e87ab600cebb9" &
+        "aeb2abd34fa64ebff72537c083d6f72d170ba198be581b430caabbc4b4b8d511044c41126cc632e1727d0ce983" &
+        "11cf07b2cbacc47739b24ac76fc8f264a75bf7250139fc380e7e571c111a1c5f556576a65872cd7dfc0a9e973a" &
+        "211551470034f4a01df0896f64e37a68031d8253755c2ef26ed4dc6598f3021e1fdd0cbe9214765e856736c0b2" &
+        "a0820315308203113082030d308201f5a0030201020214695a2eb222fd6509af65d97b7099306d68b399eb300d" &
+        "06092a864886f70d01010b050030163114301206035504030c0b63726c2d746573742d6361301e170d32363037" &
+        "32383230313534375a170d3336303732353230313534375a30163114301206035504030c0b63726c2d74657374" &
+        "2d636130820122300d06092a864886f70d01010105000382010f003082010a0282010100b5e60ee7058f7f9e99" &
+        "1a038feeac5eb95d99b6b52f543a4cf379d9b84ab68125a82424b27f07a1f6a39f6f6e5ac4df194a06d3683faf" &
+        "c31123427f768f6024aa6b2d5f759d0629a578497370038d70020ea20e261a913c332504d70327b2cd747a2ae0" &
+        "f415764976ae21d8c34874405cfabefd83ffc5b03de5c6521a611c333189ead8755a0bf56113ad088deb953cf1" &
+        "febb465a377d256bad055bf627727ccfffa616cfe8edc009a49f318a6c1e935dc42b69ab1d2aa9ee2173defdf4" &
+        "5fbb595b99aced529fca129587fac967025980f7617070edde4748fa62cd395a608475ba22bd65c29f1fabdefe" &
+        "5e8aeed28baa170388bca8bb6490db6bacea3473ed8f0203010001a3533051301d0603551d0e04160414a1f6d4" &
+        "1f7e7b24380aa8a0cd33926e4452de852f301f0603551d23041830168014a1f6d41f7e7b24380aa8a0cd33926e" &
+        "4452de852f300f0603551d130101ff040530030101ff300d06092a864886f70d01010b050003820101005f484f" &
+        "d12f7d522aa3787c0ee05c3e06067d91b3f51a3747e1ffcd7d57e839f17a9bfcf878faa9c4af435426aa06ed49" &
+        "07dfb9c29ca36c6b53af27ce22516b5bd4cb19e9d912893e3800a1f7acc3abefbc18a6c899793b6ff9d378f2a7" &
+        "7e0feb03659f8a2409bee7a4804773be1f8428608fb9041ac74581b1943d0d90dd2939be1b74015bcd676cf483" &
+        "167988523fba452b255b49146d3c5be21408d8c9848f6794a4fa588ab2d6d326bc7d92920c3547d3f4d9270c01" &
+        "ec4d368c98e11a611f40cd6672de148b3bf435f812eda7e9e5d383ff2eefcf1384d136c45b1c062f731fc3414a" &
+        "237cf1b971994cced2b6852b3f4314e9335fc96ba21fd8949c58f5c5";
+
+      OCSP_Second_DER : constant String :=
+        "308202a43082018c02021001300d06092a864886f70d01010b050030163114301206035504030c0b63726c2d74" &
+        "6573742d6361301e170d3236303732383232313431375a170d3237303732383232313431375a30193117301506" &
+        "035504030c0e7365636f6e642e6578616d706c6530820122300d06092a864886f70d01010105000382010f0030" &
+        "82010a0282010100a169fd82209088be49800f464b442f6e1d1fdd823084ff0a76bfbc7ec44287274a752dba1d" &
+        "1926442087bff21dd051ce99fdf42f8cb4b30426d8240f922287b089d4e37a4add7ba8181dfc701369be8291e5" &
+        "7166ba7922d556eed539d1c2627b160cdd7c71ba8598319435dc4c2087d062ed23a84313fae6666f45b3050b88" &
+        "46c8b8fc2fca5b4e5018545e10a3cb8c7cdfbfa133cadb29acd896362cafb931bdfb31b4be226ba91567d38499" &
+        "84b6fc1f6f9211550ea01e522aeaf7523e23c59e22ed3fc55bbdcd1e4a7019ad93f5c2c8cb603d849af6c0c0d6" &
+        "99147c7c0073baaf455e0259cf099305383c5bebcf32113e1d82db30e615de58a0eed56dbb5b37020301000130" &
+        "0d06092a864886f70d01010b050003820101006066b5357a33b4941a2fd365f2792c297d6e82829fc3ac6bdd8c" &
+        "fc5efe3861139b38592af36fd731af2ee9f4a09689f01604097636072dac2cb00a319eded804527a0631c7ef52" &
+        "1f610c466cc33d8bdc9aaaf3e77b13b5ff004a51f837af3c6cba3ba6bf882e293e2d23a35c5654b4827341e1fd" &
+        "3afd7be93bb546b93bdf0983a8cbdde40b23ffd240220362c028f824e44fa2792a6a5fee2af6878df9c401ffba" &
+        "c2681e43effd2c225cc03b7bbb09affc9e1b962feef1da1dbc1f23597487d936c21e712fd4085290cc5f5eef03" &
+        "237d417b683db649c246f384d9190d16873cb75c50abe79b62e349772306da7e154bc2655aa9306c63ea33ce84" &
+        "0832a2c904";
+
       OCSP_Unauthorized : constant String :=
         "3082050c0a0100a08205053082050106092b0601050507300101048204f2308204ee308196a11e301c311a3018" &
         "06035504030c116e6f746f6373702d726573706f6e646572180f32303236303732383230323431345a30633061" &
@@ -3505,6 +3555,40 @@ procedure Tests is
                 & CO.Result_Image (CO.Verify (Item, Leaf, CA)));
          Check (CO.Responder (Item) = CO.Not_Established,
                 "and no responder is established for it");
+      end;
+
+      --  A responder may answer about several certificates at once, so the
+      --  reply has to be searched rather than its first entry taken. Asking
+      --  about the second certificate in this reply used to give
+      --  Wrong_Certificate -- fail-closed, but an answer that was there and
+      --  was not found.
+      declare
+         Second : constant X509C.Certificate :=
+           X509C.Decode_DER
+             (From_Hex (OCSP_Second_DER), CryptoLib.ASN1.Default_Limits,
+              Status);
+         First_Item : CO.Response :=
+           CO.Decode_Response
+             (From_Hex (OCSP_Multi), CryptoLib.ASN1.Default_Limits, Status);
+         Second_Item : CO.Response :=
+           CO.Decode_Response
+             (From_Hex (OCSP_Multi), CryptoLib.ASN1.Default_Limits, Status);
+      begin
+         Check (Status = CryptoLib.ASN1.Errors.Ok,
+                "a reply covering two certificates decodes");
+
+         Check (CO.Verify (First_Item, Leaf, CA) = CO.Accepted,
+                "the first certificate is answered, got "
+                & CO.Result_Image (CO.Verify (First_Item, Leaf, CA)));
+         Check (CO.Certificate_Status_Of (First_Item) = CO.Revoked,
+                "and it is the revoked one");
+
+         Check (CO.Verify (Second_Item, Second, CA) = CO.Accepted,
+                "the second certificate is answered too, got "
+                & CO.Result_Image (CO.Verify (Second_Item, Second, CA)));
+         Check (CO.Certificate_Status_Of (Second_Item) = CO.Good,
+                "and it is good -- the status is its own rather than the "
+                & "first entry's");
       end;
 
       --  A response about somebody else's certificate. Verified against the

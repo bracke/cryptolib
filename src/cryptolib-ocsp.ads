@@ -178,6 +178,7 @@ private
       Signature    : Span;
       Signer_Cert  : Span;
       Has_Signer   : Boolean := False;
+      Responses    : Span;
       Name_Hash    : Span;
       Key_Hash     : Span;
       Serial       : Span;
