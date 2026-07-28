@@ -8,6 +8,7 @@ with CryptoLib.Ed25519;
 with CryptoLib.Errors;
 with CryptoLib.Hashes;
 with CryptoLib.Macs;
+with CryptoLib.PEM;
 with CryptoLib.Random;
 
 with CryptoLib.Secure_Wipe;
@@ -455,70 +456,71 @@ package body CryptoLib.Certificates is
       end if;
    end Base64_Value;
 
+   --  Decode the first armoured block in Text.
+   --
+   --  Delegates to CryptoLib.PEM, which permits only base64, padding and
+   --  whitespace between the armour lines. The decoder this replaced skipped
+   --  anything it did not recognise, so a preamble -- keytool naming the
+   --  alias, openssl -text printing the certificate first -- was swept into
+   --  the payload and decoded to something else entirely. That was a real
+   --  failure here, fixed once by moving where the scan started; this removes
+   --  the class of it rather than the instance.
+   --
+   --  Which block is chosen is unchanged: the first one, whatever its label.
+   --  The label is read from the armour and required to close the block, so a
+   --  BEGIN CERTIFICATE ending in END PRIVATE KEY is now refused rather than
+   --  quietly decoded.
    function Base64_Decode (Text : String) return String is
-      Clean  : Unbounded_String;
-      Result : Unbounded_String;
-      I      : Natural;
-      A      : Integer;
-      B      : Integer;
-      C      : Integer;
-      D      : Integer;
-      Header : constant Natural := Ada.Strings.Fixed.Index (Text, "-----BEGIN");
-      First  : Natural;
-      Last   : Natural;
-      Footer : Natural;
+      use type CryptoLib.PEM.Decode_Status;
+
+      Opening : constant String := "-----BEGIN ";
+      Head    : constant Natural :=
+        Ada.Strings.Fixed.Index (Text, Opening);
+      Tail    : Natural;
    begin
-      --  Start at the armour, wherever it is. This used to skip one line and
-      --  begin there, which holds only when the header is the first line: a
-      --  reader that prints something before the certificate -- keytool -rfc
-      --  names the alias and the entry type first, openssl -text prints the
-      --  whole certificate -- had every letter of that preamble swept into the
-      --  base64, and the result decoded to a different certificate or to
-      --  nothing.
-      First := (if Header = 0 then Text'First else Header);
-      First := Ada.Strings.Fixed.Index (Text (First .. Text'Last), "" & ASCII.LF);
-
-      if First = 0 then
-         First := Text'First;
-      else
-         First := First + 1;
+      if Head = 0 then
+         return "";
       end if;
 
-      Footer := Ada.Strings.Fixed.Index (Text (First .. Text'Last), "-----END");
-      if Footer = 0 then
-         Last := Text'Last;
-      else
-         Last := Footer - 1;
+      Tail :=
+        Ada.Strings.Fixed.Index
+          (Text (Head + Opening'Length .. Text'Last), "-----");
+      if Tail = 0 then
+         return "";
       end if;
 
-      for Ch of Text (First .. Last) loop
-         if Base64_Value (Ch) >= 0 or else Ch = '=' then
-            Append (Clean, Ch);
-         end if;
-      end loop;
       declare
-         S : constant String := To_String (Clean);
+         Label  : constant String :=
+           Text (Head + Opening'Length .. Tail - 1);
+         Buffer : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset
+                   (CryptoLib.PEM.Maximum_Decoded_Length (Text)));
+         Last   : Ada.Streams.Stream_Element_Offset;
+         From   : Positive := Text'First;
+         Status : CryptoLib.PEM.Decode_Status;
       begin
-         I := S'First;
-         while I + 3 <= S'Last loop
-            A := Base64_Value (S (I));
-            B := Base64_Value (S (I + 1));
-            C := (if S (I + 2) = '=' then -1 else Base64_Value (S (I + 2)));
-            D := (if S (I + 3) = '=' then -1 else Base64_Value (S (I + 3)));
-            if A < 0 or else B < 0 then
-               return "";
-            end if;
-            Append (Result, Byte (A * 4 + B / 16));
-            if C >= 0 then
-               Append (Result, Byte ((B mod 16) * 16 + C / 4));
-            end if;
-            if C >= 0 and then D >= 0 then
-               Append (Result, Byte ((C mod 4) * 64 + D));
-            end if;
-            I := I + 4;
-         end loop;
+         if Label'Length = 0 then
+            return "";
+         end if;
+
+         CryptoLib.PEM.Decode_Block
+           (Text, Label, From, Buffer, Last, Status);
+         if Status /= CryptoLib.PEM.Ok then
+            return "";
+         end if;
+
+         declare
+            Result : String (1 .. Natural (Last - Buffer'First + 1));
+         begin
+            for I in Result'Range loop
+               Result (I) :=
+                 Character'Val
+                   (Buffer (Buffer'First
+                            + Ada.Streams.Stream_Element_Offset (I - 1)));
+            end loop;
+            return Result;
+         end;
       end;
-      return To_String (Result);
    end Base64_Decode;
 
    function Contains (Data : String; Needle : String) return Boolean;

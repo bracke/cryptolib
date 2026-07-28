@@ -1,4 +1,5 @@
 with Ada.Streams;
+with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded;
 with Ada.Text_IO;
 with Interfaces;
@@ -3007,6 +3008,79 @@ procedure Tests is
    end Check_X509_Names;
 
 
+   --  The armour handling behind the issuance API, now that it goes through
+   --  the strict decoder.
+   --
+   --  What this pins is not that good input works -- the certificate tests
+   --  already cover that -- but that damaged input is refused rather than
+   --  decoded into something else. A decoder that skips what it does not
+   --  recognise turns one stray character into a different certificate, and
+   --  the fingerprint of that certificate is a number nobody can match.
+   procedure Check_Certificate_Armour is
+      CA_PEM  : Unbounded_String;
+      CA_Key  : Unbounded_String;
+      Outcome : CryptoLib.Certificates.Certificate_Status;
+   begin
+      Outcome :=
+        CryptoLib.Certificates.Create_Local_CA
+          ("armour-ca", CA_PEM, CA_Key,
+           CryptoLib.Certificates.P384_Key);
+      Check (Outcome = CryptoLib.Certificates.Ok, "fixture: CA created");
+
+      declare
+         Good        : constant String := To_String (CA_PEM);
+         Fingerprint : constant String :=
+           CryptoLib.Certificates.Fingerprint (Good);
+      begin
+         Check (Fingerprint'Length > 0,
+                "a well-formed certificate has a fingerprint");
+
+         --  A stray character inside the base64. Skipping it would shift
+         --  every following bit and yield a different certificate with a
+         --  perfectly plausible fingerprint.
+         declare
+            Body_Start : constant Natural :=
+              Ada.Strings.Fixed.Index (Good, "-----" & ASCII.LF) + 6;
+            Damaged    : String := Good;
+         begin
+            Check (Body_Start in Good'Range,
+                   "fixture: the armour body was found");
+            Damaged (Body_Start + 4) := '!';
+            Check (CryptoLib.Certificates.Fingerprint (Damaged) = "",
+                   "a certificate with a stray character in its armour has "
+                   & "no fingerprint, rather than a different one");
+            Check (not CryptoLib.Certificates.Same_Certificate
+                         (Good, Damaged),
+                   "damaged armour does not compare equal to the original");
+         end;
+
+         --  Armour that opens as one thing and closes as another.
+         declare
+            Crossed : constant String :=
+              "-----BEGIN CERTIFICATE-----" & ASCII.LF & "QUJD" & ASCII.LF
+              & "-----END PRIVATE KEY-----" & ASCII.LF;
+         begin
+            Check (CryptoLib.Certificates.Fingerprint (Crossed) = "",
+                   "a block closed by a different label is refused");
+         end;
+
+         --  Text before the armour must not become part of the payload. This
+         --  is the shape that failed here once: keytool names the alias
+         --  first, and openssl -text prints the whole certificate.
+         declare
+            With_Preamble : constant String :=
+              "Alias name: mykey" & ASCII.LF
+              & "Entry type: PrivateKeyEntry" & ASCII.LF & Good;
+         begin
+            Check (CryptoLib.Certificates.Fingerprint (With_Preamble)
+                     = Fingerprint,
+                   "a preamble before the armour does not change the "
+                   & "certificate");
+         end;
+      end;
+   end Check_Certificate_Armour;
+
+
 begin
    Check_PBKDF2_SHA1;
    Check_PBKDF2_SHA2;
@@ -3032,6 +3106,7 @@ begin
    Check_X509_Identity;
    Check_X509_Purposes;
    Check_X509_Names;
+   Check_Certificate_Armour;
    Check_Identity_Predicates;
    Check_PKCS12_Mac_Key;
    Check_ECDSA_P384_Verify;
