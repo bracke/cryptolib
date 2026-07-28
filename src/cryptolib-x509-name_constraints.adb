@@ -3,6 +3,7 @@ with Ada.Streams;
 with CryptoLib.ASN1.DER;
 with CryptoLib.ASN1.Errors;
 with CryptoLib.X509.Extensions;
+with CryptoLib.X509.Names;
 
 package body CryptoLib.X509.Name_Constraints is
 
@@ -14,6 +15,7 @@ package body CryptoLib.X509.Name_Constraints is
 
    package DER_Reader renames CryptoLib.ASN1.DER;
    package XE renames CryptoLib.X509.Extensions;
+   package XN renames CryptoLib.X509.Names;
 
    function Verdict_Image (Result : Verdict) return String is
    begin
@@ -306,6 +308,137 @@ package body CryptoLib.X509.Name_Constraints is
       return URI (Start .. Stop);
    end Host_Of_URI;
 
+   --  The host part of a mail address.
+   function Host_Of_Address (Address : String) return String is
+      At_Sign : Natural := 0;
+   begin
+      for I in Address'Range loop
+         if Address (I) = '@' then
+            At_Sign := I;
+         end if;
+      end loop;
+
+      if At_Sign = 0 or else At_Sign = Address'Last then
+         return "";
+      end if;
+
+      return Address (At_Sign + 1 .. Address'Last);
+   end Host_Of_Address;
+
+   --  Is this address within the mail subtree Base?
+   --
+   --  RFC 5280 gives the constraint three readings, told apart by its own
+   --  shape. With an "@" it is one mailbox and must match entirely. Without
+   --  one it is a host, and every mailbox on that host is covered -- but not
+   --  on a host below it. With a leading dot it is a domain, and every host
+   --  under it is covered while the domain's own host is not. Collapsing
+   --  these into a suffix test would let a constraint for one mailbox cover a
+   --  whole domain.
+   function Within_Email (Base : String; Address : String) return Boolean is
+      Host : constant String := Host_Of_Address (Address);
+
+      function Same_Fold (Left : String; Right : String) return Boolean is
+      begin
+         if Left'Length /= Right'Length then
+            return False;
+         end if;
+         for I in 0 .. Left'Length - 1 loop
+            if Lower (Left (Left'First + I))
+              /= Lower (Right (Right'First + I))
+            then
+               return False;
+            end if;
+         end loop;
+         return True;
+      end Same_Fold;
+
+      Mailbox : Boolean := False;
+   begin
+      if Base'Length = 0 or else Host'Length = 0 then
+         return False;
+      end if;
+
+      for C of Base loop
+         if C = '@' then
+            Mailbox := True;
+         end if;
+      end loop;
+
+      if Mailbox then
+         --  One mailbox. The local part is compared exactly, since a mail
+         --  system may distinguish case there and this has no business
+         --  deciding it does not; the host is compared without case, as host
+         --  names are.
+         declare
+            Base_Host : constant String := Host_Of_Address (Base);
+            Base_At   : Natural := 0;
+            Addr_At   : Natural := 0;
+         begin
+            for I in Base'Range loop
+               if Base (I) = '@' then
+                  Base_At := I;
+               end if;
+            end loop;
+            for I in Address'Range loop
+               if Address (I) = '@' then
+                  Addr_At := I;
+               end if;
+            end loop;
+
+            if Base_At = 0 or else Addr_At = 0 then
+               return False;
+            end if;
+
+            return Base (Base'First .. Base_At - 1)
+                     = Address (Address'First .. Addr_At - 1)
+              and then Same_Fold (Base_Host, Host);
+         end;
+      end if;
+
+      if Base (Base'First) = '.' then
+         --  A domain: every host under it, but not the domain's own host.
+         return Within_DNS (Base, Host);
+      end if;
+
+      --  A host: every mailbox on it, and nothing below it.
+      return Same_Fold (Base, Host);
+   end Within_Email;
+
+   --  The mail address a constraint has to be applied to beyond the
+   --  alternative names.
+   --
+   --  Legacy certificates put the address in the subject's emailAddress
+   --  attribute rather than in an alternative name, and a reader that goes
+   --  looking for an address will find it there when there is no other. Same
+   --  reasoning as the common name: constrain the field that can be read, or
+   --  a constrained CA can certify any address by writing it where the
+   --  constraint does not look. Only for end-entity certificates, and only
+   --  when there is no rfc822 alternative name.
+   function Address_From_Subject (Item : Certificate) return String is
+      Constraints : constant XE.Basic_Constraints :=
+        XE.Get_Basic_Constraints (Item);
+      Where       : Natural;
+   begin
+      if Constraints.Present and then Constraints.Is_CA then
+         return "";
+      end if;
+
+      for N in 1 .. XE.Subject_Alternative_Name_Count (Item) loop
+         if XE.Subject_Alternative_Name_Kind (Item, N) = XE.Email_Address then
+            return "";
+         end if;
+      end loop;
+
+      Where :=
+        XN.Find_Attribute
+          (Item, XN.Subject_Name, CryptoLib.X509.Email_Address);
+      if Where = 0 then
+         return "";
+      end if;
+
+      return XN.Attribute_Text (Item, XN.Subject_Name, Where);
+   end Address_From_Subject;
+
    --  Walk one GeneralSubtrees, applying every base to the certificate.
    --
    --  Reports whether any subtree of a given kind was present, and whether
@@ -319,10 +452,12 @@ package body CryptoLib.X509.Name_Constraints is
       Any_IP     : out Boolean;
       Any_DN     : out Boolean;
       Any_URI    : out Boolean;
+      Any_Mail   : out Boolean;
       Inside_DNS : out Boolean;
       Inside_IP  : out Boolean;
       Inside_DN  : out Boolean;
       Inside_URI : out Boolean;
+      Inside_Mail : out Boolean;
       Usable     : out Boolean)
    is
       Limits : constant Decode_Limits := Default_Limits;
@@ -330,15 +465,18 @@ package body CryptoLib.X509.Name_Constraints is
       Status : CryptoLib.ASN1.Errors.Decode_Status;
       Names  : constant Natural := XE.Subject_Alternative_Name_Count (Item);
       Common : constant String := Host_From_Common_Name (Item);
+      Mail   : constant String := Address_From_Subject (Item);
    begin
       Any_DNS := False;
       Any_IP := False;
       Any_DN := False;
       Any_URI := False;
+      Any_Mail := False;
       Inside_DNS := False;
       Inside_IP := False;
       Inside_DN := False;
       Inside_URI := False;
+      Inside_Mail := False;
       Usable := True;
 
       while not DER_Reader.At_End (Cursor, Region.Last) loop
@@ -411,6 +549,36 @@ package body CryptoLib.X509.Name_Constraints is
                      end if;
                   end loop;
 
+               when 1 =>
+                  --  An rfc822 subtree.
+                  Any_Mail := True;
+                  declare
+                     Text : String (1 .. Content_Length (Base));
+                  begin
+                     for I in Text'Range loop
+                        Text (I) :=
+                          Character'Val (Data (Base.First + Offset (I - 1)));
+                     end loop;
+
+                     for N in 1 .. Names loop
+                        if XE.Subject_Alternative_Name_Kind (Item, N)
+                          = XE.Email_Address
+                          and then Within_Email
+                                     (Text,
+                                      XE.Subject_Alternative_Name_Text
+                                        (Item, N))
+                        then
+                           Inside_Mail := True;
+                        end if;
+                     end loop;
+
+                     if Mail'Length > 0
+                       and then Within_Email (Text, Mail)
+                     then
+                        Inside_Mail := True;
+                     end if;
+                  end;
+
                when 4 =>
                   --  A directory-name subtree, which constrains the subject
                   --  itself rather than an alternative name -- that is how a
@@ -453,9 +621,10 @@ package body CryptoLib.X509.Name_Constraints is
                   end;
 
                when others =>
-                  --  A form this cannot apply -- an email or an EDI party
-                  --  name. Saying so beats ignoring it: an unapplied
-                  --  constraint is not a constraint.
+                  --  A form this cannot apply -- an EDI party name, an
+                  --  x400Address, a registered identifier. Saying so beats
+                  --  ignoring it: an unapplied constraint is not a
+                  --  constraint.
                   Usable := False;
                   return;
             end case;
@@ -477,6 +646,7 @@ package body CryptoLib.X509.Name_Constraints is
       Has_DNS : Boolean := False;
       Has_IP  : Boolean := False;
       Has_URI : Boolean := False;
+      Has_Mail : Boolean := False;
       Has_DN  : constant Boolean :=
         CryptoLib.X509.Certificates.Subject_Bytes (Item)'Length > 0;
    begin
@@ -491,8 +661,17 @@ package body CryptoLib.X509.Name_Constraints is
             Has_IP := True;
          elsif XE.Subject_Alternative_Name_Kind (Item, N) = XE.URI then
             Has_URI := True;
+         elsif XE.Subject_Alternative_Name_Kind (Item, N) = XE.Email_Address
+         then
+            Has_Mail := True;
          end if;
       end loop;
+
+      --  As with the common name: an address the reader will find counts as
+      --  an address for this purpose.
+      if Address_From_Subject (Item)'Length > 0 then
+         Has_Mail := True;
+      end if;
 
       --  A common name that will be read as a host counts as a DNS name for
       --  this purpose, or the permitted-subtree test below would not apply to
@@ -517,10 +696,12 @@ package body CryptoLib.X509.Name_Constraints is
             Any_IP     : Boolean;
             Any_DN     : Boolean;
             Any_URI    : Boolean;
+            Any_Mail   : Boolean;
             Inside_DNS : Boolean;
             Inside_IP  : Boolean;
             Inside_DN  : Boolean;
             Inside_URI : Boolean;
+            Inside_Mail : Boolean;
             Usable     : Boolean;
          begin
             DER_Reader.Read
@@ -533,7 +714,8 @@ package body CryptoLib.X509.Name_Constraints is
 
             Scan_Subtrees
               (Constraints_Value, Tag, Item, Any_DNS, Any_IP, Any_DN, Any_URI,
-               Inside_DNS, Inside_IP, Inside_DN, Inside_URI, Usable);
+               Any_Mail, Inside_DNS, Inside_IP, Inside_DN, Inside_URI,
+               Inside_Mail, Usable);
             if not Usable then
                return Unsupported_Constraint;
             end if;
@@ -556,11 +738,14 @@ package body CryptoLib.X509.Name_Constraints is
                   if Any_URI and then Has_URI and then not Inside_URI then
                      return Excluded;
                   end if;
+                  if Any_Mail and then Has_Mail and then not Inside_Mail then
+                     return Excluded;
+                  end if;
 
                when 1 =>
                   --  Excluded: falling inside any subtree is fatal.
                   if Inside_DNS or else Inside_IP or else Inside_DN
-                    or else Inside_URI
+                    or else Inside_URI or else Inside_Mail
                   then
                      return Excluded;
                   end if;

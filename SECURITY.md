@@ -130,18 +130,21 @@ The RNG **fails closed**: if no OS source is available it returns
   validity windows against a caller-supplied time, basic constraints and path
   length, keyCertSign, loops, and unknown critical extensions, and requires the
   path to end at a certificate the caller declares trusted. **Name constraints
-  are enforced** for DNS, IP, directory-name and URI subtrees, by every CA
-  above a certificate
+  are enforced** for DNS, IP, directory-name, URI and mail subtrees, by every
+  CA above a certificate
   rather than only its immediate issuer. A DNS subtree also covers the subject
   common name of an end-entity certificate that carries no DNS alternative
   name -- which is exactly when `X509.Identity` will read that field as a host
   if a caller enables the fallback, so the constraint and the identity check
   cover the same ground rather than leaving a gap between them; a constraint naming a form this crate
-  cannot apply (an email subtree, an EDI party name) makes the chain fail
+  cannot apply (an EDI party name, an x400 address, a registered identifier)
+  makes the chain fail
   rather than be checked against only the part that could be applied. A
   directory-name subtree constrains the certificate's own subject as a prefix
   of its relative names; a URI subtree constrains the host the URI names,
-  ignoring any credentials, port or path. **Certificate policy
+  ignoring any credentials, port or path; a mail subtree is read as a mailbox,
+  a host or a domain according to its own shape, and covers an address in the
+  subject when the certificate carries no rfc822 alternative name. **Certificate policy
   processing is not implemented**: `certificatePolicies` is recognised because
   it restricts nothing without a caller-supplied policy set, while a critical
   `policyConstraints` or `inhibitAnyPolicy` makes a chain fail, since honouring

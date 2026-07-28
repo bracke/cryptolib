@@ -51,7 +51,7 @@ Do not run plain system `gnat*`, `gnatmake`, `gnatls`, `gnatprove`,
 | `CryptoLib.Identities` | a chain and its key, checked to belong together before use |
 | `CryptoLib.X509.Certificates` | parsed X.509 certificates: inspection, extensions, signature verification |
 | `CryptoLib.X509.Validation` | path validation against explicit trust anchors (no path building, no revocation) |
-| `CryptoLib.X509.Name_Constraints` | DNS, IP, directory-name and URI subtrees a constrained CA may certify, enforced by the validator |
+| `CryptoLib.X509.Name_Constraints` | DNS, IP, directory-name, URI and mail subtrees a constrained CA may certify, enforced by the validator |
 | `CryptoLib.X509.Identity` | RFC 9525 service identity matching: DNS names, wildcards, IP addresses |
 | `CryptoLib.X509.Purposes` | may this certificate serve TLS, sign code, act as a CA |
 | `CryptoLib.X509.Names` | distinguished names by attribute; RFC 4514 formatting kept separate |
