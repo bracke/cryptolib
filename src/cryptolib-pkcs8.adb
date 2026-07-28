@@ -1,0 +1,263 @@
+with Ada.Streams;
+with System.Storage_Elements;
+
+with CryptoLib.ASN1.DER;
+with CryptoLib.ASN1.OIDs;
+with CryptoLib.Secure_Wipe;
+
+package body CryptoLib.PKCS8 is
+
+   use CryptoLib.ASN1;
+   use CryptoLib.ASN1.Errors;
+   use CryptoLib.X509;
+   use type Ada.Streams.Stream_Element;
+   use type Ada.Streams.Stream_Element_Offset;
+
+   package DER_Reader renames CryptoLib.ASN1.DER;
+   package OID_Table renames CryptoLib.ASN1.OIDs;
+
+   Empty_Octets : constant Octets (1 .. 0) := [others => 0];
+
+   procedure Wipe (Item : in out Private_Key) is
+   begin
+      if Item.Held > 0 then
+         CryptoLib.Secure_Wipe.Wipe
+           (Item.DER (Item.DER'First)'Address, Natural (Item.Held));
+      end if;
+      Item.Present := False;
+      Item.Kind := Unknown_Public_Key_Algorithm;
+      Item.Value := (First => 1, Last => 0);
+      Item.Held := 0;
+   end Wipe;
+
+   overriding procedure Finalize (Item : in out Private_Key) is
+   begin
+      Wipe (Item);
+   end Finalize;
+
+   procedure Decode_DER
+     (Data   : Octets;
+      Limits : Decode_Limits;
+      Item   : out Private_Key;
+      Status : out Decode_Status)
+   is
+      Cursor : Offset;
+      Outer  : Element;
+      Field  : Element;
+      Alg    : Element;
+      Alg_ID : Element;
+      Param  : Element;
+      Has_P  : Boolean := False;
+      Inner  : Offset;
+      Kind   : Public_Key_Algorithm := Unknown_Public_Key_Algorithm;
+   begin
+      Status := Ok;
+      Wipe (Item);
+
+      if Data'Length = 0 then
+         Status := Truncated_Input;
+         return;
+      end if;
+
+      if Natural (Data'Length) > Maximum_Key_Size
+        or else Natural (Data'Length) > Limits.Maximum_Input_Size
+      then
+         Status := Size_Limit_Exceeded;
+         return;
+      end if;
+
+      for I in Data'Range loop
+         Item.DER (Offset (I - Data'First) + 1) := Data (I);
+      end loop;
+      Item.Held := Data'Length;
+
+      declare
+         Work : Octets renames Item.DER;
+         Last : constant Offset := Item.Held;
+      begin
+         Cursor := Work'First;
+         DER_Reader.Read_Sequence
+           (Work, Cursor, Last, 0, Limits, Outer, Status);
+         if Status /= Ok then
+            Wipe (Item);
+            return;
+         end if;
+
+         if not DER_Reader.At_End (Cursor, Last) then
+            Status := Trailing_Data;
+            Wipe (Item);
+            return;
+         end if;
+
+         Inner := Outer.First;
+
+         --  version INTEGER. An EncryptedPrivateKeyInfo begins with an
+         --  AlgorithmIdentifier instead, so a SEQUENCE here rather than an
+         --  integer is the encrypted form and is refused as unsupported
+         --  rather than as malformed.
+         declare
+            Look : Offset := Inner;
+            Peek : Element;
+            Try  : Decode_Status;
+         begin
+            DER_Reader.Read (Work, Look, Outer.Last, 1, Limits, Peek, Try);
+            if Try = Ok and then Peek.Constructed then
+               Status := Unsupported_Encoding;
+               Wipe (Item);
+               return;
+            end if;
+         end;
+
+         declare
+            Version : Natural;
+         begin
+            DER_Reader.Read_Small_Integer
+              (Work, Inner, Outer.Last, 1, Limits, Version, Status);
+            if Status /= Ok then
+               Wipe (Item);
+               return;
+            end if;
+            if Version > 1 then
+               Status := Unsupported_Encoding;
+               Wipe (Item);
+               return;
+            end if;
+         end;
+
+         --  privateKeyAlgorithm
+         DER_Reader.Read_Sequence
+           (Work, Inner, Outer.Last, 1, Limits, Alg, Status);
+         if Status /= Ok then
+            Wipe (Item);
+            return;
+         end if;
+
+         declare
+            Part : Offset := Alg.First;
+         begin
+            DER_Reader.Read_Object_Identifier
+              (Work, Part, Alg.Last, 2, Limits, Alg_ID, Status);
+            if Status /= Ok then
+               Wipe (Item);
+               return;
+            end if;
+
+            if not DER_Reader.At_End (Part, Alg.Last) then
+               DER_Reader.Read
+                 (Work, Part, Alg.Last, 2, Limits, Param, Status);
+               if Status /= Ok then
+                  Wipe (Item);
+                  return;
+               end if;
+               Has_P := True;
+            end if;
+         end;
+
+         if OID_Table.Matches (Work, Alg_ID, OID_Table.Ed25519) then
+            Kind := Ed25519;
+         elsif OID_Table.Matches (Work, Alg_ID, OID_Table.Ed448) then
+            Kind := Ed448;
+         elsif OID_Table.Matches (Work, Alg_ID, OID_Table.RSA_Encryption) then
+            Kind := RSA;
+         elsif OID_Table.Matches (Work, Alg_ID, OID_Table.EC_Public_Key) then
+            if not Has_P then
+               Kind := Unknown_Public_Key_Algorithm;
+            elsif OID_Table.Matches (Work, Param, OID_Table.Prime256v1) then
+               Kind := ECDSA_P256;
+            elsif OID_Table.Matches (Work, Param, OID_Table.Secp384r1) then
+               Kind := ECDSA_P384;
+            elsif OID_Table.Matches (Work, Param, OID_Table.Secp521r1) then
+               Kind := ECDSA_P521;
+            else
+               Kind := Unknown_Public_Key_Algorithm;
+            end if;
+         end if;
+
+         Item.Kind := Kind;
+
+         --  privateKey OCTET STRING
+         DER_Reader.Read_Octet_String
+           (Work, Inner, Outer.Last, 1, Limits, Field, Status);
+         if Status /= Ok then
+            Wipe (Item);
+            return;
+         end if;
+
+         case Kind is
+            when Ed25519 | Ed448 =>
+               --  The seed is itself wrapped in an octet string, which is
+               --  the one place this encoding doubles up.
+               declare
+                  Within : Offset := Field.First;
+                  Seed   : Element;
+               begin
+                  DER_Reader.Read_Octet_String
+                    (Work, Within, Field.Last, 2, Limits, Seed, Status);
+                  if Status /= Ok then
+                     Wipe (Item);
+                     return;
+                  end if;
+                  Item.Value := (First => Seed.First, Last => Seed.Last);
+               end;
+
+            when ECDSA_P256 | ECDSA_P384 | ECDSA_P521 =>
+               --  ECPrivateKey ::= SEQUENCE { version, privateKey OCTET
+               --  STRING, [0] parameters, [1] publicKey }. The scalar is the
+               --  octet string, found by walking to it rather than by
+               --  looking for bytes that resemble it.
+               declare
+                  Within : Offset := Field.First;
+                  Key    : Element;
+                  Scalar : Element;
+                  Ver    : Natural;
+               begin
+                  DER_Reader.Read_Sequence
+                    (Work, Within, Field.Last, 2, Limits, Key, Status);
+                  if Status /= Ok then
+                     Wipe (Item);
+                     return;
+                  end if;
+
+                  declare
+                     Part : Offset := Key.First;
+                  begin
+                     DER_Reader.Read_Small_Integer
+                       (Work, Part, Key.Last, 3, Limits, Ver, Status);
+                     if Status /= Ok then
+                        Wipe (Item);
+                        return;
+                     end if;
+
+                     DER_Reader.Read_Octet_String
+                       (Work, Part, Key.Last, 3, Limits, Scalar, Status);
+                     if Status /= Ok then
+                        Wipe (Item);
+                        return;
+                     end if;
+                     Item.Value :=
+                       (First => Scalar.First, Last => Scalar.Last);
+                  end;
+               end;
+
+            when others =>
+               --  RSA and anything unrecognised: the structure decoded, and
+               --  there is no single private value to hand back.
+               Item.Value := (First => 1, Last => 0);
+         end case;
+
+         Item.Present := True;
+      end;
+   end Decode_DER;
+
+   function Is_Present (Item : Private_Key) return Boolean
+   is (Item.Present);
+
+   function Algorithm_Of (Item : Private_Key) return Public_Key_Algorithm
+   is (Item.Kind);
+
+   function Private_Value (Item : Private_Key) return Octets
+   is (if not Item.Present or else Item.Value.Last < Item.Value.First
+       then Empty_Octets
+       else Item.DER (Item.Value.First .. Item.Value.Last));
+
+end CryptoLib.PKCS8;

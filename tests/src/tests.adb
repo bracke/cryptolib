@@ -16,6 +16,7 @@ with CryptoLib.X509.Names;
 with CryptoLib.X509.CRLs;
 with CryptoLib.OCSP;
 with CryptoLib.PKCS10;
+with CryptoLib.PKCS8;
 with CryptoLib.X509.Validation;
 with CryptoLib.X509.Path_Building;
 with CryptoLib.X509.Signatures;
@@ -3843,6 +3844,123 @@ procedure Tests is
    end Check_PKCS10;
 
 
+   --  PKCS#8 private keys, decoded from the structure rather than found by
+   --  looking for bytes that resemble a key.
+   procedure Check_PKCS8 is
+      use type CryptoLib.ASN1.Errors.Decode_Status;
+      use type CryptoLib.X509.Public_Key_Algorithm;
+
+      package P8 renames CryptoLib.PKCS8;
+
+      P8_EC : constant String :=
+        "3081b6020100301006072a8648ce3d020106052b8104002204819e30819b02010104300dbe7e740d398458dc39" &
+        "a3f0d7e71e7132b65e26af9a13766441d3b1c79a30f141700119bb0be582c54a8f09fad2815ba16403620004d8" &
+        "e1d6e84534ed29f11bc644c46499728c15b025b8bfbaa8238d053946fed7f22fced5751f61c20208bf534ec12e" &
+        "1a8abf3ed710988a642539fd5e33f5da33755b63aad074d171ba133c82b99bfca240d3fd6e5408e0f2ca6b82d5" &
+        "c721f9e7d8";
+
+      P8_ED : constant String :=
+        "302e020100300506032b65700422042080ab3b0dfee005444ee6adfa364f304e2ae937d00c1d30ce92cfeb3697" &
+        "165818";
+
+      P8_ENCRYPTED : constant String :=
+        "3082011c305706092a864886f70d01050d304a302906092a864886f70d01050c301c0408284f2424c1ce1bd702" &
+        "020800300c06082a864886f70d02090500301d060960864801650304012a04106fb723fb9ef3b3abd27e95015b" &
+        "9e9bd40481c05a630d1d00b1af14808281d59b93505214f7d933ee5bf2a6d1d993b50beadc93404590b57d9f2e" &
+        "543acae2938d951742ad0f56338ea5f27ae865c8f51cf900aae0c2ccd3bde779e0fe9dde9d8e9fe779c1e34602" &
+        "976f3cd7b4320e251fdab8f79b02ac2d1e3093feba822275034d86bff7eaaa46aa7694705b98120138ff47dc89" &
+        "68febec15edf5ccbf1749d626c53bca650c92de959bc6425624c83d6ab1e8922191a7e69713e9c4106140c8b98" &
+        "91606bda2f21cc102304985001e9ca7e8f07";
+
+      function From_Hex
+        (Text : String) return Ada.Streams.Stream_Element_Array
+      is
+         Result : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (Text'Length / 2));
+         function Nibble (C : Character) return Natural
+         is (case C is
+                when '0' .. '9' => Character'Pos (C) - Character'Pos ('0'),
+                when others     => Character'Pos (C) - Character'Pos ('a') + 10);
+      begin
+         for I in Result'Range loop
+            Result (I) :=
+              Ada.Streams.Stream_Element
+                (Nibble (Text (Text'First + 2 * Natural (I - 1))) * 16
+                 + Nibble (Text (Text'First + 2 * Natural (I - 1) + 1)));
+         end loop;
+         return Result;
+      end From_Hex;
+
+      Status : CryptoLib.ASN1.Errors.Decode_Status;
+   begin
+      --  A P-384 key made by OpenSSL. The scalar is the octet string inside
+      --  the ECPrivateKey, reached by walking there.
+      declare
+         Item : P8.Private_Key;
+      begin
+         P8.Decode_DER
+           (From_Hex (P8_EC), CryptoLib.ASN1.Default_Limits, Item, Status);
+         Check (Status = CryptoLib.ASN1.Errors.Ok and then P8.Is_Present (Item),
+                "an EC private key decodes: "
+                & CryptoLib.ASN1.Errors.Status_Image (Status));
+         Check (P8.Algorithm_Of (Item) = CryptoLib.X509.ECDSA_P384,
+                "its curve is read from the algorithm parameters");
+         Check (P8.Private_Value (Item)'Length = 48,
+                "a P-384 scalar is 48 octets, got"
+                & Natural'Image (Natural (P8.Private_Value (Item)'Length)));
+
+         --  Wiping is not only a matter of scope: it can be asked for.
+         P8.Wipe (Item);
+         Check (not P8.Is_Present (Item),
+                "a wiped key is no longer present");
+         Check (P8.Private_Value (Item)'Length = 0,
+                "and holds nothing");
+      end;
+
+      declare
+         Item : P8.Private_Key;
+      begin
+         P8.Decode_DER
+           (From_Hex (P8_ED), CryptoLib.ASN1.Default_Limits, Item, Status);
+         Check (Status = CryptoLib.ASN1.Errors.Ok,
+                "an Ed25519 private key decodes");
+         Check (P8.Algorithm_Of (Item) = CryptoLib.X509.Ed25519,
+                "its algorithm is read");
+         Check (P8.Private_Value (Item)'Length = 32,
+                "the seed is 32 octets, unwrapped from the octet string that "
+                & "this one encoding doubles up");
+      end;
+
+      --  An encrypted key needs a password, and there is nowhere here to put
+      --  one. Refused as unsupported rather than read as if it were plain,
+      --  which would yield ciphertext presented as a key.
+      declare
+         Item : P8.Private_Key;
+      begin
+         P8.Decode_DER
+           (From_Hex (P8_ENCRYPTED), CryptoLib.ASN1.Default_Limits, Item,
+            Status);
+         Check (Status = CryptoLib.ASN1.Errors.Unsupported_Encoding,
+                "an encrypted key is refused as unsupported, got "
+                & CryptoLib.ASN1.Errors.Status_Image (Status));
+         Check (not P8.Is_Present (Item),
+                "and nothing is left behind from the attempt");
+      end;
+
+      --  Trailing data, as everywhere else.
+      declare
+         Item   : P8.Private_Key;
+         Padded : constant Ada.Streams.Stream_Element_Array :=
+           From_Hex (P8_ED) & [0];
+      begin
+         P8.Decode_DER
+           (Padded, CryptoLib.ASN1.Default_Limits, Item, Status);
+         Check (Status = CryptoLib.ASN1.Errors.Trailing_Data,
+                "a byte after the key is refused");
+      end;
+   end Check_PKCS8;
+
+
 begin
    Check_PBKDF2_SHA1;
    Check_PBKDF2_SHA2;
@@ -3873,6 +3991,7 @@ begin
    Check_OCSP;
    Check_X509_Path_Building;
    Check_PKCS10;
+   Check_PKCS8;
    Check_Identity_Predicates;
    Check_PKCS12_Mac_Key;
    Check_ECDSA_P384_Verify;
