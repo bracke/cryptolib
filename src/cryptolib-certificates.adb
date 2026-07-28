@@ -1674,6 +1674,29 @@ package body CryptoLib.Certificates is
       return Valid_Email (Text);
    end Valid_Email_Address;
 
+   function Fingerprint (Certificate_PEM : String) return String is
+      DER : constant String := Base64_Decode (Certificate_PEM);
+   begin
+      if DER = "" then
+         return "";
+      end if;
+
+      declare
+         Digest : constant String := Digest_Hex (DER);
+         Result : Unbounded_String;
+      begin
+         for I in 1 .. Digest'Length / 2 loop
+            if I > 1 then
+               Append (Result, ":");
+            end if;
+            Append
+              (Result,
+               Digest (Digest'First + (I - 1) * 2 .. Digest'First + (I - 1) * 2 + 1));
+         end loop;
+         return To_String (Result);
+      end;
+   end Fingerprint;
+
    function Same_Certificate (Left : String; Right : String) return Boolean is
       Left_DER  : constant String := Base64_Decode (Left);
       Right_DER : constant String := Base64_Decode (Right);

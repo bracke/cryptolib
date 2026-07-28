@@ -71,6 +71,17 @@ package CryptoLib.Certificates is
    function Valid_IP_Address (Text : String) return Boolean;
    function Valid_Email_Address (Text : String) return Boolean;
 
+   --  The certificate's SHA-256 fingerprint, lower-case hex in colon-separated
+   --  pairs.
+   --
+   --  Over the certificate, which means over its DER: that is the value every
+   --  other reader shows -- openssl, a browser's certificate manager, keytool
+   --  -- and the only one a person can compare with. Hashing the armoured text
+   --  instead gives a number that matches nothing, and that changes when the
+   --  same certificate is re-wrapped.
+   --  @return "" when the text carries no certificate
+   function Fingerprint (Certificate_PEM : String) return String;
+
    --  Do these two PEM texts carry the same certificate?
    --
    --  Comparing the text does not answer it: the same certificate may be
