@@ -120,9 +120,12 @@ The RNG **fails closed**: if no OS source is available it returns
   path to end at a certificate the caller declares trusted. **Name
   constraints, certificate policies, and revocation (CRL/OCSP) are not
   checked**, and there is no path building: finding a chain through
-  cross-signed roots is a separate problem and is not implemented. Trust is
-  never inferred -- a self-signed certificate is not an anchor unless the
-  caller says so.
+  cross-signed roots is `X509.Path_Building`, kept separate: it searches and
+  may be wrong, so a path it finds is a proposal that must still go through
+  `Validate_Path`. The search verifies signatures as it goes rather than
+  trusting name matches, which is what makes cross-signed roots resolve, and
+  it is bounded by depth and by a link budget. Trust is never inferred -- a
+  self-signed certificate is not an anchor unless the caller says so.
 - **Revocation is available but not wired into validation.** `X509.CRLs`
   decodes a CRL, verifies that its issuer signed it, and answers whether a
   serial is on it; `Validate_Path` does not consult one. Nothing here fetches a

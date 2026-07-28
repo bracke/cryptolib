@@ -1,6 +1,5 @@
 with Ada.Streams;
 
-with CryptoLib.ASN1;
 with CryptoLib.ASN1.DER;
 with CryptoLib.ASN1.Errors;
 with CryptoLib.ECDSA;

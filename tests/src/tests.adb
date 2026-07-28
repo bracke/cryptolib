@@ -16,6 +16,7 @@ with CryptoLib.X509.Names;
 with CryptoLib.X509.CRLs;
 with CryptoLib.OCSP;
 with CryptoLib.X509.Validation;
+with CryptoLib.X509.Path_Building;
 with CryptoLib.X509.Signatures;
 with CryptoLib.ASN1.DER;
 with CryptoLib.ASN1.Errors;
@@ -3514,6 +3515,185 @@ procedure Tests is
    end Check_OCSP;
 
 
+   --  Path building, and specifically the case that separates a builder that
+   --  works from one that appears to.
+   --
+   --  Two CAs share a subject name and have different keys. Only one of them
+   --  issued the leaf, and the other is offered first. A builder that took
+   --  the first name match and stopped would report no path where one plainly
+   --  exists -- and the arrangement is not exotic: it is what cross-signing
+   --  looks like from the inside.
+   procedure Check_X509_Path_Building is
+      use type CryptoLib.PEM.Decode_Status;
+      use type CryptoLib.X509.Validation.Validation_Failure;
+
+      package X509C renames CryptoLib.X509.Certificates;
+      package PB renames CryptoLib.X509.Path_Building;
+      package XV renames CryptoLib.X509.Validation;
+
+      Real_PEM  : Unbounded_String;   --  the CA that issued the leaf
+      Real_Key  : Unbounded_String;
+      Twin_PEM  : Unbounded_String;   --  same name, different key
+      Twin_Key  : Unbounded_String;
+      Other_PEM : Unbounded_String;   --  unrelated, to pad the pool
+      Other_Key : Unbounded_String;
+      Leaf_PEM  : Unbounded_String;
+      Leaf_Key  : Unbounded_String;
+      Outcome   : CryptoLib.Certificates.Certificate_Status;
+
+      function Decoded (Text : String) return X509C.Certificate is
+         Buffer : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset
+                   (CryptoLib.PEM.Maximum_Decoded_Length (Text)));
+         Last   : Ada.Streams.Stream_Element_Offset;
+         From   : Positive := Text'First;
+         P      : CryptoLib.PEM.Decode_Status;
+         D      : CryptoLib.ASN1.Errors.Decode_Status;
+      begin
+         CryptoLib.PEM.Decode_Block
+           (Text, CryptoLib.PEM.Certificate_Label, From, Buffer, Last, P);
+         Check (P = CryptoLib.PEM.Ok, "fixture: armour decodes");
+         return X509C.Decode_DER
+           (Buffer (Buffer'First .. Last), CryptoLib.ASN1.Default_Limits, D);
+      end Decoded;
+
+      --  The pool, in a deliberately unhelpful order: the impostor first.
+      type Pool is limited new PB.Candidate_Source with null record;
+
+      overriding function Count (Source : Pool) return Natural is (3);
+
+      overriding function Candidate
+        (Source : Pool; Index : Positive) return X509C.Certificate
+      is (case Index is
+             when 1      => Decoded (To_String (Twin_PEM)),
+             when 2      => Decoded (To_String (Other_PEM)),
+             when others => Decoded (To_String (Real_PEM)));
+
+      overriding function Is_Trust_Anchor
+        (Source : Pool; Item : X509C.Certificate) return Boolean
+      is (X509C.Subject_Common_Name (Item) = "shared-ca");
+
+      --  A pool holding only the impostor, so no path exists at all.
+      type Impostor_Only is limited new PB.Candidate_Source with null record;
+
+      overriding function Count (Source : Impostor_Only) return Natural is (1);
+
+      overriding function Candidate
+        (Source : Impostor_Only; Index : Positive) return X509C.Certificate
+      is (Decoded (To_String (Twin_PEM)));
+
+      overriding function Is_Trust_Anchor
+        (Source : Impostor_Only; Item : X509C.Certificate) return Boolean
+      is (X509C.Subject_Common_Name (Item) = "shared-ca");
+
+      --  A path fetched by position, so the built path can be validated.
+      type Built_Path (Length : Natural) is limited new XV.Path_Source
+      with record
+         Chain : PB.Path_Indices;
+      end record;
+
+      overriding function Length (Source : Built_Path) return Positive
+      is (Source.Length + 1);
+
+      overriding function Certificate_At
+        (Source : Built_Path; Index : Positive) return X509C.Certificate
+      is (if Index = 1
+          then Decoded (To_String (Leaf_PEM))
+          else Candidate (Pool'(null record), Source.Chain (Index - 1)));
+
+      overriding function Is_Trust_Anchor
+        (Source : Built_Path; Item : X509C.Certificate) return Boolean
+      is (X509C.Subject_Common_Name (Item) = "shared-ca");
+
+      Search : PB.Build_Result;
+   begin
+      --  Two CAs with one name. Create_Local_CA names the subject from what
+      --  it is given, so these encode identically and differ only in key.
+      Outcome :=
+        CryptoLib.Certificates.Create_Local_CA
+          ("shared-ca", Twin_PEM, Twin_Key,
+           CryptoLib.Certificates.P384_Key);
+      Check (Outcome = CryptoLib.Certificates.Ok, "fixture: twin CA");
+
+      Outcome :=
+        CryptoLib.Certificates.Create_Local_CA
+          ("shared-ca", Real_PEM, Real_Key,
+           CryptoLib.Certificates.P384_Key);
+      Check (Outcome = CryptoLib.Certificates.Ok, "fixture: real CA");
+
+      Outcome :=
+        CryptoLib.Certificates.Create_Local_CA
+          ("unrelated-ca", Other_PEM, Other_Key,
+           CryptoLib.Certificates.P384_Key);
+      Check (Outcome = CryptoLib.Certificates.Ok, "fixture: unrelated CA");
+
+      Outcome :=
+        CryptoLib.Certificates.Issue_Server_Certificate
+          (To_String (Real_PEM), To_String (Real_Key), "host.example",
+           [1 => To_Unbounded_String ("host.example")],
+           Leaf_PEM, Leaf_Key);
+      Check (Outcome = CryptoLib.Certificates.Ok, "fixture: leaf issued");
+
+      --  The premise: the impostor really does look like the issuer by name.
+      Check (X509C.Subject_Bytes (Decoded (To_String (Twin_PEM)))
+               = X509C.Subject_Bytes (Decoded (To_String (Real_PEM))),
+             "fixture: the two CAs encode the same subject name");
+      Check (X509C.Issuer_Bytes (Decoded (To_String (Leaf_PEM)))
+               = X509C.Subject_Bytes (Decoded (To_String (Twin_PEM))),
+             "fixture: the leaf's issuer name matches the impostor too");
+
+      --  The search must look past the name match that fails on signature.
+      Search :=
+        PB.Build_Path (Decoded (To_String (Leaf_PEM)), Pool'(null record));
+      Check (Search.Found,
+             "a path is found although the first name match is the wrong key");
+      Check (Search.Length = 1,
+             "the path is the leaf and one issuer, got"
+             & Natural'Image (Search.Length));
+      Check (Search.Indices (1) = 3,
+             "the issuer chosen is the CA that actually signed the leaf, "
+             & "not the one that merely shares its name, got"
+             & Natural'Image (Search.Indices (1)));
+      Check (Search.Examined >= 2,
+             "the search examined the impostor before finding the issuer");
+
+      --  What it found must survive validation, which is the only thing
+      --  entitled to conclude anything.
+      declare
+         Path : constant Built_Path :=
+           (Length => Search.Length, Chain => Search.Indices);
+         Verdict : constant XV.Validation_Result :=
+           XV.Validate_Path
+             (Path,
+              (Year => 2027, Month => 6, Day => 1,
+               Hour => 12, Minute => 0, Second => 0));
+      begin
+         Check (Verdict.Valid,
+                "the path found also validates, got "
+                & XV.Failure_Image (Verdict.Failure));
+      end;
+
+      --  With only the impostor available there is no path, and saying so is
+      --  different from having run out of budget.
+      Search :=
+        PB.Build_Path
+          (Decoded (To_String (Leaf_PEM)), Impostor_Only'(null record));
+      Check (not Search.Found,
+             "no path is found when only the wrong key is available");
+      Check (not Search.Exhausted,
+             "and the search finished rather than being cut short");
+
+      --  A budget too small to reach the issuer is reported as such, not as
+      --  an absence of paths.
+      Search :=
+        PB.Build_Path
+          (Decoded (To_String (Leaf_PEM)), Pool'(null record),
+           (Maximum_Depth => 1, Maximum_Links => 1));
+      Check (not Search.Found and then Search.Exhausted,
+             "a search stopped by its budget says so");
+   end Check_X509_Path_Building;
+
+
 begin
    Check_PBKDF2_SHA1;
    Check_PBKDF2_SHA2;
@@ -3542,6 +3722,7 @@ begin
    Check_Certificate_Armour;
    Check_X509_CRL;
    Check_OCSP;
+   Check_X509_Path_Building;
    Check_Identity_Predicates;
    Check_PKCS12_Mac_Key;
    Check_ECDSA_P384_Verify;
