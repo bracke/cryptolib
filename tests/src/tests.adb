@@ -11,6 +11,7 @@ with CryptoLib.X509.Certificates;
 with CryptoLib.X509.Extensions;
 with CryptoLib.X509.Identity;
 with CryptoLib.X509.Purposes;
+with CryptoLib.X509.Names;
 with CryptoLib.X509.Validation;
 with CryptoLib.X509.Signatures;
 with CryptoLib.ASN1.DER;
@@ -2877,6 +2878,135 @@ procedure Tests is
    end Check_X509_Purposes;
 
 
+   --  Distinguished names taken apart rather than flattened.
+   --
+   --  The certificate is one OpenSSL issued with every common attribute, so
+   --  the ordering and the labels can be checked against what "openssl x509
+   --  -nameopt rfc2253" prints for the same bytes.
+   procedure Check_X509_Names is
+      use type CryptoLib.X509.Attribute_Kind;
+      use type CryptoLib.X509.Names.Directory_String_Kind;
+
+      package X509C renames CryptoLib.X509.Certificates;
+      package XN renames CryptoLib.X509.Names;
+
+      Multi_Certificate : constant String :=
+        "308203403082022802140a69642915b0555887f43cad736f58c003e69ded300d06092a864886f70d01010b0500" &
+        "30163114301206035504030c0b7273612d746573742d6361301e170d3236303732383139333135365a170d3237" &
+        "303732383139333135365a3081a2310b300906035504061302444b3114301206035504080c0b486f7665647374" &
+        "6164656e3113301106035504070c0a436f70656e686167656e31143012060355040a0c0b4578616d706c65204c" &
+        "746431143012060355040b0c0b456e67696e656572696e67311a301806035504030c116d756c74692e6578616d" &
+        "706c652e636f6d3120301e06092a864886f70d010901161161646d696e406578616d706c652e636f6d30820122" &
+        "300d06092a864886f70d01010105000382010f003082010a0282010100c62626cc40706f4eec4a2098b1dc8694" &
+        "a5a20d0896371462df1bc05898b1ca553793bdc8a7f22e5318d4bd6057d203e61f6565a1c02cebff0652fd1522" &
+        "54992da0b4148071de75e897baeede1201d65086c860bb0f096719360fc373b333de8eff20179775ca8bee5c89" &
+        "9930dee779e02ba0cde4f7a58b12abca10e6a2f0624ae9f8cc3d7da1fbafd8139d265b2c48ab6e36660921f5b1" &
+        "ae05c3fbe7630d7fc7a138b1f2eba7b9ed5d303a4276161595bf6234746974c68b2da2c2a45a6550955cd179cb" &
+        "003f432b99ae9260fd32adddf394796660f19809d79b3778419d23365d91b105212a94fb814583eb2e90ceb48f" &
+        "552b888442c732288e4b4137fff0d10203010001300d06092a864886f70d01010b050003820101002632f88d68" &
+        "f7c8bd35178730a33cbc9b20c8b5e8b5c756be3c4872636470ccf2e2f6f19bd26ef01d9b365c38307e384591e6" &
+        "e90745014af092fc62c4a41bcac2cf37f92038c5dfca9355e6ea9590eb23031cc7af80f46effde8ec1fab977b7" &
+        "1089990e5f7355c3819762fc131572e8e358c389dd79993c4022cf8d3796516ad46af2209720aaa332bfee7bb2" &
+        "424c5881863874f9db30742009310858f5a63a5a8454a183aa41c0a02feb2d7fdeb0e81ba59af4fa7e124e6d62" &
+        "1a8a2e0fecd6ecfeeae65066de8140c5f71bbff3e8d67c305b5c8aa34f1080ef83fb658782d6fd7255c93f664b" &
+        "fb0de858da0800ac25c9edba5d7866b1db86116fc5d307652791";
+
+      function From_Hex
+        (Text : String) return Ada.Streams.Stream_Element_Array
+      is
+         Result : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (Text'Length / 2));
+         function Nibble (C : Character) return Natural
+         is (case C is
+                when '0' .. '9' => Character'Pos (C) - Character'Pos ('0'),
+                when others     => Character'Pos (C) - Character'Pos ('a') + 10);
+      begin
+         for I in Result'Range loop
+            Result (I) :=
+              Ada.Streams.Stream_Element
+                (Nibble (Text (Text'First + 2 * Natural (I - 1))) * 16
+                 + Nibble (Text (Text'First + 2 * Natural (I - 1) + 1)));
+         end loop;
+         return Result;
+      end From_Hex;
+
+      Raw    : constant Ada.Streams.Stream_Element_Array :=
+        From_Hex (Multi_Certificate);
+      Status : CryptoLib.ASN1.Errors.Decode_Status;
+      Item   : constant X509C.Certificate :=
+        X509C.Decode_DER (Raw, CryptoLib.ASN1.Default_Limits, Status);
+   begin
+      Check (X509C.Is_Present (Item), "fixture: the certificate decodes");
+
+      --  Seven attributes, in the order DER holds them.
+      Check (XN.Attribute_Count (Item, XN.Subject_Name) = 7,
+             "the subject carries seven attributes, got"
+             & Natural'Image (XN.Attribute_Count (Item, XN.Subject_Name)));
+
+      Check (XN.Attribute_Kind_At (Item, XN.Subject_Name, 1)
+               = CryptoLib.X509.Country
+             and then XN.Attribute_Text (Item, XN.Subject_Name, 1) = "DK",
+             "the first attribute is the country");
+      Check (XN.Attribute_Kind_At (Item, XN.Subject_Name, 4)
+               = CryptoLib.X509.Organization
+             and then XN.Attribute_Text (Item, XN.Subject_Name, 4)
+                        = "Example Ltd",
+             "the fourth is the organization");
+      Check (XN.Attribute_Kind_At (Item, XN.Subject_Name, 6)
+               = CryptoLib.X509.Common_Name
+             and then XN.Attribute_Text (Item, XN.Subject_Name, 6)
+                        = "multi.example.com",
+             "the sixth is the common name");
+      Check (XN.Attribute_Kind_At (Item, XN.Subject_Name, 7)
+               = CryptoLib.X509.Email_Address,
+             "the seventh is the email address");
+
+      --  Found by kind rather than by counting.
+      Check (XN.Find_Attribute
+               (Item, XN.Subject_Name, CryptoLib.X509.Organizational_Unit) = 5,
+             "the organizational unit is found by kind");
+      Check (XN.Find_Attribute
+               (Item, XN.Subject_Name, CryptoLib.X509.Domain_Component) = 0,
+             "an attribute the name does not carry is not found");
+      Check (XN.Find_Attribute
+               (Item, XN.Subject_Name, CryptoLib.X509.Unknown_Attribute) = 0,
+             "searching for the unknown kind finds nothing, since every "
+             & "unrecognised attribute would answer to it");
+
+      --  The encodings are reported, not guessed at.
+      Check (XN.Attribute_String_Kind (Item, XN.Subject_Name, 1)
+               = XN.Printable_String,
+             "a country is a PrintableString");
+      Check (XN.Attribute_String_Kind (Item, XN.Subject_Name, 7)
+               = XN.IA5_String,
+             "an email address is an IA5String");
+
+      --  Formatting is RFC 4514 order: most specific first, which is the
+      --  reverse of how DER holds it. This is the same string openssl prints
+      --  with -nameopt rfc2253, except for the label it gives the email
+      --  attribute.
+      Check (XN.Format (Item, XN.Subject_Name)
+               = "EMAIL=admin@example.com,CN=multi.example.com,"
+               & "OU=Engineering,O=Example Ltd,L=Copenhagen,"
+               & "ST=Hovedstaden,C=DK",
+             "the formatted subject is in RFC 4514 order, got "
+             & XN.Format (Item, XN.Subject_Name));
+
+      --  The issuer of this certificate is the RSA test CA, one attribute.
+      Check (XN.Attribute_Count (Item, XN.Issuer_Name) = 1
+             and then XN.Attribute_Text (Item, XN.Issuer_Name, 1)
+                        = "rsa-test-ca",
+             "the issuer name is read the same way");
+
+      --  Formatting is for reading, not for comparing: the encoded name is
+      --  what an issuer signed and what tells two subjects apart.
+      Check (X509C.Subject_Bytes (Item)'Length > 0
+             and then X509C.Subject_Bytes (Item) /= X509C.Issuer_Bytes (Item),
+             "the encoded subject and issuer differ, which is the comparison "
+             & "that counts");
+   end Check_X509_Names;
+
+
 begin
    Check_PBKDF2_SHA1;
    Check_PBKDF2_SHA2;
@@ -2901,6 +3031,7 @@ begin
    Check_X509_Validation;
    Check_X509_Identity;
    Check_X509_Purposes;
+   Check_X509_Names;
    Check_Identity_Predicates;
    Check_PKCS12_Mac_Key;
    Check_ECDSA_P384_Verify;
