@@ -212,7 +212,7 @@ package body ada_main is
       Is_Elaborated := True;
       Main_Priority := -1;
       Time_Slice_Value := -1;
-      WC_Encoding := '8';
+      WC_Encoding := 'b';
       Locking_Policy := ' ';
       Queuing_Policy := ' ';
       Task_Dispatching_Policy := ' ';

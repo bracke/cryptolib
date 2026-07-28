@@ -4,6 +4,10 @@ with Ada.Text_IO;
 with Interfaces;
 with System;
 
+with CryptoLib.ASN1;
+with CryptoLib.ASN1.DER;
+with CryptoLib.ASN1.Errors;
+with CryptoLib.ASN1.OIDs;
 with CryptoLib.ChaCha20_Poly1305;
 with CryptoLib.Certificates;
 with OpenSSL_Interop;
@@ -1082,6 +1086,334 @@ procedure Tests is
       Check (S521 /= [S521'Range => 0], "ECDSA P-521 raw signing emits s");
    end Check_ECDSA_P384_P521_Signing;
 
+   --  The DER reader is the floor everything X.509 stands on, so these check
+   --  the refusals as closely as the acceptances. Each malformed case is a
+   --  shape that is legal BER, or nearly legal DER, and would be accepted by a
+   --  reader that only looked at tags and lengths.
+   procedure Check_ASN1_DER is
+      use CryptoLib.ASN1;
+      use type CryptoLib.ASN1.Errors.Decode_Status;
+
+      subtype ASN1_Element is CryptoLib.ASN1.Element;
+
+      package DER renames CryptoLib.ASN1.DER;
+      package Err renames CryptoLib.ASN1.Errors;
+
+      Limits : constant Decode_Limits := Default_Limits;
+
+      procedure Expect
+        (Data    : Ada.Streams.Stream_Element_Array;
+         Wanted  : Err.Decode_Status;
+         Message : String)
+      is
+         Pos    : Ada.Streams.Stream_Element_Offset := Data'First;
+         Item   : ASN1_Element;
+         Status : Err.Decode_Status;
+      begin
+         DER.Read (Data, Pos, Data'Last, 0, Limits, Item, Status);
+         Check (Status = Wanted,
+                Message & ": expected " & Err.Status_Image (Wanted)
+                & ", got " & Err.Status_Image (Status));
+      end Expect;
+   begin
+      --  A SEQUENCE holding INTEGER 5, read through and then into.
+      declare
+         Data : constant Ada.Streams.Stream_Element_Array :=
+           [16#30#, 16#03#, 16#02#, 16#01#, 16#05#];
+         Pos    : Ada.Streams.Stream_Element_Offset := Data'First;
+         Seq    : ASN1_Element;
+         Status : Err.Decode_Status;
+         Value  : Natural;
+      begin
+         DER.Read_Sequence (Data, Pos, Data'Last, 0, Limits, Seq, Status);
+         Check (Status = Err.Ok, "DER reads a SEQUENCE header");
+         Check (Seq.Constructed, "a SEQUENCE is constructed");
+         Check (Content_Length (Seq) = 3, "SEQUENCE content is three octets");
+         Check (Encoded_First (Seq) = Data'First
+                and then Encoded_Last (Seq) = Data'Last,
+                "the encoded range covers the whole TLV, header included");
+         Check (DER.At_End (Pos, Data'Last),
+                "reading an element advances past it");
+
+         Pos := Seq.First;
+         DER.Read_Small_Integer
+           (Data, Pos, Seq.Last, 1, Limits, Value, Status);
+         Check (Status = Err.Ok and then Value = 5,
+                "DER reads a nested INTEGER");
+         Check (DER.At_End (Pos, Seq.Last), "the SEQUENCE is consumed");
+      end;
+
+      --  Indefinite length is BER. Refusing it is the point.
+      Expect ([16#30#, 16#80#, 16#00#, 16#00#], Err.Unsupported_Encoding,
+              "indefinite length is refused");
+
+      --  Long form where the short form would do.
+      Expect ([16#04#, 16#81#, 16#01#, 16#41#], Err.Non_Canonical_DER,
+              "a length in long form that fits the short form is refused");
+      Expect ([16#04#, 16#82#, 16#00#, 16#81#], Err.Non_Canonical_DER,
+              "a length with a leading zero octet is refused");
+      Expect ([16#04#, 16#FF#, 16#01#], Err.Invalid_Length,
+              "the reserved length octet is refused");
+
+      --  A length the buffer cannot satisfy.
+      Expect ([16#04#, 16#05#, 16#01#, 16#02#], Err.Truncated_Input,
+              "a length past the end of the buffer is refused");
+      Expect ([16#04#], Err.Truncated_Input, "a header with no length is refused");
+
+      --  High-tag-number form used for a tag that fits the identifier octet.
+      Expect ([16#1F#, 16#01#, 16#00#], Err.Non_Canonical_DER,
+              "a high-tag form for a low tag number is refused");
+      Expect ([16#1F#, 16#80#, 16#01#, 16#00#], Err.Non_Canonical_DER,
+              "a high tag padded with a leading zero group is refused");
+
+      --  Nesting, against a deliberately shallow limit.
+      declare
+         Shallow : constant Decode_Limits :=
+           (Maximum_Input_Size     => 1024,
+            Maximum_Nesting_Depth  => 2,
+            Maximum_Sequence_Items => 16,
+            Maximum_String_Length  => 256);
+         Data : constant Ada.Streams.Stream_Element_Array :=
+           [16#30#, 16#02#, 16#05#, 16#00#];
+         Pos    : Ada.Streams.Stream_Element_Offset := Data'First;
+         Item   : ASN1_Element;
+         Status : Err.Decode_Status;
+      begin
+         DER.Read (Data, Pos, Data'Last, 3, Shallow, Item, Status);
+         Check (Status = Err.Excessive_Nesting,
+                "a read below the depth limit is refused");
+      end;
+
+      --  A length larger than the caller will decode.
+      declare
+         Tight : constant Decode_Limits :=
+           (Maximum_Input_Size     => 100,
+            Maximum_Nesting_Depth  => 8,
+            Maximum_Sequence_Items => 16,
+            Maximum_String_Length  => 100);
+         Data : constant Ada.Streams.Stream_Element_Array :=
+           [16#04#, 16#82#, 16#01#, 16#00#];
+         Pos    : Ada.Streams.Stream_Element_Offset := Data'First;
+         Item   : ASN1_Element;
+         Status : Err.Decode_Status;
+      begin
+         DER.Read (Data, Pos, Data'Last, 0, Tight, Item, Status);
+         Check (Status = Err.Size_Limit_Exceeded,
+                "a length beyond the caller's limit is refused");
+      end;
+
+      --  INTEGER: shortest form, and the sign rules that go with it.
+      declare
+         Pos      : Ada.Streams.Stream_Element_Offset;
+         Item     : ASN1_Element;
+         Negative : Boolean;
+         Status   : Err.Decode_Status;
+
+         Padded   : constant Ada.Streams.Stream_Element_Array :=
+           [16#02#, 16#02#, 16#00#, 16#01#];
+         Legal    : constant Ada.Streams.Stream_Element_Array :=
+           [16#02#, 16#02#, 16#00#, 16#80#];
+         Signed   : constant Ada.Streams.Stream_Element_Array :=
+           [16#02#, 16#01#, 16#FF#];
+         Empty    : constant Ada.Streams.Stream_Element_Array :=
+           [16#02#, 16#00#];
+      begin
+         Pos := Padded'First;
+         DER.Read_Integer
+           (Padded, Pos, Padded'Last, 0, Limits, Item, Negative, Status);
+         Check (Status = Err.Non_Canonical_DER,
+                "an INTEGER with a redundant leading zero is refused");
+
+         --  The same leading zero is required here: without it the value
+         --  would read as negative.
+         Pos := Legal'First;
+         DER.Read_Integer
+           (Legal, Pos, Legal'Last, 0, Limits, Item, Negative, Status);
+         Check (Status = Err.Ok and then not Negative,
+                "an INTEGER whose leading zero carries the sign is accepted");
+
+         Pos := Signed'First;
+         DER.Read_Integer
+           (Signed, Pos, Signed'Last, 0, Limits, Item, Negative, Status);
+         Check (Status = Err.Ok and then Negative,
+                "a negative INTEGER is reported as negative");
+
+         Pos := Signed'First;
+         declare
+            Value : Natural;
+         begin
+            DER.Read_Small_Integer
+              (Signed, Pos, Signed'Last, 0, Limits, Value, Status);
+            Check (Status = Err.Invalid_Value,
+                   "a negative INTEGER is not a small non-negative one");
+         end;
+
+         Pos := Empty'First;
+         DER.Read_Integer
+           (Empty, Pos, Empty'Last, 0, Limits, Item, Negative, Status);
+         Check (Status = Err.Invalid_Value,
+                "an INTEGER with no content octets is refused");
+      end;
+
+      --  BOOLEAN: DER fixes true at all bits set.
+      declare
+         Pos    : Ada.Streams.Stream_Element_Offset;
+         Value  : Boolean;
+         Status : Err.Decode_Status;
+
+         Yes  : constant Ada.Streams.Stream_Element_Array :=
+           [16#01#, 16#01#, 16#FF#];
+         No   : constant Ada.Streams.Stream_Element_Array :=
+           [16#01#, 16#01#, 16#00#];
+         Odd  : constant Ada.Streams.Stream_Element_Array :=
+           [16#01#, 16#01#, 16#01#];
+      begin
+         Pos := Yes'First;
+         DER.Read_Boolean (Yes, Pos, Yes'Last, 0, Limits, Value, Status);
+         Check (Status = Err.Ok and then Value, "BOOLEAN 16#FF# is true");
+
+         Pos := No'First;
+         DER.Read_Boolean (No, Pos, No'Last, 0, Limits, Value, Status);
+         Check (Status = Err.Ok and then not Value, "BOOLEAN 16#00# is false");
+
+         Pos := Odd'First;
+         DER.Read_Boolean (Odd, Pos, Odd'Last, 0, Limits, Value, Status);
+         Check (Status = Err.Invalid_Value,
+                "any other BOOLEAN octet is refused, however BER reads it");
+      end;
+
+      --  BIT STRING: the unused-bit count is consumed, not handed back as
+      --  part of the value.
+      declare
+         Pos     : Ada.Streams.Stream_Element_Offset;
+         Item    : ASN1_Element;
+         Unused  : Natural;
+         Status  : Err.Decode_Status;
+
+         Key   : constant Ada.Streams.Stream_Element_Array :=
+           [16#03#, 16#03#, 16#00#, 16#AB#, 16#CD#];
+         Wide  : constant Ada.Streams.Stream_Element_Array :=
+           [16#03#, 16#02#, 16#08#, 16#00#];
+         Bare  : constant Ada.Streams.Stream_Element_Array :=
+           [16#03#, 16#01#, 16#03#];
+         None  : constant Ada.Streams.Stream_Element_Array :=
+           [16#03#, 16#00#];
+      begin
+         Pos := Key'First;
+         DER.Read_Bit_String
+           (Key, Pos, Key'Last, 0, Limits, Item, Unused, Status);
+         Check (Status = Err.Ok and then Unused = 0
+                and then Content_Length (Item) = 2
+                and then Key (Item.First) = 16#AB#,
+                "a BIT STRING yields its value without the unused-bit octet");
+
+         Pos := Wide'First;
+         DER.Read_Bit_String
+           (Wide, Pos, Wide'Last, 0, Limits, Item, Unused, Status);
+         Check (Status = Err.Invalid_Value,
+                "more than seven unused bits is refused");
+
+         Pos := Bare'First;
+         DER.Read_Bit_String
+           (Bare, Pos, Bare'Last, 0, Limits, Item, Unused, Status);
+         Check (Status = Err.Invalid_Value,
+                "unused bits with no value octets is refused");
+
+         Pos := None'First;
+         DER.Read_Bit_String
+           (None, Pos, None'Last, 0, Limits, Item, Unused, Status);
+         Check (Status = Err.Invalid_Value,
+                "a BIT STRING without its unused-bit octet is refused");
+      end;
+
+      --  NULL carries nothing.
+      declare
+         Pos    : Ada.Streams.Stream_Element_Offset;
+         Status : Err.Decode_Status;
+
+         Good : constant Ada.Streams.Stream_Element_Array := [16#05#, 16#00#];
+         Bad  : constant Ada.Streams.Stream_Element_Array :=
+           [16#05#, 16#01#, 16#00#];
+      begin
+         Pos := Good'First;
+         DER.Read_Null (Good, Pos, Good'Last, 0, Limits, Status);
+         Check (Status = Err.Ok, "an empty NULL is accepted");
+
+         Pos := Bad'First;
+         DER.Read_Null (Bad, Pos, Bad'Last, 0, Limits, Status);
+         Check (Status = Err.Invalid_Value, "a NULL with content is refused");
+      end;
+
+      --  OBJECT IDENTIFIER: encoding rules, then a match against the table.
+      declare
+         Pos    : Ada.Streams.Stream_Element_Offset;
+         Item   : ASN1_Element;
+         Status : Err.Decode_Status;
+
+         --  ecdsa-with-SHA384, as it appears in a certificate this crate
+         --  issues under a P-384 CA.
+         Sig : constant Ada.Streams.Stream_Element_Array :=
+           [16#06#, 16#08#, 16#2A#, 16#86#, 16#48#, 16#CE#, 16#3D#, 16#04#,
+            16#03#, 16#03#];
+         CN  : constant Ada.Streams.Stream_Element_Array :=
+           [16#06#, 16#03#, 16#55#, 16#04#, 16#03#];
+         Pad : constant Ada.Streams.Stream_Element_Array :=
+           [16#06#, 16#02#, 16#80#, 16#01#];
+         Cut : constant Ada.Streams.Stream_Element_Array :=
+           [16#06#, 16#02#, 16#55#, 16#81#];
+      begin
+         Pos := Sig'First;
+         DER.Read_Object_Identifier
+           (Sig, Pos, Sig'Last, 0, Limits, Item, Status);
+         Check (Status = Err.Ok, "a well-formed OID is accepted");
+         Check (CryptoLib.ASN1.OIDs.Matches
+                  (Sig, Item, CryptoLib.ASN1.OIDs.ECDSA_With_SHA384),
+                "the OID table recognises ecdsa-with-SHA384");
+         Check (not CryptoLib.ASN1.OIDs.Matches
+                  (Sig, Item, CryptoLib.ASN1.OIDs.ECDSA_With_SHA256),
+                "a different signature OID does not match");
+
+         Pos := CN'First;
+         DER.Read_Object_Identifier
+           (CN, Pos, CN'Last, 0, Limits, Item, Status);
+         Check (Status = Err.Ok
+                and then CryptoLib.ASN1.OIDs.Matches
+                           (CN, Item, CryptoLib.ASN1.OIDs.Common_Name),
+                "the OID table recognises id-at-commonName");
+         Check (not CryptoLib.ASN1.OIDs.Matches
+                  (CN, Item, CryptoLib.ASN1.OIDs.Organization),
+                "a shorter arc list does not match a longer identifier");
+
+         Pos := Pad'First;
+         DER.Read_Object_Identifier
+           (Pad, Pos, Pad'Last, 0, Limits, Item, Status);
+         Check (Status = Err.Non_Canonical_DER,
+                "an OID arc padded with a leading zero group is refused");
+
+         Pos := Cut'First;
+         DER.Read_Object_Identifier
+           (Cut, Pos, Cut'Last, 0, Limits, Item, Status);
+         Check (Status = Err.Invalid_Value,
+                "an OID ending mid-arc is refused");
+      end;
+
+      --  A tag that is not the one required.
+      declare
+         Data : constant Ada.Streams.Stream_Element_Array :=
+           [16#02#, 16#01#, 16#05#];
+         Pos    : Ada.Streams.Stream_Element_Offset := Data'First;
+         Item   : ASN1_Element;
+         Status : Err.Decode_Status;
+      begin
+         DER.Read_Sequence (Data, Pos, Data'Last, 0, Limits, Item, Status);
+         Check (Status = Err.Invalid_Tag,
+                "an INTEGER read as a SEQUENCE is refused");
+         Check (Pos = Data'First,
+                "a refused read leaves the position where it was");
+      end;
+   end Check_ASN1_DER;
+
+
 begin
    Check_PBKDF2_SHA1;
    Check_PBKDF2_SHA2;
@@ -1097,6 +1429,7 @@ begin
    Check_ECDSA_P384_P521_Signing;
    Check_ECDSA_P384_Public_Key;
    Check_P384_Local_CA;
+   Check_ASN1_DER;
    Check_Identity_Predicates;
    Check_PKCS12_Mac_Key;
    Check_ECDSA_P384_Verify;
