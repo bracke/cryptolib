@@ -317,21 +317,6 @@ package body CryptoLib.Certificates is
         (Integer_DER (0) & P384_Algorithm & Octets (Inner));
    end P384_Private_Key_DER;
 
-   function BMP_Password (Password : String) return Ada.Streams.Stream_Element_Array is
-      Result : Ada.Streams.Stream_Element_Array
-        (1 .. Ada.Streams.Stream_Element_Offset ((Password'Length + 1) * 2));
-      Pos : Ada.Streams.Stream_Element_Offset := Result'First;
-   begin
-      for C of Password loop
-         Result (Pos) := 0;
-         Result (Pos + 1) := Ada.Streams.Stream_Element (Character'Pos (C));
-         Pos := Pos + 2;
-      end loop;
-      Result (Pos) := 0;
-      Result (Pos + 1) := 0;
-      return Result;
-   end BMP_Password;
-
    function Mac_Data
      (Authenticated_Safe : String;
       Password           : String;
@@ -340,7 +325,10 @@ package body CryptoLib.Certificates is
       Iterations : constant Positive := 2048;
       Key        : constant Ada.Streams.Stream_Element_Array :=
         CryptoLib.Macs.PKCS12_KDF_SHA1
-          (Password_Data => BMP_Password (Password),
+          --  The plain password: PKCS12_KDF_SHA1 widens it to a BMPString
+          --  itself, and handing it one already widened produced a key for a
+          --  password nobody typed -- so every bundle failed its own MAC check.
+          (Password_Data => To_Bytes (Password),
            Salt_Data     => Salt,
            Iterations    => Iterations,
            Id_Byte       => 3,

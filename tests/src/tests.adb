@@ -751,6 +751,31 @@ procedure Tests is
    --  These decide what a certificate may contain, and they moved here from a
    --  caller that had its own copy of the rules. Both copies could not have
    --  been checked against each other; one can be checked against the encoder.
+   --  A bundle nothing can open is not a bundle. The MAC key comes from the
+   --  password as typed -- PKCS12_KDF_SHA1 widens it to a BMPString itself --
+   --  and handing it one already widened derived a key for a password nobody
+   --  typed, so every bundle failed its own integrity check. The vector here
+   --  was taken from OpenSSL, which agrees with it byte for byte.
+   procedure Check_PKCS12_Mac_Key is
+      Password : constant Ada.Streams.Stream_Element_Array :=
+        [16#73#, 16#65#, 16#63#, 16#72#, 16#65#, 16#74#];        --  "secret"
+      Salt     : constant Ada.Streams.Stream_Element_Array :=
+        [16#C7#, 16#40#, 16#DF#, 16#A4#, 16#CA#, 16#54#, 16#E2#, 16#4B#];
+      Expected : constant Ada.Streams.Stream_Element_Array :=
+        [16#4A#, 16#0F#, 16#8B#, 16#F9#, 16#AF#, 16#DB#, 16#AA#, 16#5A#,
+         16#E5#, 16#14#, 16#BB#, 16#67#, 16#40#, 16#CD#, 16#53#, 16#9D#,
+         16#66#, 16#57#, 16#53#, 16#81#];
+   begin
+      Check
+        (CryptoLib.Macs.PKCS12_KDF_SHA1
+           (Password_Data => Password,
+            Salt_Data     => Salt,
+            Iterations    => 2048,
+            Id_Byte       => 3,
+            Output_Length => 20) = Expected,
+         "PKCS#12 MAC key matches OpenSSL for a password as typed");
+   end Check_PKCS12_Mac_Key;
+
    procedure Check_Identity_Predicates is
       Cert, Key, Other_Cert, Other_Key : Ada.Strings.Unbounded.Unbounded_String;
       Status : CryptoLib.Certificates.Certificate_Status;
@@ -976,6 +1001,7 @@ begin
    Check_ECDSA_P384_Public_Key;
    Check_P384_Local_CA;
    Check_Identity_Predicates;
+   Check_PKCS12_Mac_Key;
    Check_ECDSA_P384_Verify;
    Check_Certificates;
    Check_XXH3;
