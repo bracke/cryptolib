@@ -8,7 +8,10 @@ with CryptoLib.Ed25519;
 with CryptoLib.Errors;
 with CryptoLib.Hashes;
 with CryptoLib.Macs;
+with CryptoLib.ASN1;
+with CryptoLib.ASN1.Errors;
 with CryptoLib.PEM;
+with CryptoLib.X509.Certificates;
 with CryptoLib.Random;
 
 with CryptoLib.Secure_Wipe;
@@ -1390,58 +1393,58 @@ package body CryptoLib.Certificates is
    --  reports "unable to get local issuer certificate" when they differ. Taking
    --  it from the CA certificate is the only way to be sure they match, which
    --  is what CA_Certificate_PEM is for.
+   --  The subject common name of a certificate, used to name the issuer on
+   --  certificates issued under it.
+   --
+   --  This walked the TBSCertificate by hand until there was a parsed
+   --  certificate to ask instead. The hand-written walk and the one in
+   --  CryptoLib.X509.Certificates read the same structure, and two readers of
+   --  one structure drift: the parsed one enforces canonical DER, bounds what
+   --  it will decode, and refuses trailing data, none of which the walk here
+   --  did.
    function Certificate_Subject_CN
      (Certificate_PEM : String;
       Common_Name     : out Unbounded_String) return Boolean
    is
+      use type CryptoLib.ASN1.Errors.Decode_Status;
+
       DER : constant String := Base64_Decode (Certificate_PEM);
-      Outer, TBS, Field : Unbounded_String;
-      Pos : Natural;
    begin
       Common_Name := Null_Unbounded_String;
       if DER'Length = 0 then
          return False;
       end if;
 
-      Pos := DER'First;
-      if not Read_TLV (DER, Pos, 16#30#, Outer) then
-         return False;
-      end if;
-
       declare
-         Outer_Text : constant String := To_String (Outer);
-         Outer_Pos  : Natural := Outer_Text'First;
+         Raw : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (DER'Length));
       begin
-         if not Read_TLV (Outer_Text, Outer_Pos, 16#30#, TBS) then
-            return False;
-         end if;
-      end;
+         for I in DER'Range loop
+            Raw (Ada.Streams.Stream_Element_Offset (I - DER'First + 1)) :=
+              Character'Pos (DER (I));
+         end loop;
 
-      declare
-         TBS_Text : constant String := To_String (TBS);
-         TBS_Pos  : Natural := TBS_Text'First;
-      begin
-         --  version [0], serial, signature algorithm, issuer, validity, then
-         --  the subject this reads.
-         if not Read_TLV (TBS_Text, TBS_Pos, 16#A0#, Field) then
-            return False;
-         end if;
-         if not Read_TLV (TBS_Text, TBS_Pos, 16#02#, Field) then
-            return False;
-         end if;
-         if not Read_TLV (TBS_Text, TBS_Pos, 16#30#, Field) then
-            return False;
-         end if;
-         if not Read_TLV (TBS_Text, TBS_Pos, 16#30#, Field) then
-            return False;
-         end if;
-         if not Read_TLV (TBS_Text, TBS_Pos, 16#30#, Field) then
-            return False;
-         end if;
-         if not Read_TLV (TBS_Text, TBS_Pos, 16#30#, Field) then
-            return False;
-         end if;
-         return Extract_Common_Name (To_String (Field), Common_Name);
+         declare
+            Status : CryptoLib.ASN1.Errors.Decode_Status;
+            Item   : constant CryptoLib.X509.Certificates.Certificate :=
+              CryptoLib.X509.Certificates.Decode_DER
+                (Raw, CryptoLib.ASN1.Default_Limits, Status);
+         begin
+            if Status /= CryptoLib.ASN1.Errors.Ok then
+               return False;
+            end if;
+
+            declare
+               Text : constant String :=
+                 CryptoLib.X509.Certificates.Subject_Common_Name (Item);
+            begin
+               if Text'Length = 0 then
+                  return False;
+               end if;
+               Common_Name := To_Unbounded_String (Text);
+               return True;
+            end;
+         end;
       end;
    end Certificate_Subject_CN;
 
