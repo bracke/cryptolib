@@ -28,6 +28,7 @@ package CryptoLib.ASN1 is
 
    Tag_Boolean           : constant Tag_Number := 1;
    Tag_Integer           : constant Tag_Number := 2;
+   Tag_Enumerated        : constant Tag_Number := 10;
    Tag_Bit_String        : constant Tag_Number := 3;
    Tag_Octet_String      : constant Tag_Number := 4;
    Tag_Null              : constant Tag_Number := 5;

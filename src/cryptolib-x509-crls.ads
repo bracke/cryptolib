@@ -91,6 +91,16 @@ package CryptoLib.X509.CRLs is
    function Is_Revoked
      (Item : Revocation_List; Serial : Octets) return Boolean;
 
+   --  Look a serial up and report when it was revoked, and why.
+   --
+   --  Serial is matched as Is_Revoked matches it. Present is False when the
+   --  serial is not on the list, in which case the other fields say nothing.
+   --  @param Item the list to inspect
+   --  @param Serial the serial number to look for
+   --  @return what the entry says, or a record with Present False
+   function Find_Revocation
+     (Item : Revocation_List; Serial : Octets) return Revocation_Details;
+
    --  How many entries does the list carry?
    --
    --  Costs a walk of the entries; there is no stored count.

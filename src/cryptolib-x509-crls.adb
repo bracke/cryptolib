@@ -292,9 +292,118 @@ package body CryptoLib.X509.CRLs is
    function TBS_Bytes (Item : Revocation_List) return Octets
    is (Slice (Item, Item.TBS));
 
-   --  Walk the revoked entries, reporting each serial to the caller.
+   --  Read the reasonCode out of an entry's extensions, if it carries one.
+   --
+   --  crlEntryExtensions is the third and last field of an entry, present
+   --  only when the issuer had something to add. An extension this does not
+   --  recognise is passed over rather than refused: an entry saying why in a
+   --  way this cannot read still says that the certificate is revoked, and
+   --  that is the part a caller must not lose.
+   procedure Read_Entry_Reason
+     (Data   : Octets;
+      From   : Offset;
+      Last   : Offset;
+      Limits : Decode_Limits;
+      Found  : out Boolean;
+      Reason : out CryptoLib.X509.Revocation_Reason)
+   is
+      Cursor : Offset := From;
+      Outer  : Element;
+      Status : Decode_Status;
+   begin
+      Found := False;
+      Reason := CryptoLib.X509.Unspecified;
+
+      if DER_Reader.At_End (Cursor, Last) then
+         return;
+      end if;
+
+      DER_Reader.Read_Sequence (Data, Cursor, Last, 4, Limits, Outer, Status);
+      if Status /= Ok then
+         return;
+      end if;
+
+      Cursor := Outer.First;
+      while not DER_Reader.At_End (Cursor, Outer.Last) loop
+         declare
+            Ext   : Element;
+            Part  : Offset;
+            OID   : Element;
+            Value : Element;
+            Flag  : Boolean;
+            Look  : Offset;
+            Peek  : Element;
+            Try   : Decode_Status;
+            Code  : Natural;
+         begin
+            DER_Reader.Read_Sequence
+              (Data, Cursor, Outer.Last, 5, Limits, Ext, Status);
+            exit when Status /= Ok;
+
+            Part := Ext.First;
+            DER_Reader.Read_Object_Identifier
+              (Data, Part, Ext.Last, 6, Limits, OID, Status);
+            exit when Status /= Ok;
+
+            --  critical DEFAULT FALSE sits between the identifier and the
+            --  value, so it has to be stepped over when present.
+            Look := Part;
+            DER_Reader.Read (Data, Look, Ext.Last, 6, Limits, Peek, Try);
+            if Try = Ok
+              and then Peek.Class = Universal
+              and then Peek.Number = Tag_Boolean
+            then
+               DER_Reader.Read_Boolean
+                 (Data, Part, Ext.Last, 6, Limits, Flag, Status);
+               exit when Status /= Ok;
+            end if;
+
+            DER_Reader.Read_Octet_String
+              (Data, Part, Ext.Last, 6, Limits, Value, Status);
+            exit when Status /= Ok;
+
+            if OID_Table.Matches (Data, OID, OID_Table.CRL_Reason_Code) then
+               --  CRLReason is an ENUMERATED, tag 10, not an INTEGER, so it
+               --  is read as an element and its content decoded here. The
+               --  issuer having said something is recorded even when what it
+               --  said is not a code this crate names: Found and Reason
+               --  answer different questions.
+               Part := Value.First;
+               DER_Reader.Read
+                 (Data, Part, Value.Last, 7, Limits, Peek, Status);
+               if Status /= Ok
+                 or else Peek.Class /= Universal
+                 or else Peek.Number /= Tag_Enumerated
+               then
+                  return;
+               end if;
+
+               Found := True;
+               Reason := CryptoLib.X509.Unknown_Reason;
+               if Content_Length (Peek) = 1
+                 and then Data (Peek.First) < 16#80#
+               then
+                  Code := Natural (Data (Peek.First));
+                  Reason := CryptoLib.X509.Reason_Of (Code);
+               end if;
+               return;
+            end if;
+         end;
+      end loop;
+   end Read_Entry_Reason;
+
+   --  Walk the revoked entries, reporting each to the caller.
+   --
+   --  One reader for every question asked of the list -- whether a serial is
+   --  on it, how many entries it has, and what an entry says -- so that the
+   --  answers cannot disagree about where an entry starts or what it holds.
    generic
-      with procedure Visit (Serial : Octets; Stop : out Boolean);
+      with procedure Visit
+        (Serial     : Octets;
+         Revoked_At : Certificate_Time;
+         Has_Reason : Boolean;
+         Reason     : CryptoLib.X509.Revocation_Reason;
+         Stop       : out Boolean);
    procedure Walk_Entries (Item : Revocation_List);
 
    procedure Walk_Entries (Item : Revocation_List) is
@@ -310,10 +419,13 @@ package body CryptoLib.X509.CRLs is
       Cursor := Item.Revoked.First;
       while not DER_Reader.At_End (Cursor, Item.Revoked.Last) loop
          declare
-            Row   : Element;
-            Field : Element;
-            Part  : Offset;
-            Minus : Boolean;
+            Row    : Element;
+            Field  : Element;
+            Part   : Offset;
+            Minus  : Boolean;
+            When_T : Certificate_Time;
+            Has_R  : Boolean;
+            Why    : CryptoLib.X509.Revocation_Reason;
          begin
             DER_Reader.Read_Sequence
               (Item.DER, Cursor, Item.Revoked.Last, 3, Limits, Row, Status);
@@ -324,7 +436,19 @@ package body CryptoLib.X509.CRLs is
               (Item.DER, Part, Row.Last, 4, Limits, Field, Minus, Status);
             exit when Status /= Ok;
 
-            Visit (Item.DER (Field.First .. Field.Last), Halt);
+            --  revocationDate is not optional: an entry that does not say
+            --  when is malformed, and reading past it would put the
+            --  extensions walk on the wrong bytes.
+            CryptoLib.X509.Times.Read
+              (Item.DER, Part, Row.Last, 4, Limits, When_T, Status);
+            exit when Status /= Ok;
+
+            Read_Entry_Reason
+              (Item.DER, Part, Row.Last, Limits, Has_R, Why);
+
+            Visit
+              (Item.DER (Field.First .. Field.Last), When_T, Has_R, Why,
+               Halt);
             exit when Halt;
          end;
       end loop;
@@ -368,7 +492,14 @@ package body CryptoLib.X509.CRLs is
    is
       Found : Boolean := False;
 
-      procedure Consider (Candidate : Octets; Stop : out Boolean) is
+      procedure Consider
+        (Candidate  : Octets;
+         Revoked_At : Certificate_Time;
+         Has_Reason : Boolean;
+         Reason     : CryptoLib.X509.Revocation_Reason;
+         Stop       : out Boolean)
+      is
+         pragma Unreferenced (Revoked_At, Has_Reason, Reason);
       begin
          Stop := False;
          if Same_Number (Candidate, Serial) then
@@ -387,11 +518,51 @@ package body CryptoLib.X509.CRLs is
       return Found;
    end Is_Revoked;
 
+   function Find_Revocation
+     (Item : Revocation_List; Serial : Octets) return Revocation_Details
+   is
+      Result : Revocation_Details;
+
+      procedure Consider
+        (Candidate  : Octets;
+         Revoked_At : Certificate_Time;
+         Has_Reason : Boolean;
+         Reason     : CryptoLib.X509.Revocation_Reason;
+         Stop       : out Boolean)
+      is
+      begin
+         Stop := False;
+         if Same_Number (Candidate, Serial) then
+            Result :=
+              (Present    => True,
+               Revoked_At => Revoked_At,
+               Has_Reason => Has_Reason,
+               Reason     => Reason);
+            Stop := True;
+         end if;
+      end Consider;
+
+      procedure Run is new Walk_Entries (Consider);
+   begin
+      if Serial'Length = 0 then
+         return Result;
+      end if;
+
+      Run (Item);
+      return Result;
+   end Find_Revocation;
+
    function Entry_Count (Item : Revocation_List) return Natural is
       Total : Natural := 0;
 
-      procedure Count (Candidate : Octets; Stop : out Boolean) is
-         pragma Unreferenced (Candidate);
+      procedure Count
+        (Candidate  : Octets;
+         Revoked_At : Certificate_Time;
+         Has_Reason : Boolean;
+         Reason     : CryptoLib.X509.Revocation_Reason;
+         Stop       : out Boolean)
+      is
+         pragma Unreferenced (Candidate, Revoked_At, Has_Reason, Reason);
       begin
          Stop := False;
          Total := Total + 1;

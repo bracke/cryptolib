@@ -48,7 +48,21 @@ package body CryptoLib.X509.Revocation is
       List    : XC.Revocation_List;
       At_Time : Certificate_Time) return Revocation_Answer
    is
+      Ignored : Revocation_Details;
    begin
+      return Check_Against_CRL (Item, Issuer, List, At_Time, Ignored);
+   end Check_Against_CRL;
+
+   function Check_Against_CRL
+     (Item    : Certificate;
+      Issuer  : Certificate;
+      List    : XC.Revocation_List;
+      At_Time : Certificate_Time;
+      Details : out Revocation_Details) return Revocation_Answer
+   is
+   begin
+      Details := (others => <>);
+
       if not X509C.Is_Present (Item)
         or else not X509C.Is_Present (Issuer)
         or else not XC.Is_Present (List)
@@ -87,7 +101,10 @@ package body CryptoLib.X509.Revocation is
          return Stale;
       end if;
 
-      if XC.Is_Revoked (List, X509C.Serial_Number (Item)) then
+      --  Asked once, and the answer to "is it revoked" and "when" come from
+      --  the same lookup rather than from two walks that could disagree.
+      Details := XC.Find_Revocation (List, X509C.Serial_Number (Item));
+      if Details.Present then
          return Revoked;
       end if;
 
@@ -100,8 +117,22 @@ package body CryptoLib.X509.Revocation is
       Response : in out CO.Response;
       At_Time  : Certificate_Time) return Revocation_Answer
    is
+      Ignored : Revocation_Details;
+   begin
+      return Check_Against_OCSP (Item, Issuer, Response, At_Time, Ignored);
+   end Check_Against_OCSP;
+
+   function Check_Against_OCSP
+     (Item     : Certificate;
+      Issuer   : Certificate;
+      Response : in out CO.Response;
+      At_Time  : Certificate_Time;
+      Details  : out Revocation_Details) return Revocation_Answer
+   is
       Verdict : CO.Verification_Result;
    begin
+      Details := (others => <>);
+
       if not X509C.Is_Present (Item)
         or else not X509C.Is_Present (Issuer)
         or else not CO.Is_Present (Response)
@@ -140,7 +171,9 @@ package body CryptoLib.X509.Revocation is
 
       case CO.Certificate_Status_Of (Response) is
          when CO.Good    => return Not_Revoked;
-         when CO.Revoked => return Revoked;
+         when CO.Revoked =>
+            Details := CO.Revocation_Of (Response);
+            return Revoked;
          when CO.Unknown => return Unknown;
       end case;
    end Check_Against_OCSP;

@@ -25,6 +25,7 @@ package CryptoLib.OCSP is
    subtype Offset is CryptoLib.ASN1.Offset;
    subtype Certificate is CryptoLib.X509.Certificates.Certificate;
    subtype Certificate_Time is CryptoLib.X509.Certificate_Time;
+   subtype Revocation_Details is CryptoLib.X509.Revocation_Details;
 
    --  What the responder said about the whole request.
    type Response_Status is
@@ -141,6 +142,16 @@ package CryptoLib.OCSP is
    --  @return the nextUpdate time, meaningless when absent
    function Next_Update (Item : Response) return Certificate_Time;
 
+   --  When the certificate was revoked, and why.
+   --
+   --  Meaningful only once Verify has accepted the response, and only when
+   --  Certificate_Status_Of says Revoked; Present is False otherwise. A
+   --  responder is not obliged to give a reason, and one that does not is
+   --  not saying "unspecified".
+   --  @param Item the response to inspect
+   --  @return what the response says about the revocation
+   function Revocation_Of (Item : Response) return Revocation_Details;
+
    --  Who signed the response, once Verify has established it.
    --  @param Item the response to inspect
    --  @return which kind of responder signed it
@@ -179,6 +190,7 @@ private
       Signer_Cert  : Span;
       Has_Signer   : Boolean := False;
       Responses    : Span;
+      Revocation   : CryptoLib.X509.Revocation_Details;
       Name_Hash    : Span;
       Key_Hash     : Span;
       Serial       : Span;

@@ -1,5 +1,39 @@
 package body CryptoLib.X509 is
 
+   function Reason_Image (Reason : Revocation_Reason) return String is
+   begin
+      case Reason is
+         when Unspecified            => return "unspecified";
+         when Key_Compromise         => return "key compromise";
+         when CA_Compromise          => return "CA compromise";
+         when Affiliation_Changed    => return "affiliation changed";
+         when Superseded             => return "superseded";
+         when Cessation_Of_Operation => return "cessation of operation";
+         when Certificate_Hold       => return "certificate hold";
+         when Remove_From_CRL        => return "remove from CRL";
+         when Privilege_Withdrawn    => return "privilege withdrawn";
+         when AA_Compromise          => return "AA compromise";
+         when Unknown_Reason         => return "unknown reason";
+      end case;
+   end Reason_Image;
+
+   function Reason_Of (Code : Natural) return Revocation_Reason is
+   begin
+      case Code is
+         when 0      => return Unspecified;
+         when 1      => return Key_Compromise;
+         when 2      => return CA_Compromise;
+         when 3      => return Affiliation_Changed;
+         when 4      => return Superseded;
+         when 5      => return Cessation_Of_Operation;
+         when 6      => return Certificate_Hold;
+         when 8      => return Remove_From_CRL;
+         when 9      => return Privilege_Withdrawn;
+         when 10     => return AA_Compromise;
+         when others => return Unknown_Reason;
+      end case;
+   end Reason_Of;
+
    function Is_Not_After
      (Left : Certificate_Time; Right : Certificate_Time) return Boolean
    is

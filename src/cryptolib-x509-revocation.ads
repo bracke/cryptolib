@@ -62,6 +62,25 @@ package CryptoLib.X509.Revocation is
       List    : CryptoLib.X509.CRLs.Revocation_List;
       At_Time : Certificate_Time) return Revocation_Answer;
 
+   --  As above, and say when the certificate was revoked and why.
+   --
+   --  Details is filled only when the answer is Revoked, and only from the
+   --  statement that produced that answer. It stays Present-False otherwise,
+   --  so a caller cannot read a revocation time off a list that did not
+   --  revoke anything.
+   --  @param Item the certificate in question
+   --  @param Issuer the certificate that issued it
+   --  @param List the revocation list to consult
+   --  @param At_Time the time to judge the list's freshness against
+   --  @param Details receives when and why, when the answer is Revoked
+   --  @return what the list says, or why it cannot say
+   function Check_Against_CRL
+     (Item    : Certificate;
+      Issuer  : Certificate;
+      List    : CryptoLib.X509.CRLs.Revocation_List;
+      At_Time : Certificate_Time;
+      Details : out Revocation_Details) return Revocation_Answer;
+
    --  Ask an OCSP response about a certificate.
    --
    --  The response must be about this certificate and signed by the issuer or
@@ -76,5 +95,24 @@ package CryptoLib.X509.Revocation is
       Issuer   : Certificate;
       Response : in out CryptoLib.OCSP.Response;
       At_Time  : Certificate_Time) return Revocation_Answer;
+
+   --  As above, and say when the certificate was revoked and why.
+   --
+   --  Details is filled only when the answer is Revoked. A responder that
+   --  revokes without giving a time is possible and leaves Details
+   --  Present-False: the answer is still Revoked, since not saying when does
+   --  not unsay the revocation.
+   --  @param Item the certificate in question
+   --  @param Issuer the certificate that issued it
+   --  @param Response the response to consult
+   --  @param At_Time the time to judge the response's freshness against
+   --  @param Details receives when and why, when the answer is Revoked
+   --  @return what the response says, or why it cannot say
+   function Check_Against_OCSP
+     (Item     : Certificate;
+      Issuer   : Certificate;
+      Response : in out CryptoLib.OCSP.Response;
+      At_Time  : Certificate_Time;
+      Details  : out Revocation_Details) return Revocation_Answer;
 
 end CryptoLib.X509.Revocation;

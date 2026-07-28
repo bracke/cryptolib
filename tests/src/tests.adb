@@ -3234,6 +3234,282 @@ procedure Tests is
 
    --  A revocation list made by OpenSSL, with a certificate genuinely
    --  revoked through "openssl ca -revoke".
+   --  When a certificate was revoked, and why -- from a CRL and from an OCSP
+   --  response about the same certificates, which must agree.
+   --
+   --  The time matters on its own: a signature made before the revocation
+   --  took effect may still stand, and a caller judging one needs that time
+   --  rather than the moment the statement was published. The reason matters
+   --  because Key_Compromise discredits every signature the key ever made,
+   --  while Superseded or Cessation_Of_Operation leave earlier ones alone.
+   procedure Check_Revocation_Details is
+      use type CryptoLib.ASN1.Errors.Decode_Status;
+      use type CryptoLib.OCSP.Verification_Result;
+      use type CryptoLib.X509.Certificate_Time;
+      use type CryptoLib.X509.Revocation_Reason;
+      use type CryptoLib.X509.Revocation.Revocation_Answer;
+
+      package X509C renames CryptoLib.X509.Certificates;
+      package XC renames CryptoLib.X509.CRLs;
+      package XR renames CryptoLib.X509.Revocation;
+      package CO renames CryptoLib.OCSP;
+
+      Reason_CA_DER : constant String :=
+        "3082030d308201f5a0030201020214695a2eb222fd6509af65d97b7099306d68b399eb300d06092a864886f70d" &
+        "01010b050030163114301206035504030c0b63726c2d746573742d6361301e170d323630373238323031353437" &
+        "5a170d3336303732353230313534375a30163114301206035504030c0b63726c2d746573742d63613082012230" &
+        "0d06092a864886f70d01010105000382010f003082010a0282010100b5e60ee7058f7f9e991a038feeac5eb95d" &
+        "99b6b52f543a4cf379d9b84ab68125a82424b27f07a1f6a39f6f6e5ac4df194a06d3683fafc31123427f768f60" &
+        "24aa6b2d5f759d0629a578497370038d70020ea20e261a913c332504d70327b2cd747a2ae0f415764976ae21d8" &
+        "c34874405cfabefd83ffc5b03de5c6521a611c333189ead8755a0bf56113ad088deb953cf1febb465a377d256b" &
+        "ad055bf627727ccfffa616cfe8edc009a49f318a6c1e935dc42b69ab1d2aa9ee2173defdf45fbb595b99aced52" &
+        "9fca129587fac967025980f7617070edde4748fa62cd395a608475ba22bd65c29f1fabdefe5e8aeed28baa1703" &
+        "88bca8bb6490db6bacea3473ed8f0203010001a3533051301d0603551d0e04160414a1f6d41f7e7b24380aa8a0" &
+        "cd33926e4452de852f301f0603551d23041830168014a1f6d41f7e7b24380aa8a0cd33926e4452de852f300f06" &
+        "03551d130101ff040530030101ff300d06092a864886f70d01010b050003820101005f484fd12f7d522aa3787c" &
+        "0ee05c3e06067d91b3f51a3747e1ffcd7d57e839f17a9bfcf878faa9c4af435426aa06ed4907dfb9c29ca36c6b" &
+        "53af27ce22516b5bd4cb19e9d912893e3800a1f7acc3abefbc18a6c899793b6ff9d378f2a77e0feb03659f8a24" &
+        "09bee7a4804773be1f8428608fb9041ac74581b1943d0d90dd2939be1b74015bcd676cf483167988523fba452b" &
+        "255b49146d3c5be21408d8c9848f6794a4fa588ab2d6d326bc7d92920c3547d3f4d9270c01ec4d368c98e11a61" &
+        "1f40cd6672de148b3bf435f812eda7e9e5d383ff2eefcf1384d136c45b1c062f731fc3414a237cf1b971994cce" &
+        "d2b6852b3f4314e9335fc96ba21fd8949c58f5c5";
+
+      Reason_Leaf_DER : constant String :=
+        "308202a53082018d02021000300d06092a864886f70d01010b050030163114301206035504030c0b63726c2d74" &
+        "6573742d6361301e170d3236303732383230313534375a170d3237303732383230313534375a301a3118301606" &
+        "035504030c0f7265766f6b65642e6578616d706c6530820122300d06092a864886f70d01010105000382010f00" &
+        "3082010a0282010100c0ed219d3150260bb4a5a976fd93941636a1dcdc8976321a5c82e468c74ff7e755f29a69" &
+        "40524606cf7e70308e8c3ed01c6954e7e7a45fdedd1d914b6cf2459cbba0b0a2f3a248771f69301ac2735a408a" &
+        "f830e03b7c3941648de0810c102c79f17da1d486a3b676993fd30102ed86ee4d4cde770d3abf8dd4b178885132" &
+        "f79e8799c63595af16af350d94207d96a5d830c19e2eff9edb43607e7c8e5ba3e737b82f71937a7ca59ffcac9d" &
+        "fc633aa69ce1e08aabf84a068c4e1dfa9f7ca28f959062408140c1c8cf63d66761609bc2dff8b3d4bd3250ee0a" &
+        "86b507023e9f9aee80b2184c01758ffaf3c280eeeff0fb0926de9c83cfc2f327c4dcd6254a0447150203010001" &
+        "300d06092a864886f70d01010b0500038201010080e42f4484be128c22efd3e63c0ea74f0efc8937b0a9529a0d" &
+        "90efd502c75e3647fa117adca923af965a184fa141d74ce910ad9fbed2fb1f1eb295f9cd28ebff73c6b8ea6ace" &
+        "a4d54009be31e34a52fa63c4277ebe37865d16ce20d7776ff9dbfee953305678b1dc967f59f836b6fc5ce4f166" &
+        "c3e4d20a992bbdb0b2ac53f8c8a23b9176097ae12e84bcebe9e81b77da3571a2f2bcf77d7e516102c37352c1e0" &
+        "fba2439d98a01280abcefe8a91b5857a2f515e6ae71c14f10fa56fb4710798b987f0a0b89a2510995a6f6cfa27" &
+        "2f10d60bcd56e3add0eb664aaa565ee2471a1f5b00eae79e62e58b987db98503855bb0bd82b803d2b7ee27f40c" &
+        "f62c878f5876";
+
+      Reason_Second_DER : constant String :=
+        "308202a43082018c02021001300d06092a864886f70d01010b050030163114301206035504030c0b63726c2d74" &
+        "6573742d6361301e170d3236303732383232313431375a170d3237303732383232313431375a30193117301506" &
+        "035504030c0e7365636f6e642e6578616d706c6530820122300d06092a864886f70d01010105000382010f0030" &
+        "82010a0282010100a169fd82209088be49800f464b442f6e1d1fdd823084ff0a76bfbc7ec44287274a752dba1d" &
+        "1926442087bff21dd051ce99fdf42f8cb4b30426d8240f922287b089d4e37a4add7ba8181dfc701369be8291e5" &
+        "7166ba7922d556eed539d1c2627b160cdd7c71ba8598319435dc4c2087d062ed23a84313fae6666f45b3050b88" &
+        "46c8b8fc2fca5b4e5018545e10a3cb8c7cdfbfa133cadb29acd896362cafb931bdfb31b4be226ba91567d38499" &
+        "84b6fc1f6f9211550ea01e522aeaf7523e23c59e22ed3fc55bbdcd1e4a7019ad93f5c2c8cb603d849af6c0c0d6" &
+        "99147c7c0073baaf455e0259cf099305383c5bebcf32113e1d82db30e615de58a0eed56dbb5b37020301000130" &
+        "0d06092a864886f70d01010b050003820101006066b5357a33b4941a2fd365f2792c297d6e82829fc3ac6bdd8c" &
+        "fc5efe3861139b38592af36fd731af2ee9f4a09689f01604097636072dac2cb00a319eded804527a0631c7ef52" &
+        "1f610c466cc33d8bdc9aaaf3e77b13b5ff004a51f837af3c6cba3ba6bf882e293e2d23a35c5654b4827341e1fd" &
+        "3afd7be93bb546b93bdf0983a8cbdde40b23ffd240220362c028f824e44fa2792a6a5fee2af6878df9c401ffba" &
+        "c2681e43effd2c225cc03b7bbb09affc9e1b962feef1da1dbc1f23597487d936c21e712fd4085290cc5f5eef03" &
+        "237d417b683db649c246f384d9190d16873cb75c50abe79b62e349772306da7e154bc2655aa9306c63ea33ce84" &
+        "0832a2c904";
+
+      Reason_CRL_DER : constant String :=
+        "308201aa308193020101300d06092a864886f70d01010b050030163114301206035504030c0b63726c2d746573" &
+        "742d6361170d3236303732383232333530315a170d3236303832373232333530315a3038301302021000170d32" &
+        "36303732383230313534375a302102021001170d3236303732383232333530315a300c300a0603551d1504030a" &
+        "0101a00f300d300b0603551d14040402021001300d06092a864886f70d01010b050003820101007a95fd172721" &
+        "41f2fb843e9bca2032f064e9fc48a1a09e47042bf2acf47f6c704776cb513d6991b0b9f08966af640a5be77c75" &
+        "c497905b1087b1114a0ebab6616ddd0740085ae706dc9095b3596928ea9353484d4a07867174a3e17e745d61fe" &
+        "3e3038fbe8e365e370ae1b989da8d11cd3cb2aa46ebdbad1b0af01581925c221270b488651bdfd13574ca3b91c" &
+        "feb81e99c5d3d450de6cc66d93a1bf42f22683d81597a58be41fc8bf78cc038b73e30b3226bb5e4b8ee8f06a09" &
+        "b8463b8bcb6095eff4dc439313f5834791ae09b92d169059b6d08af52d1ac727d373a3bd52e38dae47120addd9" &
+        "dd397ac90f72edbc0b651c50b149f9c9a989029b3419a7d65e";
+
+      Reason_Response_DER : constant String :=
+        "308204f60a0100a08204ef308204eb06092b0601050507300101048204dc308204d83081a8a118301631143012" &
+        "06035504030c0b63726c2d746573742d6361180f32303236303732383232333535325a307b3079303b30090605" &
+        "2b0e03021a05000414c62b1a2f4dac7a6728a9d9bcec42380ae44dbd360414a1f6d41f7e7b24380aa8a0cd3392" &
+        "6e4452de852f02021001a116180f32303236303732383232333530315aa0030a0101180f323032363037323832" &
+        "32333535325aa011180f32303236303832373232333535325a300d06092a864886f70d01010b05000382010100" &
+        "80a8a22a0fdfd1ad318eab14f12e354c63021234ae50e3b4b1ca9f7102dc9df6327c8f7df5b5ccc2e3c5afdb6c" &
+        "c94cf1dbfd7c1f46d86d3a95dc2eb2668b0d3a2eadfeeaed734da38c84dbd94dfe8acf0458adcb48fcec6d970b" &
+        "39e55f6a27bfe3838f5edc746c2a6c9ffa785066e68540e89124f7a44e27b4fdecf86a59b41f9b3ec3b5663687" &
+        "348a1f4b4a13a5c3f2156429037d67f55e39846ccc07432f3f0bff4bf84517ddf3994fc61c72b6d1f9a7d0a36f" &
+        "a331d3eaad39c6cc6f2845801461af6bd4a0152e9731fd4b39d25f66a394cc6a24b38db2cc5b5dd77acc620233" &
+        "14469b08e952941688585c1788af20ecd72ac1db95c69944b073cabf27d188a0820315308203113082030d3082" &
+        "01f5a0030201020214695a2eb222fd6509af65d97b7099306d68b399eb300d06092a864886f70d01010b050030" &
+        "163114301206035504030c0b63726c2d746573742d6361301e170d3236303732383230313534375a170d333630" &
+        "3732353230313534375a30163114301206035504030c0b63726c2d746573742d636130820122300d06092a8648" &
+        "86f70d01010105000382010f003082010a0282010100b5e60ee7058f7f9e991a038feeac5eb95d99b6b52f543a" &
+        "4cf379d9b84ab68125a82424b27f07a1f6a39f6f6e5ac4df194a06d3683fafc31123427f768f6024aa6b2d5f75" &
+        "9d0629a578497370038d70020ea20e261a913c332504d70327b2cd747a2ae0f415764976ae21d8c34874405cfa" &
+        "befd83ffc5b03de5c6521a611c333189ead8755a0bf56113ad088deb953cf1febb465a377d256bad055bf62772" &
+        "7ccfffa616cfe8edc009a49f318a6c1e935dc42b69ab1d2aa9ee2173defdf45fbb595b99aced529fca129587fa" &
+        "c967025980f7617070edde4748fa62cd395a608475ba22bd65c29f1fabdefe5e8aeed28baa170388bca8bb6490" &
+        "db6bacea3473ed8f0203010001a3533051301d0603551d0e04160414a1f6d41f7e7b24380aa8a0cd33926e4452" &
+        "de852f301f0603551d23041830168014a1f6d41f7e7b24380aa8a0cd33926e4452de852f300f0603551d130101" &
+        "ff040530030101ff300d06092a864886f70d01010b050003820101005f484fd12f7d522aa3787c0ee05c3e0606" &
+        "7d91b3f51a3747e1ffcd7d57e839f17a9bfcf878faa9c4af435426aa06ed4907dfb9c29ca36c6b53af27ce2251" &
+        "6b5bd4cb19e9d912893e3800a1f7acc3abefbc18a6c899793b6ff9d378f2a77e0feb03659f8a2409bee7a48047" &
+        "73be1f8428608fb9041ac74581b1943d0d90dd2939be1b74015bcd676cf483167988523fba452b255b49146d3c" &
+        "5be21408d8c9848f6794a4fa588ab2d6d326bc7d92920c3547d3f4d9270c01ec4d368c98e11a611f40cd6672de" &
+        "148b3bf435f812eda7e9e5d383ff2eefcf1384d136c45b1c062f731fc3414a237cf1b971994cced2b6852b3f43" &
+        "14e9335fc96ba21fd8949c58f5c5";
+
+      function From_Hex
+        (Text : String) return Ada.Streams.Stream_Element_Array
+      is
+         Result : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (Text'Length / 2));
+         function Nibble (C : Character) return Natural
+         is (case C is
+                when '0' .. '9' => Character'Pos (C) - Character'Pos ('0'),
+                when others     => Character'Pos (C) - Character'Pos ('a') + 10);
+      begin
+         for I in Result'Range loop
+            Result (I) :=
+              Ada.Streams.Stream_Element
+                (Nibble (Text (Text'First + 2 * Natural (I - 1))) * 16
+                 + Nibble (Text (Text'First + 2 * Natural (I - 1) + 1)));
+         end loop;
+         return Result;
+      end From_Hex;
+
+      Status : CryptoLib.ASN1.Errors.Decode_Status;
+      CA     : constant X509C.Certificate :=
+        X509C.Decode_DER
+          (From_Hex (Reason_CA_DER), CryptoLib.ASN1.Default_Limits, Status);
+      Leaf   : constant X509C.Certificate :=
+        X509C.Decode_DER
+          (From_Hex (Reason_Leaf_DER), CryptoLib.ASN1.Default_Limits, Status);
+      Second : constant X509C.Certificate :=
+        X509C.Decode_DER
+          (From_Hex (Reason_Second_DER), CryptoLib.ASN1.Default_Limits,
+           Status);
+      List   : constant XC.Revocation_List :=
+        XC.Decode_DER
+          (From_Hex (Reason_CRL_DER), CryptoLib.ASN1.Default_Limits, Status);
+
+      --  Inside the CRL's window: thisUpdate 2026-07-28, nextUpdate
+      --  2026-08-27, both as OpenSSL wrote them.
+      Inside : constant CryptoLib.X509.Certificate_Time :=
+        (Year => 2026, Month => 8, Day => 1,
+         Hour => 12, Minute => 0, Second => 0);
+
+      From_List : CryptoLib.X509.Revocation_Details;
+      From_OCSP : CryptoLib.X509.Revocation_Details;
+   begin
+      Check (Status = CryptoLib.ASN1.Errors.Ok and then XC.Is_Present (List),
+             "fixture: the two-entry CRL decodes");
+      Check (XC.Entry_Count (List) = 2,
+             "the list revokes two certificates, got"
+             & Natural'Image (XC.Entry_Count (List)));
+
+      --  An entry that gives no reason. Has_Reason must stay False: an
+      --  issuer that said nothing did not say "unspecified", and reading the
+      --  default as a statement puts words in its mouth.
+      declare
+         Info : constant CryptoLib.X509.Revocation_Details :=
+           XC.Find_Revocation (List, X509C.Serial_Number (Leaf));
+      begin
+         Check (Info.Present, "the first certificate is on the list");
+         Check (Info.Revoked_At.Year = 2026
+                and then Info.Revoked_At.Month = 7
+                and then Info.Revoked_At.Day = 28
+                and then Info.Revoked_At.Hour = 20
+                and then Info.Revoked_At.Minute = 15
+                and then Info.Revoked_At.Second = 47,
+                "its revocation time is the one OpenSSL wrote");
+         Check (not Info.Has_Reason,
+                "it gives no reason, and none is invented");
+      end;
+
+      --  An entry that does give one.
+      From_List := XC.Find_Revocation (List, X509C.Serial_Number (Second));
+      Check (From_List.Present, "the second certificate is on the list too");
+      Check (From_List.Revoked_At.Year = 2026
+             and then From_List.Revoked_At.Month = 7
+             and then From_List.Revoked_At.Day = 28
+             and then From_List.Revoked_At.Hour = 22
+             and then From_List.Revoked_At.Minute = 35
+             and then From_List.Revoked_At.Second = 1,
+             "with its own revocation time, not the other entry's");
+      Check (From_List.Has_Reason
+             and then From_List.Reason = CryptoLib.X509.Key_Compromise,
+             "and the reason the issuer gave, "
+             & CryptoLib.X509.Reason_Image (From_List.Reason));
+
+      --  A serial the list says nothing about must not come back carrying
+      --  some other entry's time.
+      declare
+         Info : constant CryptoLib.X509.Revocation_Details :=
+           XC.Find_Revocation (List, X509C.Serial_Number (CA));
+      begin
+         Check (not Info.Present,
+                "a certificate not on the list is not revoked");
+         Check (Info.Revoked_At.Year = 0 and then not Info.Has_Reason,
+                "and carries no time or reason from anyone else");
+      end;
+
+      --  The same two facts from an OCSP response about the same
+      --  certificate. The two sources are parsed by different code and must
+      --  land on the same answer; if they can disagree, one of them is wrong
+      --  and a caller has no way to tell which.
+      declare
+         Reply : CO.Response :=
+           CO.Decode_Response
+             (From_Hex (Reason_Response_DER), CryptoLib.ASN1.Default_Limits,
+              Status);
+      begin
+         Check (Status = CryptoLib.ASN1.Errors.Ok,
+                "fixture: the response decodes");
+         Check (CO.Verify (Reply, Second, CA) = CO.Accepted,
+                "the response is accepted before its contents are read");
+
+         From_OCSP := CO.Revocation_Of (Reply);
+         Check (From_OCSP.Present,
+                "the response says when the revocation took effect");
+         Check (From_OCSP.Revoked_At = From_List.Revoked_At,
+                "and it is the time the CRL gave");
+         Check (From_OCSP.Has_Reason = From_List.Has_Reason
+                and then From_OCSP.Reason = From_List.Reason,
+                "and the reason the CRL gave, "
+                & CryptoLib.X509.Reason_Image (From_OCSP.Reason));
+      end;
+
+      --  The same, through the front door, which is where a caller lands.
+      declare
+         Reply  : CO.Response :=
+           CO.Decode_Response
+             (From_Hex (Reason_Response_DER), CryptoLib.ASN1.Default_Limits,
+              Status);
+         Detail : CryptoLib.X509.Revocation_Details;
+         Answer : XR.Revocation_Answer;
+      begin
+         Answer :=
+           XR.Check_Against_CRL (Second, CA, List, Inside, Detail);
+         Check (Answer = XR.Revoked,
+                "the list revokes it: " & XR.Answer_Image (Answer));
+         Check (Detail.Present
+                and then Detail.Reason = CryptoLib.X509.Key_Compromise,
+                "and says why without a second lookup");
+
+         Answer :=
+           XR.Check_Against_OCSP (Second, CA, Reply, Inside, Detail);
+         Check (Answer = XR.Revoked,
+                "the response revokes it: " & XR.Answer_Image (Answer));
+         Check (Detail.Present
+                and then Detail.Reason = CryptoLib.X509.Key_Compromise,
+                "and says why too");
+
+         --  A certificate the statement does not revoke must leave the
+         --  details empty rather than keep the last certificate's.
+         Answer := XR.Check_Against_CRL (CA, CA, List, Inside, Detail);
+         Check (Answer /= XR.Revoked,
+                "the CA is not revoked by its own list");
+         Check (not Detail.Present,
+                "and no revocation details are left behind from the last "
+                & "question");
+      end;
+   end Check_Revocation_Details;
+
    procedure Check_X509_CRL is
       use type CryptoLib.ASN1.Errors.Decode_Status;
       use type CryptoLib.X509.Signatures.Verification_Result;
@@ -6327,6 +6603,7 @@ begin
    Check_X509_Names;
    Check_Certificate_Armour;
    Check_X509_CRL;
+   Check_Revocation_Details;
    Check_OCSP;
    Check_X509_Path_Building;
    Check_Name_Constraints;

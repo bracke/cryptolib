@@ -68,6 +68,7 @@ package CryptoLib.ASN1.OIDs is
    Subject_Alternative_Name : constant Octets := [16#55#, 16#1D#, 16#11#];
    Issuer_Alternative_Name  : constant Octets := [16#55#, 16#1D#, 16#12#];
    Basic_Constraints        : constant Octets := [16#55#, 16#1D#, 16#13#];
+   CRL_Reason_Code          : constant Octets := [16#55#, 16#1D#, 16#15#];
    Name_Constraints         : constant Octets := [16#55#, 16#1D#, 16#1E#];
    CRL_Distribution_Points  : constant Octets := [16#55#, 16#1D#, 16#1F#];
    Certificate_Policies     : constant Octets := [16#55#, 16#1D#, 16#20#];

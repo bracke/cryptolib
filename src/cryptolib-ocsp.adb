@@ -273,6 +273,10 @@ package body CryptoLib.OCSP is
       Issued    : out Certificate_Time;
       Due       : out Certificate_Time;
       Due_Given : out Boolean;
+      Revoked_At    : out Certificate_Time;
+      Revoked_Given : out Boolean;
+      Reason        : out CryptoLib.X509.Revocation_Reason;
+      Reason_Given  : out Boolean;
       Status    : out Decode_Status)
    is
       Single  : Element;
@@ -288,6 +292,10 @@ package body CryptoLib.OCSP is
       Issued := (others => 0);
       Due := (others => 0);
       Due_Given := False;
+      Revoked_At := (others => 0);
+      Revoked_Given := False;
+      Reason := CryptoLib.X509.Unspecified;
+      Reason_Given := False;
 
       DER_Reader.Read_Sequence
         (Data, Position, Last, 7, Limits, Single, Status);
@@ -351,6 +359,62 @@ package body CryptoLib.OCSP is
          when 1      => State := Revoked;
          when others => State := Unknown;
       end case;
+
+      --  revoked is [1] IMPLICIT RevokedInfo, so the context tag stands in
+      --  for the SEQUENCE and its content is revocationTime followed by an
+      --  optional [0] EXPLICIT reason. Stepping past it, as this used to,
+      --  loses when the revocation took effect -- which is the difference
+      --  between a signature made before it and one made after.
+      if State = Revoked and then not Is_Empty (Value) then
+         declare
+            Within : Offset := Value.First;
+            When_T : Certificate_Time;
+            Try    : Decode_Status;
+         begin
+            CryptoLib.X509.Times.Read
+              (Data, Within, Value.Last, 9, Limits, When_T, Try);
+            if Try = Ok then
+               Revoked_At := When_T;
+               Revoked_Given := True;
+
+               if not DER_Reader.At_End (Within, Value.Last) then
+                  declare
+                     Tag  : Element;
+                     Code : Element;
+                     Deep : Offset;
+                  begin
+                     DER_Reader.Read
+                       (Data, Within, Value.Last, 9, Limits, Tag, Try);
+                     if Try = Ok
+                       and then Tag.Class = Context_Specific
+                       and then Tag.Number = 0
+                       and then Tag.Constructed
+                     then
+                        Deep := Tag.First;
+                        DER_Reader.Read
+                          (Data, Deep, Tag.Last, 10, Limits, Code, Try);
+                        if Try = Ok
+                          and then Code.Class = Universal
+                          and then Code.Number = Tag_Enumerated
+                        then
+                           --  The responder said something; whether this
+                           --  crate names the code is a separate matter.
+                           Reason_Given := True;
+                           Reason := CryptoLib.X509.Unknown_Reason;
+                           if Content_Length (Code) = 1
+                             and then Data (Code.First) < 16#80#
+                           then
+                              Reason :=
+                                CryptoLib.X509.Reason_Of
+                                  (Natural (Data (Code.First)));
+                           end if;
+                        end if;
+                     end if;
+                  end;
+               end if;
+            end if;
+         end;
+      end if;
 
       CryptoLib.X509.Times.Read
         (Data, Inner, Single.Last, 8, Limits, Issued, Status);
@@ -626,6 +690,10 @@ package body CryptoLib.OCSP is
                   Row_From  : Certificate_Time;
                   Row_To    : Certificate_Time;
                   Row_Due   : Boolean;
+                  Row_Rev   : Certificate_Time;
+                  Row_Rev_Given : Boolean;
+                  Row_Reason    : CryptoLib.X509.Revocation_Reason;
+                  Row_Reason_Given : Boolean;
                   Name_H, Key_H, Serial_S : Span;
                   Seen  : Natural := 0;
                begin
@@ -633,6 +701,7 @@ package body CryptoLib.OCSP is
                      Read_Single_Response
                        (Work, Row, Skip.Last, Limits, Name_H, Key_H,
                         Serial_S, Row_State, Row_From, Row_To, Row_Due,
+                        Row_Rev, Row_Rev_Given, Row_Reason, Row_Reason_Given,
                         Status);
                      exit when Status /= Ok;
                      Seen := Seen + 1;
@@ -672,6 +741,9 @@ package body CryptoLib.OCSP is
 
    function Next_Update (Item : Response) return Certificate_Time
    is (Item.Due);
+
+   function Revocation_Of (Item : Response) return Revocation_Details
+   is (Item.Revocation);
 
    function Responder (Item : Response) return Responder_Kind
    is (Item.Signed_By);
@@ -729,6 +801,10 @@ package body CryptoLib.OCSP is
          Row_State : Certificate_Status;
          Row_From, Row_To : Certificate_Time;
          Row_Due   : Boolean;
+         Row_Rev   : Certificate_Time;
+         Row_Rev_Given : Boolean;
+         Row_Reason    : CryptoLib.X509.Revocation_Reason;
+         Row_Reason_Given : Boolean;
       begin
          if Item.Responses.Last < Item.Responses.First then
             return Malformed_Response;
@@ -738,7 +814,8 @@ package body CryptoLib.OCSP is
             Read_Single_Response
               (Item.DER, Row, Item.Responses.Last, Default_Limits,
                Row_Name, Row_Key, Row_Serial, Row_State, Row_From, Row_To,
-               Row_Due, Parse);
+               Row_Due, Row_Rev, Row_Rev_Given, Row_Reason, Row_Reason_Given,
+               Parse);
             exit when Parse /= Ok;
 
             if Same_Bytes (Slice (Item, Row_Name), Name_Hash)
@@ -754,6 +831,11 @@ package body CryptoLib.OCSP is
                Item.Issued := Row_From;
                Item.Due := Row_To;
                Item.Due_Present := Row_Due;
+               Item.Revocation :=
+                 (Present    => Row_State = Revoked and then Row_Rev_Given,
+                  Revoked_At => Row_Rev,
+                  Has_Reason => Row_Reason_Given,
+                  Reason     => Row_Reason);
                Found := True;
                exit;
             end if;
