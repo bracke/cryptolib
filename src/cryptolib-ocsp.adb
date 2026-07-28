@@ -36,6 +36,8 @@ package body CryptoLib.OCSP is
          when Not_Successful          => return "not successful";
          when Malformed_Response      => return "malformed response";
          when Wrong_Certificate       => return "wrong certificate";
+         when Nonce_Missing           => return "nonce missing";
+         when Nonce_Mismatch          => return "nonce mismatch";
          when Unknown_Responder       => return "unknown responder";
          when Delegate_Not_Authorized => return "delegate not authorized";
          when Invalid_Signature       => return "invalid signature";
@@ -97,9 +99,27 @@ package body CryptoLib.OCSP is
       Issuer : Certificate;
       Output : out Octets;
       Last   : out Offset;
-      Status : out Decode_Status)
+      Status : out Decode_Status;
+      Nonce  : Octets := No_Nonce)
    is
       Cursor : Offset := Output'First;
+
+      Send_Nonce : constant Boolean := Nonce'Length > 0;
+
+      --  extnValue is an OCTET STRING whose content is itself a DER OCTET
+      --  STRING holding the nonce -- two layers, as RFC 6960 requires and as
+      --  OpenSSL writes it.
+      Nonce_Inner : constant Natural :=
+        (if Send_Nonce then TLV_Length (Natural (Nonce'Length)) else 0);
+      Nonce_Ext   : constant Natural :=
+        (if Send_Nonce
+         then TLV_Length (Natural (OID_Table.OCSP_Nonce'Length))
+              + TLV_Length (Nonce_Inner)
+         else 0);
+      Nonce_List  : constant Natural :=
+        (if Send_Nonce then TLV_Length (Nonce_Ext) else 0);
+      Nonce_Block : constant Natural :=
+        (if Send_Nonce then TLV_Length (TLV_Length (Nonce_List)) else 0);
    begin
       Last := Output'First - 1;
       Status := Ok;
@@ -135,11 +155,14 @@ package body CryptoLib.OCSP is
            + TLV_Length (Natural (Serial'Length));
          Request_Content : constant Natural := TLV_Length (Cert_ID_Content);
          List_Content    : constant Natural := TLV_Length (Request_Content);
-         TBS_Content     : constant Natural := TLV_Length (List_Content);
+         TBS_Content     : constant Natural :=
+           TLV_Length (List_Content) + Nonce_Block;
          Outer_Content   : constant Natural := TLV_Length (TBS_Content);
          Total           : constant Natural := TLV_Length (Outer_Content);
       begin
-         if Serial'Length = 0 then
+         if Serial'Length = 0
+           or else Natural (Nonce'Length) > Maximum_Nonce_Length
+         then
             Status := Invalid_Value;
             return;
          end if;
@@ -185,6 +208,31 @@ package body CryptoLib.OCSP is
          Put_TLV (Output, Cursor, 16#04#, Name_Hash);
          Put_TLV (Output, Cursor, 16#04#, Key_Hash);
          Put_TLV (Output, Cursor, 16#02#, Serial);
+
+         --  requestExtensions [2] EXPLICIT Extensions, after the request
+         --  list rather than inside it: the nonce is about the question, not
+         --  about the certificate being asked after.
+         if Send_Nonce then
+            Output (Cursor) := 16#A2#;
+            Cursor := Cursor + 1;
+            Put_Length (Output, Cursor, TLV_Length (Nonce_List));
+
+            Output (Cursor) := 16#30#;
+            Cursor := Cursor + 1;
+            Put_Length (Output, Cursor, Nonce_List);
+
+            Output (Cursor) := 16#30#;
+            Cursor := Cursor + 1;
+            Put_Length (Output, Cursor, Nonce_Ext);
+
+            Put_TLV (Output, Cursor, 16#06#, OID_Table.OCSP_Nonce);
+
+            --  The outer OCTET STRING, then the inner one it wraps.
+            Output (Cursor) := 16#04#;
+            Cursor := Cursor + 1;
+            Put_Length (Output, Cursor, Nonce_Inner);
+            Put_TLV (Output, Cursor, 16#04#, Nonce);
+         end if;
 
          Last := Cursor - 1;
       end;
@@ -259,6 +307,103 @@ package body CryptoLib.OCSP is
 
    --  Read one SingleResponse: which certificate it is about, what it says,
    --  and for how long. One reader, used to validate the list at decode and
+   --  Find the nonce inside a [Number] EXPLICIT Extensions wrapper.
+   --
+   --  Absent is not an error: responseExtensions is optional, and most
+   --  responses carry none. Whether that matters is Verify's question, and it
+   --  depends on whether the caller sent one.
+   procedure Find_Nonce
+     (Data     : Octets;
+      Position : Offset;
+      Last     : Offset;
+      Depth    : Natural;
+      Number   : Tag_Number;
+      Limits   : Decode_Limits;
+      Where    : out Span;
+      Found    : out Boolean)
+   is
+      Cursor : Offset := Position;
+      Wrap   : Element;
+      Seq    : Element;
+      Status : Decode_Status;
+   begin
+      Where := (First => 1, Last => 0);
+      Found := False;
+
+      if DER_Reader.At_End (Cursor, Last) then
+         return;
+      end if;
+
+      DER_Reader.Read (Data, Cursor, Last, Depth, Limits, Wrap, Status);
+      if Status /= Ok
+        or else Wrap.Class /= Context_Specific
+        or else Wrap.Number /= Number
+        or else not Wrap.Constructed
+      then
+         return;
+      end if;
+
+      Cursor := Wrap.First;
+      DER_Reader.Read_Sequence
+        (Data, Cursor, Wrap.Last, Depth + 1, Limits, Seq, Status);
+      if Status /= Ok then
+         return;
+      end if;
+
+      Cursor := Seq.First;
+      while not DER_Reader.At_End (Cursor, Seq.Last) loop
+         declare
+            Ext   : Element;
+            Part  : Offset;
+            OID   : Element;
+            Value : Element;
+            Inner : Element;
+            Look  : Offset;
+            Peek  : Element;
+            Flag  : Boolean;
+            Try   : Decode_Status;
+         begin
+            DER_Reader.Read_Sequence
+              (Data, Cursor, Seq.Last, Depth + 2, Limits, Ext, Status);
+            exit when Status /= Ok;
+
+            Part := Ext.First;
+            DER_Reader.Read_Object_Identifier
+              (Data, Part, Ext.Last, Depth + 3, Limits, OID, Status);
+            exit when Status /= Ok;
+
+            Look := Part;
+            DER_Reader.Read
+              (Data, Look, Ext.Last, Depth + 3, Limits, Peek, Try);
+            if Try = Ok
+              and then Peek.Class = Universal
+              and then Peek.Number = Tag_Boolean
+            then
+               DER_Reader.Read_Boolean
+                 (Data, Part, Ext.Last, Depth + 3, Limits, Flag, Status);
+               exit when Status /= Ok;
+            end if;
+
+            DER_Reader.Read_Octet_String
+              (Data, Part, Ext.Last, Depth + 3, Limits, Value, Status);
+            exit when Status /= Ok;
+
+            if OID_Table.Matches (Data, OID, OID_Table.OCSP_Nonce) then
+               --  extnValue wraps a DER OCTET STRING; the nonce is its
+               --  content, not the wrapper's.
+               Part := Value.First;
+               DER_Reader.Read_Octet_String
+                 (Data, Part, Value.Last, Depth + 4, Limits, Inner, Status);
+               if Status = Ok and then not Is_Empty (Inner) then
+                  Where := (First => Inner.First, Last => Inner.Last);
+                  Found := True;
+               end if;
+               return;
+            end if;
+         end;
+      end loop;
+   end Find_Nonce;
+
    --  to pick from it at verify, so the two cannot disagree about what an
    --  entry means.
    procedure Read_Single_Response
@@ -716,6 +861,17 @@ package body CryptoLib.OCSP is
 
                   pragma Unreferenced (Row_ID);
                end;
+
+               --  responseExtensions [1] EXPLICIT Extensions OPTIONAL.
+               declare
+                  At_Nonce : Span;
+                  Carried  : Boolean;
+               begin
+                  Find_Nonce
+                    (Work, Part, TBS.Last, 6, 1, Limits, At_Nonce, Carried);
+                  Result.Nonce_At := At_Nonce;
+                  Result.Has_Nonce_Ext := Carried;
+               end;
             end;
          end;
       end;
@@ -742,6 +898,12 @@ package body CryptoLib.OCSP is
    function Next_Update (Item : Response) return Certificate_Time
    is (Item.Due);
 
+   function Has_Nonce (Item : Response) return Boolean
+   is (Item.Has_Nonce_Ext);
+
+   function Nonce (Item : Response) return Octets
+   is (Slice (Item, Item.Nonce_At));
+
    function Revocation_Of (Item : Response) return Revocation_Details
    is (Item.Revocation);
 
@@ -763,9 +925,10 @@ package body CryptoLib.OCSP is
    end Same_Bytes;
 
    function Verify
-     (Item    : in out Response;
-      Subject : Certificate;
-      Issuer  : Certificate) return Verification_Result
+     (Item           : in out Response;
+      Subject        : Certificate;
+      Issuer         : Certificate;
+      Expected_Nonce : Octets := No_Nonce) return Verification_Result
    is
    begin
       Item.Signed_By := Not_Established;
@@ -845,6 +1008,20 @@ package body CryptoLib.OCSP is
             return Wrong_Certificate;
          end if;
       end;
+
+      --  Checked before the signature, because a nonce that does not match
+      --  means this is not the answer to the question asked, however well
+      --  signed it is. Only checked when the caller sent one: a response
+      --  fetched without a nonce has nothing to compare against, and
+      --  demanding one anyway would refuse every stapled response.
+      if Expected_Nonce'Length > 0 then
+         if not Item.Has_Nonce_Ext then
+            return Nonce_Missing;
+         end if;
+         if not Same_Bytes (Slice (Item, Item.Nonce_At), Expected_Nonce) then
+            return Nonce_Mismatch;
+         end if;
+      end if;
 
       if not XS.Is_Supported (Item.Algorithm) then
          return Unsupported_Algorithm;

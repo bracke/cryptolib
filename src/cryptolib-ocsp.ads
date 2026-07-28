@@ -59,6 +59,14 @@ package CryptoLib.OCSP is
       Wrong_Certificate,
       --  The response is about a different certificate than the one asked
       --  about. A response can be perfectly valid and about somebody else.
+      Nonce_Missing,
+      --  A nonce was sent and the response carries none, so nothing ties it
+      --  to the request. Separate from Nonce_Mismatch because it is the
+      --  ordinary behaviour of a responder serving pre-signed responses,
+      --  which a caller may decide to tolerate; a wrong nonce is not.
+      Nonce_Mismatch,
+      --  The response carries a different nonce than the one sent. That is
+      --  somebody else's answer, or a replayed one.
       Unknown_Responder,
       --  Signed by something that is neither the issuer nor a responder the
       --  issuer delegated to.
@@ -71,6 +79,12 @@ package CryptoLib.OCSP is
 
    type Response (Length : Offset) is private;
 
+   --  Ask, or verify, without a nonce.
+   No_Nonce : constant Octets (1 .. 0) := [others => 0];
+
+   --  The longest nonce this will send, RFC 8954's bound.
+   Maximum_Nonce_Length : constant := 32;
+
    --  Render a verification result as short diagnostic text.
    --  @param Result the result to describe
    --  @return lower-case text naming the result
@@ -82,17 +96,30 @@ package CryptoLib.OCSP is
    --  not a security choice: the identifier is a lookup key that responders
    --  compute the same way, and using anything else asks a question no
    --  responder can answer.
+   --  A nonce, when given, is sent as a request extension and ties the
+   --  answer to this question. Without one a response stands on its own and
+   --  can be replayed for as long as it remains current: an attacker who
+   --  captured a "good" answer before the certificate was revoked can keep
+   --  presenting it until nextUpdate. It must be unpredictable -- generate it
+   --  with CryptoLib.Random, not from a counter or a clock -- and it must be
+   --  kept, because checking the answer means comparing against it.
+   --
+   --  It is optional because it has to be. Many public responders serve
+   --  pre-signed responses and either ignore a nonce or refuse the request
+   --  outright, so a library that always sent one would fail against them.
    --  @param Item the certificate being asked about
    --  @param Issuer the certificate that issued it
    --  @param Output receives the request's DER
    --  @param Last the last index of Output written
    --  @param Status Ok on success, otherwise why no request was built
+   --  @param Nonce the nonce to send, or No_Nonce to send none
    procedure Build_Request
      (Item   : Certificate;
       Issuer : Certificate;
       Output : out Octets;
       Last   : out Offset;
-      Status : out Decode_Status);
+      Status : out Decode_Status;
+      Nonce  : Octets := No_Nonce);
 
    --  An upper bound on a request's size, for sizing the buffer.
    --  @return the largest number of octets Build_Request can produce
@@ -152,6 +179,19 @@ package CryptoLib.OCSP is
    --  @return what the response says about the revocation
    function Revocation_Of (Item : Response) return Revocation_Details;
 
+   --  Does the response carry a nonce?
+   --  @param Item the response to inspect
+   --  @return True when a nonce extension is present
+   function Has_Nonce (Item : Response) return Boolean;
+
+   --  The nonce the response carries.
+   --
+   --  Unauthenticated until Verify has accepted the response: the nonce is
+   --  inside the signed data, but nothing has checked the signature yet.
+   --  @param Item the response to inspect
+   --  @return the nonce octets, empty when the response carries none
+   function Nonce (Item : Response) return Octets;
+
    --  Who signed the response, once Verify has established it.
    --  @param Item the response to inspect
    --  @return which kind of responder signed it
@@ -165,14 +205,20 @@ package CryptoLib.OCSP is
    --  the issuer delegated to. It does not mean the certificate is good --
    --  read Certificate_Status_Of for that -- nor that the response is current,
    --  which is a question about times and the caller's tolerance.
+   --  Pass the nonce that was sent as Expected_Nonce and the response must
+   --  carry it. Leaving it No_Nonce checks nothing, which is right for a
+   --  stapled response or one fetched without a nonce, and wrong for one
+   --  fetched with a nonce that nobody then compares.
    --  @param Item the response to check, updated with who signed it
    --  @param Subject the certificate the response should be about
    --  @param Issuer that certificate's issuer
+   --  @param Expected_Nonce the nonce that was sent, or No_Nonce
    --  @return Accepted, or why not
    function Verify
-     (Item    : in out Response;
-      Subject : Certificate;
-      Issuer  : Certificate) return Verification_Result;
+     (Item           : in out Response;
+      Subject        : Certificate;
+      Issuer         : Certificate;
+      Expected_Nonce : Octets := No_Nonce) return Verification_Result;
 
 private
 
@@ -190,6 +236,8 @@ private
       Signer_Cert  : Span;
       Has_Signer   : Boolean := False;
       Responses    : Span;
+      Nonce_At     : Span;
+      Has_Nonce_Ext : Boolean := False;
       Revocation   : CryptoLib.X509.Revocation_Details;
       Name_Hash    : Span;
       Key_Hash     : Span;

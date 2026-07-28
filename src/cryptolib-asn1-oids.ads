@@ -94,6 +94,11 @@ package CryptoLib.ASN1.OIDs is
    AD_CA_Issuers : constant Octets :=
      [16#2B#, 16#06#, 16#01#, 16#05#, 16#05#, 16#07#, 16#30#, 16#02#];
 
+   --  1.3.6.1.5.5.7.48.1.2, the OCSP nonce, which sits under AD_OCSP for the
+   --  same reason OCSP_No_Check does.
+   OCSP_Nonce : constant Octets :=
+     [16#2B#, 16#06#, 16#01#, 16#05#, 16#05#, 16#07#, 16#30#, 16#01#, 16#02#];
+
    --  Extended key usages, 1.3.6.1.5.5.7.3.n
    EKU_Server_Auth : constant Octets :=
      [16#2B#, 16#06#, 16#01#, 16#05#, 16#05#, 16#07#, 16#03#, 16#01#];

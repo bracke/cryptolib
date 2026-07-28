@@ -3893,6 +3893,43 @@ procedure Tests is
          return Result;
       end From_Hex;
 
+      OCSP_Nonce_Request : constant String :=
+        "30683066303f303d303b300906052b0e03021a05000414c62b1a2f4dac7a6728a9d9bcec42380ae44dbd360414" &
+        "a1f6d41f7e7b24380aa8a0cd33926e4452de852f02021000a2233021301f06092b060105050730010204120410" &
+        "7fd8286787dd2b097e24bc1c0437e57b";
+
+      OCSP_Nonce_Response : constant String :=
+        "308205160a0100a082050f3082050b06092b0601050507300101048204fc308204f83081c8a118301631143012" &
+        "06035504030c0b63726c2d746573742d6361180f32303236303732383232343130395a30763074303b30090605" &
+        "2b0e03021a05000414c62b1a2f4dac7a6728a9d9bcec42380ae44dbd360414a1f6d41f7e7b24380aa8a0cd3392" &
+        "6e4452de852f02021000a111180f32303236303732383230313534375a180f3230323630373238323234313039" &
+        "5aa011180f32303236303832373232343130395aa1233021301f06092b0601050507300102041204107fd82867" &
+        "87dd2b097e24bc1c0437e57b300d06092a864886f70d01010b0500038201010068b3c8fa8dde21a743f5eedd73" &
+        "3a681dcbc6e188f739590f30dd2dc495cf9ead37f99b1f31ad0185ccb38fbf752de366d5b06a9c7dfbb3d75718" &
+        "017343e06f71af78054f98fce4585277957e193cee24fe98c0417807d349efc09993533dd0b3daf47a73e63176" &
+        "9b066f08e812af0ca47ac1630390166cb8120be2c1dc6a9f801e92495a1c44110fdd39524a72f7920ec2ecfa9e" &
+        "459b7e0a774c87d8968e294acf799db314f391a612942210f53172d79367826822eb7d60db5c362a507aefd935" &
+        "59913c5bc91e1a37e08cd5c258ed13166778accab6dd4d10b6de573acff07ac70b0b571845f7552b75fd924c38" &
+        "02414f14b9e83fc0fd862856ee49a8db8c1aa0820315308203113082030d308201f5a0030201020214695a2eb2" &
+        "22fd6509af65d97b7099306d68b399eb300d06092a864886f70d01010b050030163114301206035504030c0b63" &
+        "726c2d746573742d6361301e170d3236303732383230313534375a170d3336303732353230313534375a301631" &
+        "14301206035504030c0b63726c2d746573742d636130820122300d06092a864886f70d01010105000382010f00" &
+        "3082010a0282010100b5e60ee7058f7f9e991a038feeac5eb95d99b6b52f543a4cf379d9b84ab68125a82424b2" &
+        "7f07a1f6a39f6f6e5ac4df194a06d3683fafc31123427f768f6024aa6b2d5f759d0629a578497370038d70020e" &
+        "a20e261a913c332504d70327b2cd747a2ae0f415764976ae21d8c34874405cfabefd83ffc5b03de5c6521a611c" &
+        "333189ead8755a0bf56113ad088deb953cf1febb465a377d256bad055bf627727ccfffa616cfe8edc009a49f31" &
+        "8a6c1e935dc42b69ab1d2aa9ee2173defdf45fbb595b99aced529fca129587fac967025980f7617070edde4748" &
+        "fa62cd395a608475ba22bd65c29f1fabdefe5e8aeed28baa170388bca8bb6490db6bacea3473ed8f0203010001" &
+        "a3533051301d0603551d0e04160414a1f6d41f7e7b24380aa8a0cd33926e4452de852f301f0603551d23041830" &
+        "168014a1f6d41f7e7b24380aa8a0cd33926e4452de852f300f0603551d130101ff040530030101ff300d06092a" &
+        "864886f70d01010b050003820101005f484fd12f7d522aa3787c0ee05c3e06067d91b3f51a3747e1ffcd7d57e8" &
+        "39f17a9bfcf878faa9c4af435426aa06ed4907dfb9c29ca36c6b53af27ce22516b5bd4cb19e9d912893e3800a1" &
+        "f7acc3abefbc18a6c899793b6ff9d378f2a77e0feb03659f8a2409bee7a4804773be1f8428608fb9041ac74581" &
+        "b1943d0d90dd2939be1b74015bcd676cf483167988523fba452b255b49146d3c5be21408d8c9848f6794a4fa58" &
+        "8ab2d6d326bc7d92920c3547d3f4d9270c01ec4d368c98e11a611f40cd6672de148b3bf435f812eda7e9e5d383" &
+        "ff2eefcf1384d136c45b1c062f731fc3414a237cf1b971994cced2b6852b3f4314e9335fc96ba21fd8949c58f5" &
+        "c5";
+
       Status : CryptoLib.ASN1.Errors.Decode_Status;
 
       --  The same CA and revoked certificate the CRL fixtures come from.
@@ -4019,6 +4056,89 @@ procedure Tests is
          Check (CO.Verify (Item, CA, CA) = CO.Wrong_Certificate,
                 "a response about a different certificate is refused, got "
                 & CO.Result_Image (CO.Verify (Item, CA, CA)));
+      end;
+
+      --  A nonce ties a response to the question that was asked. Without one
+      --  a response stands on its own for as long as it is current, so an
+      --  answer captured before a certificate was revoked can be presented
+      --  again afterwards and still check out.
+      declare
+         Sent : constant Ada.Streams.Stream_Element_Array :=
+           From_Hex ("7fd8286787dd2b097e24bc1c0437e57b");
+         Other : constant Ada.Streams.Stream_Element_Array :=
+           From_Hex ("00112233445566778899aabbccddeeff");
+         Built : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset
+                   (CO.Maximum_Request_Length));
+         Last  : Ada.Streams.Stream_Element_Offset;
+         St    : CryptoLib.ASN1.Errors.Decode_Status;
+         Want  : constant Ada.Streams.Stream_Element_Array :=
+           From_Hex (OCSP_Nonce_Request);
+      begin
+         --  Same certificate, same nonce, same bytes OpenSSL writes. The
+         --  nonce sits in requestExtensions with its value wrapped twice --
+         --  an OCTET STRING inside the extension's OCTET STRING -- and
+         --  getting that nesting wrong produces a request a responder reads
+         --  as carrying no nonce at all.
+         CO.Build_Request (Leaf, CA, Built, Last, St, Sent);
+         Check (St = CryptoLib.ASN1.Errors.Ok,
+                "a request carrying a nonce is built");
+         Check (Built (Built'First .. Last) = Want,
+                "and is byte-identical to the one OpenSSL builds");
+
+         --  RFC 8954 bounds the nonce at 32 octets. A longer one is refused
+         --  rather than truncated: a truncated nonce is a different nonce,
+         --  and the caller would compare against what it meant to send.
+         declare
+            Too_Long : constant Ada.Streams.Stream_Element_Array
+              (1 .. CO.Maximum_Nonce_Length + 1) := [others => 16#41#];
+         begin
+            CO.Build_Request (Leaf, CA, Built, Last, St, Too_Long);
+            Check (St /= CryptoLib.ASN1.Errors.Ok,
+                   "an over-long nonce is refused rather than trimmed");
+         end;
+
+         declare
+            Reply : CO.Response :=
+              CO.Decode_Response
+                (From_Hex (OCSP_Nonce_Response),
+                 CryptoLib.ASN1.Default_Limits, Status);
+            Plain : CO.Response :=
+              CO.Decode_Response
+                (From_Hex (OCSP_Direct), CryptoLib.ASN1.Default_Limits,
+                 Status);
+         begin
+            Check (Status = CryptoLib.ASN1.Errors.Ok,
+                   "fixture: the response decodes");
+            Check (CO.Has_Nonce (Reply),
+                   "the responder echoed a nonce");
+            Check (CO.Nonce (Reply) = Sent,
+                   "and it is the nonce that was sent");
+
+            Check (CO.Verify (Reply, Leaf, CA, Sent) = CO.Accepted,
+                   "a response carrying the nonce sent is accepted, got "
+                   & CO.Result_Image (CO.Verify (Reply, Leaf, CA, Sent)));
+
+            --  The whole point: a well-formed, correctly signed, current
+            --  response that answers the wrong question is refused.
+            Check (CO.Verify (Reply, Leaf, CA, Other) = CO.Nonce_Mismatch,
+                   "a response carrying a different nonce is refused, got "
+                   & CO.Result_Image (CO.Verify (Reply, Leaf, CA, Other)));
+
+            --  Missing is reported apart from mismatched, because a
+            --  responder serving pre-signed answers omits the nonce as a
+            --  matter of course and a caller may decide to live with that.
+            Check (CO.Verify (Plain, Leaf, CA, Sent) = CO.Nonce_Missing,
+                   "a response carrying no nonce is reported as missing, got "
+                   & CO.Result_Image (CO.Verify (Plain, Leaf, CA, Sent)));
+
+            --  A caller that sent no nonce has nothing to compare against,
+            --  and demanding one anyway would refuse every stapled response.
+            Check (CO.Verify (Reply, Leaf, CA) = CO.Accepted,
+                   "checking no nonce still accepts a response that has one");
+            Check (CO.Verify (Plain, Leaf, CA) = CO.Accepted,
+                   "and one that has none");
+         end;
       end;
    end Check_OCSP;
 
