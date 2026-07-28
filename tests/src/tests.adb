@@ -3248,6 +3248,7 @@ procedure Tests is
       use type CryptoLib.X509.Certificate_Time;
       use type CryptoLib.X509.Revocation_Reason;
       use type CryptoLib.X509.Revocation.Revocation_Answer;
+      use type CryptoLib.X509.Signatures.Verification_Result;
 
       package X509C renames CryptoLib.X509.Certificates;
       package XC renames CryptoLib.X509.CRLs;
@@ -3393,6 +3394,17 @@ procedure Tests is
         (Year => 2026, Month => 8, Day => 1,
          Hour => 12, Minute => 0, Second => 0);
 
+      Scoped_CRL_DER : constant String :=
+        "30820180306a020101300d06092a864886f70d01010b050030163114301206035504030c0b63726c2d74657374" &
+        "2d6361170d3236303732383232353330385a170d3236303832373232353330385aa020301e300f0603551d1c01" &
+        "01ff040530038201ff300b0603551d14040402022000300d06092a864886f70d01010b050003820101003fdb81" &
+        "9f241451c144f655f468651da90a1e5009fc9564925c5849a2d061025e1511cd0eddcbfa07b325b352dd79d06a" &
+        "20fd8b3135aeea4cb32f879ac49a9bd23a21626bfe06baa9bd96a037245980741f4d66affe4b4319b0ed467b2e" &
+        "32615986c25ff8c0b295df910e640ac08b7d2d5035120640265597f73dd1891f8895fe626b0fac8dbca132286b" &
+        "e2a62e85e190d1e7d0d1bbaedf217a6494ed1efe86aea9953d900d2c08635fa8e027306c08a6da815215135f64" &
+        "18bc8d84542ad6f12a7fe9d3488b5c0f1ef8746e062ce93d0a6add3ddeb512773690a347b59d05a18ecd0ea465" &
+        "695e35231c67a5e38f5e24560a02d031f92143ce973aa48a0b41648a";
+
       From_List : CryptoLib.X509.Revocation_Details;
       From_OCSP : CryptoLib.X509.Revocation_Details;
    begin
@@ -3507,6 +3519,52 @@ procedure Tests is
          Check (not Detail.Present,
                 "and no revocation details are left behind from the last "
                 & "question");
+      end;
+
+      --  A CRL that says, critically, that it covers only part of what its
+      --  issuer signed. It is properly signed, in its own window, and lists
+      --  nothing -- so every other check passes and an absent serial reads
+      --  as "not revoked". It is not: the list never covered end-entity
+      --  certificates, and reading silence as absolution is how a revoked
+      --  certificate keeps working.
+      declare
+         Scoped : constant XC.Revocation_List :=
+           XC.Decode_DER
+             (From_Hex (Scoped_CRL_DER), CryptoLib.ASN1.Default_Limits,
+              Status);
+         Detail : CryptoLib.X509.Revocation_Details;
+      begin
+         Check (Status = CryptoLib.ASN1.Errors.Ok
+                and then XC.Is_Present (Scoped),
+                "a scoped CRL still decodes -- it is well formed");
+         Check (XC.Verify_Signature (Scoped, CA)
+                = CryptoLib.X509.Signatures.Valid,
+                "and its issuer really signed it");
+         Check (XC.Entry_Count (Scoped) = 0,
+                "and it lists nothing, which is the trap");
+
+         Check (XC.Has_Unsupported_Critical_Extension (Scoped),
+                "its critical scoping extension is noticed");
+
+         --  The certificate this asks about is revoked on the real list.
+         declare
+            Answer : constant XR.Revocation_Answer :=
+              XR.Check_Against_CRL (Leaf, CA, Scoped, Inside, Detail);
+         begin
+            Check (Answer = XR.Unsupported_Statement,
+                   "so the list answers nothing rather than 'not revoked', "
+                   & "got " & XR.Answer_Image (Answer));
+            Check (not Detail.Present,
+                   "and carries no revocation details either");
+         end;
+
+         --  The ordinary list is unaffected: this must refuse scoped CRLs,
+         --  not CRLs.
+         Check (not XC.Has_Unsupported_Critical_Extension (List),
+                "an ordinary CRL carries nothing critical this cannot read");
+         Check (XR.Check_Against_CRL (Leaf, CA, List, Inside, Detail)
+                = XR.Revoked,
+                "and still answers");
       end;
    end Check_Revocation_Details;
 

@@ -24,6 +24,7 @@ package body CryptoLib.X509.Revocation is
          when Stale               => return "stale";
          when Wrong_Issuer        => return "wrong issuer";
          when Untrusted_Signature => return "untrusted signature";
+         when Unsupported_Statement => return "unsupported statement";
          when Malformed           => return "malformed";
       end case;
    end Answer_Image;
@@ -85,6 +86,14 @@ package body CryptoLib.X509.Revocation is
         /= CryptoLib.X509.Signatures.Valid
       then
          return Untrusted_Signature;
+      end if;
+
+      --  Before reading anything into what the list does or does not say.
+      --  A CRL scoped by a critical extension is a statement about part of
+      --  what its issuer signed, and this crate cannot tell which part, so
+      --  an absent serial means nothing at all.
+      if XC.Has_Unsupported_Critical_Extension (List) then
+         return Unsupported_Statement;
       end if;
 
       --  Issued in the past, and not yet superseded. A list from before the

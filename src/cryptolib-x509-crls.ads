@@ -7,7 +7,8 @@ with CryptoLib.X509.Signatures;
 --
 --  A CRL is a signed statement by an issuer that certain serial numbers it
 --  issued are no longer to be trusted. This decodes one, checks that the
---  issuer really signed it, and answers whether a serial is on it.
+--  issuer really signed it, and answers whether a serial is on it -- and, for
+--  one that is, when the revocation took effect and why.
 --
 --  Nothing here fetches anything. A CRL arrives from a file, a distribution
 --  point the application chose to visit, or a protocol that carried it;
@@ -18,8 +19,11 @@ with CryptoLib.X509.Signatures;
 --  The revoked list is not held in memory as a list. A CRL can carry hundreds
 --  of thousands of entries, so an array of them would put a bound on what
 --  could be read, and the bound would be the wrong one for somebody. The
---  encoding is walked on demand instead: Is_Revoked costs a pass over the
---  entries and nothing else costs anything.
+--  encoding is walked on demand instead: each question -- Is_Revoked,
+--  Find_Revocation, Entry_Count -- costs one pass over the entries, and
+--  nothing costs anything until it is asked. All three go through the same
+--  walk, so they cannot disagree about where an entry starts or what it
+--  holds.
 package CryptoLib.X509.CRLs is
 
    subtype Decode_Status is CryptoLib.ASN1.Errors.Decode_Status;
@@ -79,6 +83,12 @@ package CryptoLib.X509.CRLs is
 
    --  Is this serial number on the list?
    --
+   --  A question about the list's contents, not about whether the list is
+   --  authoritative for this certificate. A CRL scoped by a critical
+   --  extension may legitimately not mention a serial it never covered --
+   --  see Has_Unsupported_Critical_Extension, which X509.Revocation checks
+   --  before reading anything into an absent entry.
+   --
    --  Serial is the serial number's content octets, as
    --  CryptoLib.X509.Certificates.Serial_Number gives them. Compared as
    --  bytes after leading zeros are dropped from both, so that a serial
@@ -100,6 +110,22 @@ package CryptoLib.X509.CRLs is
    --  @return what the entry says, or a record with Present False
    function Find_Revocation
      (Item : Revocation_List; Serial : Octets) return Revocation_Details;
+
+   --  Does this CRL carry a critical extension this crate cannot interpret?
+   --
+   --  This is not pedantry about unknown fields. The two extensions that
+   --  scope a CRL -- issuingDistributionPoint and deltaCRLIndicator -- must
+   --  be critical when present, and both change what an absent serial means.
+   --  A CRL scoped to CA certificates does not list end-entity revocations,
+   --  and a delta CRL lists only what changed since a base CRL; reading
+   --  either as a complete statement turns "this list does not mention your
+   --  serial" into "your certificate is fine", which is exactly backwards.
+   --  Such a CRL is well formed and correctly signed, so nothing else here
+   --  would catch it.
+   --  @param Item the list to inspect
+   --  @return True when an unrecognised critical extension is present
+   function Has_Unsupported_Critical_Extension
+     (Item : Revocation_List) return Boolean;
 
    --  How many entries does the list carry?
    --
@@ -135,6 +161,8 @@ private
       Signature   : Span;
       Revoked     : Span;
       Has_Revoked : Boolean := False;
+      Extensions  : Span;
+      Has_Ext     : Boolean := False;
       Issued      : Certificate_Time;
       Due         : Certificate_Time;
       Due_Present : Boolean := False;

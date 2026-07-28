@@ -269,13 +269,122 @@ package body CryptoLib.X509.CRLs is
          end;
       end if;
 
-      --  Anything left is crlExtensions, which are not interpreted here.
+      --  crlExtensions [0] EXPLICIT Extensions OPTIONAL. Kept rather than
+      --  interpreted: what matters here is whether any of them is critical
+      --  and unrecognised, which is asked separately.
+      if not DER_Reader.At_End (Inner, TBS.Last) then
+         declare
+            Wrap : Element;
+            Seq  : Element;
+            Walk : Offset := Inner;
+         begin
+            DER_Reader.Read (Work, Walk, TBS.Last, 2, Limits, Wrap, Status);
+            if Status = Ok
+              and then Wrap.Class = Context_Specific
+              and then Wrap.Number = 0
+              and then Wrap.Constructed
+            then
+               Walk := Wrap.First;
+               DER_Reader.Read_Sequence
+                 (Work, Walk, Wrap.Last, 3, Limits, Seq, Status);
+               if Status /= Ok then
+                  return Result;
+               end if;
+               Result.Extensions := (First => Seq.First, Last => Seq.Last);
+               Result.Has_Ext := True;
+            else
+               --  Something is there that is not the extensions block. A CRL
+               --  this reader cannot account for is refused rather than
+               --  read up to the part it understood.
+               Status := Invalid_Tag;
+               return Result;
+            end if;
+         end;
+      end if;
+
+      Status := Ok;
       Result.Present := True;
       return Result;
    end Decode_DER;
 
    function Is_Present (Item : Revocation_List) return Boolean
    is (Item.Present);
+
+   function Has_Unsupported_Critical_Extension
+     (Item : Revocation_List) return Boolean
+   is
+      Limits : constant Decode_Limits := Default_Limits;
+      Cursor : Offset;
+      Status : Decode_Status;
+   begin
+      if not Item.Present or else not Item.Has_Ext then
+         return False;
+      end if;
+
+      Cursor := Item.Extensions.First;
+      while not DER_Reader.At_End (Cursor, Item.Extensions.Last) loop
+         declare
+            Ext      : Element;
+            Part     : Offset;
+            OID      : Element;
+            Value    : Element;
+            Critical : Boolean := False;
+            Look     : Offset;
+            Peek     : Element;
+            Try      : Decode_Status;
+
+            --  Recognised means "does not change what this list says".
+            --  cRLNumber orders lists, the identifiers name the issuer's
+            --  key, freshestCRL points at a delta without making this one
+            --  partial. None of them narrows what the list covers, so none
+            --  of them can turn an absent serial into a wrong answer.
+            function Known return Boolean
+            is (OID_Table.Matches (Item.DER, OID, OID_Table.CRL_Number)
+                or else OID_Table.Matches
+                          (Item.DER, OID, OID_Table.Authority_Key_Identifier)
+                or else OID_Table.Matches
+                          (Item.DER, OID, OID_Table.Issuer_Alternative_Name)
+                or else OID_Table.Matches
+                          (Item.DER, OID, OID_Table.Freshest_CRL));
+         begin
+            DER_Reader.Read_Sequence
+              (Item.DER, Cursor, Item.Extensions.Last, 4, Limits, Ext,
+               Status);
+            --  An extensions block that does not parse is not evidence that
+            --  nothing critical is in it.
+            exit when Status /= Ok;
+
+            Part := Ext.First;
+            DER_Reader.Read_Object_Identifier
+              (Item.DER, Part, Ext.Last, 5, Limits, OID, Status);
+            exit when Status /= Ok;
+
+            Look := Part;
+            DER_Reader.Read
+              (Item.DER, Look, Ext.Last, 5, Limits, Peek, Try);
+            if Try = Ok
+              and then Peek.Class = Universal
+              and then Peek.Number = Tag_Boolean
+            then
+               DER_Reader.Read_Boolean
+                 (Item.DER, Part, Ext.Last, 5, Limits, Critical, Status);
+               exit when Status /= Ok;
+            end if;
+
+            DER_Reader.Read_Octet_String
+              (Item.DER, Part, Ext.Last, 5, Limits, Value, Status);
+            exit when Status /= Ok;
+
+            if Critical and then not Known then
+               return True;
+            end if;
+         end;
+      end loop;
+
+      --  Reached only by falling out of the loop on a parse failure; the
+      --  list could not be accounted for, so it is not vouched for either.
+      return Status /= Ok;
+   end Has_Unsupported_Critical_Extension;
 
    function Issuer_Bytes (Item : Revocation_List) return Octets
    is (Slice (Item, Item.Issuer));

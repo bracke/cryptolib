@@ -38,6 +38,13 @@ package CryptoLib.X509.Revocation is
       --  The statement is about a different issuer's certificates.
       Untrusted_Signature,
       --  The statement is not signed by anyone entitled to make it.
+      Unsupported_Statement,
+      --  The statement is well formed and properly signed, but says
+      --  something about its own scope that this crate cannot honour -- a
+      --  CRL limited to part of what its issuer signed, or a delta CRL
+      --  listing only what changed. Absence of an entry in such a list is
+      --  not evidence of anything, so it answers nothing rather than
+      --  Not_Revoked.
       Malformed);
       --  The statement did not decode, or the certificate did not.
 

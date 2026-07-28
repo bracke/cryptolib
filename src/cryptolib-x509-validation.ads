@@ -15,10 +15,16 @@ with CryptoLib.X509.Certificates;
 --  What is checked, and nothing beyond it: signatures along the path, issuer
 --  and subject linkage, validity windows against a supplied time, basic
 --  constraints and path length, key usage for certificate signing,
---  termination at a trust anchor, and the presence of critical extensions
---  this crate cannot interpret. Name constraints, certificate policies, and
---  revocation are NOT checked -- see the failure type. A caller needing those
---  must not read a valid result as covering them.
+--  termination at a trust anchor, name constraints applied by every CA above
+--  a certificate rather than only its immediate issuer, and the presence of
+--  critical extensions this crate cannot interpret.
+--
+--  Certificate policy processing and revocation are NOT done here. A critical
+--  policyConstraints or inhibitAnyPolicy makes the chain fail rather than be
+--  accepted with the demand ignored; certificatePolicies restricts nothing
+--  without a caller-supplied policy set. Revocation lives in
+--  X509.Revocation and is never consulted from here, so a valid result says
+--  the path holds, not that nothing on it has since been revoked.
 package CryptoLib.X509.Validation is
 
    subtype Certificate is CryptoLib.X509.Certificates.Certificate;

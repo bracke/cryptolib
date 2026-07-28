@@ -68,7 +68,10 @@ package CryptoLib.ASN1.OIDs is
    Subject_Alternative_Name : constant Octets := [16#55#, 16#1D#, 16#11#];
    Issuer_Alternative_Name  : constant Octets := [16#55#, 16#1D#, 16#12#];
    Basic_Constraints        : constant Octets := [16#55#, 16#1D#, 16#13#];
+   CRL_Number               : constant Octets := [16#55#, 16#1D#, 16#14#];
    CRL_Reason_Code          : constant Octets := [16#55#, 16#1D#, 16#15#];
+   Delta_CRL_Indicator      : constant Octets := [16#55#, 16#1D#, 16#1B#];
+   Issuing_Distribution_Pt  : constant Octets := [16#55#, 16#1D#, 16#1C#];
    Name_Constraints         : constant Octets := [16#55#, 16#1D#, 16#1E#];
    CRL_Distribution_Points  : constant Octets := [16#55#, 16#1D#, 16#1F#];
    Certificate_Policies     : constant Octets := [16#55#, 16#1D#, 16#20#];
@@ -77,6 +80,7 @@ package CryptoLib.ASN1.OIDs is
    Policy_Constraints       : constant Octets := [16#55#, 16#1D#, 16#24#];
    Extended_Key_Usage       : constant Octets := [16#55#, 16#1D#, 16#25#];
    Inhibit_Any_Policy       : constant Octets := [16#55#, 16#1D#, 16#36#];
+   Freshest_CRL             : constant Octets := [16#55#, 16#1D#, 16#2E#];
 
    --  1.3.6.1.5.5.7.1.1 and neighbours
    Authority_Information_Access : constant Octets :=
