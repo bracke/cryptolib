@@ -111,6 +111,22 @@ package CryptoLib.PKCS8 is
    --  @return the scalar or seed, empty when there is no single such value
    function Private_Value (Item : Private_Key) return Octets;
 
+   --  An RSA key's public modulus, as the octets it was encoded as.
+   --
+   --  An RSA private key carries its public parts: the modulus and the public
+   --  exponent sit in the RSAPrivateKey beside the secret ones. So deciding
+   --  whether such a key belongs to a certificate needs no computation at
+   --  all, only a comparison -- which is why this is offered rather than a
+   --  derived public key.
+   --  @param Item the key to inspect
+   --  @return the modulus, empty when the key is not RSA
+   function RSA_Modulus (Item : Private_Key) return Octets;
+
+   --  An RSA key's public exponent. See RSA_Modulus.
+   --  @param Item the key to inspect
+   --  @return the public exponent, empty when the key is not RSA
+   function RSA_Exponent (Item : Private_Key) return Octets;
+
    --  Overwrite the key's storage now rather than at end of scope.
    --  @param Item the key to scrub
    procedure Wipe (Item : in out Private_Key);
@@ -131,6 +147,8 @@ private
          Kind      : CryptoLib.X509.Public_Key_Algorithm :=
            CryptoLib.X509.Unknown_Public_Key_Algorithm;
          Value     : Span;
+         Modulus   : Span;
+         Exponent  : Span;
          Held      : Offset := 0;
          DER       : Octets (1 .. Maximum_Key_Size) := [others => 0];
       end record;

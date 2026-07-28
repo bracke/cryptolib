@@ -28,6 +28,8 @@ package body CryptoLib.PKCS8 is
       Item.Present := False;
       Item.Kind := Unknown_Public_Key_Algorithm;
       Item.Value := (First => 1, Last => 0);
+      Item.Modulus := (First => 1, Last => 0);
+      Item.Exponent := (First => 1, Last => 0);
       Item.Held := 0;
    end Wipe;
 
@@ -240,9 +242,65 @@ package body CryptoLib.PKCS8 is
                   end;
                end;
 
+            when RSA =>
+               --  RSAPrivateKey ::= SEQUENCE { version, modulus,
+               --      publicExponent, privateExponent, ... }. There is no
+               --  single private value to hand back, but the public parts are
+               --  here and are what decides whether this key belongs to a
+               --  given certificate.
+               declare
+                  Within : Offset := Field.First;
+                  Key    : Element;
+                  Number : Element;
+                  Ver    : Natural;
+                  Minus  : Boolean;
+               begin
+                  Item.Value := (First => 1, Last => 0);
+
+                  DER_Reader.Read_Sequence
+                    (Work, Within, Field.Last, 2, Limits, Key, Status);
+                  if Status /= Ok then
+                     Wipe (Item);
+                     return;
+                  end if;
+
+                  declare
+                     Part : Offset := Key.First;
+                  begin
+                     DER_Reader.Read_Small_Integer
+                       (Work, Part, Key.Last, 3, Limits, Ver, Status);
+                     if Status /= Ok then
+                        Wipe (Item);
+                        return;
+                     end if;
+
+                     DER_Reader.Read_Integer
+                       (Work, Part, Key.Last, 3, Limits, Number, Minus,
+                        Status);
+                     if Status /= Ok or else Minus then
+                        Wipe (Item);
+                        Status := Invalid_Value;
+                        return;
+                     end if;
+                     Item.Modulus :=
+                       (First => Number.First, Last => Number.Last);
+
+                     DER_Reader.Read_Integer
+                       (Work, Part, Key.Last, 3, Limits, Number, Minus,
+                        Status);
+                     if Status /= Ok or else Minus then
+                        Wipe (Item);
+                        Status := Invalid_Value;
+                        return;
+                     end if;
+                     Item.Exponent :=
+                       (First => Number.First, Last => Number.Last);
+                  end;
+               end;
+
             when others =>
-               --  RSA and anything unrecognised: the structure decoded, and
-               --  there is no single private value to hand back.
+               --  Unrecognised: the structure decoded, and there is nothing
+               --  here this can name.
                Item.Value := (First => 1, Last => 0);
          end case;
 
@@ -255,6 +313,16 @@ package body CryptoLib.PKCS8 is
 
    function Algorithm_Of (Item : Private_Key) return Public_Key_Algorithm
    is (Item.Kind);
+
+   function RSA_Modulus (Item : Private_Key) return Octets
+   is (if not Item.Present or else Item.Modulus.Last < Item.Modulus.First
+       then Empty_Octets
+       else Item.DER (Item.Modulus.First .. Item.Modulus.Last));
+
+   function RSA_Exponent (Item : Private_Key) return Octets
+   is (if not Item.Present or else Item.Exponent.Last < Item.Exponent.First
+       then Empty_Octets
+       else Item.DER (Item.Exponent.First .. Item.Exponent.Last));
 
    function Private_Value (Item : Private_Key) return Octets
    is (if not Item.Present or else Item.Value.Last < Item.Value.First

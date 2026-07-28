@@ -4,6 +4,7 @@ with CryptoLib.ASN1.Errors;
 with CryptoLib.ECDSA;
 with CryptoLib.Ed25519;
 with CryptoLib.Errors;
+with CryptoLib.ASN1.DER;
 with CryptoLib.PEM;
 
 package body CryptoLib.Identities is
@@ -70,13 +71,45 @@ package body CryptoLib.Identities is
    --  that looked for the key's bytes somewhere in the certificate would
    --  match a certificate that merely mentions the key, which is not the same
    --  as one issued for it.
+   --  Compare two unsigned integers written as octets, ignoring the leading
+   --  zero a DER INTEGER carries to stay positive.
+   function Same_Number (Left : Octets; Right : Octets) return Boolean is
+      L : Offset := Left'First;
+      R : Offset := Right'First;
+   begin
+      while L <= Left'Last and then Left (L) = 0 loop
+         L := L + 1;
+      end loop;
+      while R <= Right'Last and then Right (R) = 0 loop
+         R := R + 1;
+      end loop;
+
+      if L > Left'Last or else R > Right'Last then
+         return False;
+      end if;
+
+      if Left'Last - L /= Right'Last - R then
+         return False;
+      end if;
+
+      while L <= Left'Last loop
+         if Left (L) /= Right (R) then
+            return False;
+         end if;
+         L := L + 1;
+         R := R + 1;
+      end loop;
+
+      return True;
+   end Same_Number;
+
    function Key_Matches
-     (Key      : CryptoLib.PKCS8.Private_Key;
+     (Key_Item : CryptoLib.PKCS8.Private_Key;
       Leaf     : Certificate;
       Decided  : out Boolean) return Boolean
    is
       Kind : constant Public_Key_Algorithm :=
-        CryptoLib.PKCS8.Algorithm_Of (Key);
+        CryptoLib.PKCS8.Algorithm_Of (Key_Item);
    begin
       Decided := False;
 
@@ -89,7 +122,7 @@ package body CryptoLib.Identities is
          when ECDSA_P384 =>
             declare
                Scalar : constant Octets :=
-                 CryptoLib.PKCS8.Private_Value (Key);
+                 CryptoLib.PKCS8.Private_Value (Key_Item);
                Point  : Ada.Streams.Stream_Element_Array (1 .. 97);
             begin
                if Scalar'Length = 0 then
@@ -107,7 +140,7 @@ package body CryptoLib.Identities is
          when CryptoLib.X509.Ed25519 =>
             declare
                Seed  : constant Octets :=
-                 CryptoLib.PKCS8.Private_Value (Key);
+                 CryptoLib.PKCS8.Private_Value (Key_Item);
                Point : Ada.Streams.Stream_Element_Array (1 .. 32);
             begin
                if Seed'Length /= 32 then
@@ -122,10 +155,64 @@ package body CryptoLib.Identities is
                return Same_Bytes (Point, X509C.Public_Key (Leaf));
             end;
 
+         when CryptoLib.X509.RSA =>
+            --  An RSA private key carries its own public parts, so this is a
+            --  comparison rather than a derivation: the modulus and exponent
+            --  in the key against the two integers in the certificate's
+            --  public key. Compared as numbers, because a DER INTEGER carries
+            --  a leading zero when its top bit would otherwise make it
+            --  negative and the same modulus arrives written both ways.
+            declare
+               Limits : constant CryptoLib.ASN1.Decode_Limits :=
+                 CryptoLib.ASN1.Default_Limits;
+               Key    : constant Octets := X509C.Public_Key (Leaf);
+               Cursor : CryptoLib.ASN1.Offset;
+               Outer  : CryptoLib.ASN1.Element;
+               Field  : CryptoLib.ASN1.Element;
+               Status : CryptoLib.ASN1.Errors.Decode_Status;
+               Minus  : Boolean;
+            begin
+               if Key'Length = 0 then
+                  return False;
+               end if;
+
+               Cursor := Key'First;
+               CryptoLib.ASN1.DER.Read_Sequence
+                 (Key, Cursor, Key'Last, 0, Limits, Outer, Status);
+               if Status /= CryptoLib.ASN1.Errors.Ok then
+                  return False;
+               end if;
+
+               Cursor := Outer.First;
+               CryptoLib.ASN1.DER.Read_Integer
+                 (Key, Cursor, Outer.Last, 1, Limits, Field, Minus, Status);
+               if Status /= CryptoLib.ASN1.Errors.Ok or else Minus then
+                  return False;
+               end if;
+
+               Decided := True;
+
+               if not Same_Number
+                        (Key (Field.First .. Field.Last),
+                         CryptoLib.PKCS8.RSA_Modulus (Key_Item))
+               then
+                  return False;
+               end if;
+
+               CryptoLib.ASN1.DER.Read_Integer
+                 (Key, Cursor, Outer.Last, 1, Limits, Field, Minus, Status);
+               if Status /= CryptoLib.ASN1.Errors.Ok or else Minus then
+                  return False;
+               end if;
+
+               return Same_Number
+                        (Key (Field.First .. Field.Last),
+                         CryptoLib.PKCS8.RSA_Exponent (Key_Item));
+            end;
+
          when others =>
-            --  RSA, and the curves with no public-key derivation here. The
-            --  match cannot be decided, which is reported rather than
-            --  guessed.
+            --  The curves with no public-key derivation here. The match
+            --  cannot be decided, which is reported rather than guessed.
             return False;
       end case;
    end Key_Matches;
