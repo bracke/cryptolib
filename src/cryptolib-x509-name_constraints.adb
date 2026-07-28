@@ -110,6 +110,68 @@ package body CryptoLib.X509.Name_Constraints is
       return True;
    end Within_IP;
 
+   --  Does this common name read as a host name?
+   --
+   --  A subject common name may be a host, or a person, or an organisation.
+   --  Treating "Example Ltd" as a DNS name and refusing it against a domain
+   --  subtree would reject chains that are perfectly valid, so only something
+   --  shaped like a host is considered one: a dot, and nothing in it that a
+   --  host name cannot contain.
+   function Looks_Like_Host (Name : String) return Boolean is
+      Dotted : Boolean := False;
+   begin
+      if Name'Length = 0 then
+         return False;
+      end if;
+
+      for C of Name loop
+         if C = '.' then
+            Dotted := True;
+         elsif not (C in 'a' .. 'z' or else C in 'A' .. 'Z'
+                    or else C in '0' .. '9'
+                    or else C = '-' or else C = '*' or else C = '_')
+         then
+            return False;
+         end if;
+      end loop;
+
+      return Dotted;
+   end Looks_Like_Host;
+
+   --  The name a DNS subtree has to be applied to, beyond the alternative
+   --  names.
+   --
+   --  A certificate with no DNS alternative name may still be used for a host
+   --  if its common name is read as one, and CryptoLib.X509.Identity will do
+   --  that when a caller asks for the old behaviour. Constraining only the
+   --  alternative names would then leave a constrained CA able to certify any
+   --  host at all, so long as it named it in the field the constraint did not
+   --  look at. The two must cover the same ground.
+   --
+   --  Only for end-entity certificates, and only when there is no DNS
+   --  alternative name -- which is exactly when the common name can be read
+   --  as a host. A CA's common name is a name, not a service identity, and
+   --  refusing a CA called "ca.example.org" beneath a subtree for another
+   --  domain would reject a chain nobody meant to forbid.
+   function Host_From_Common_Name (Item : Certificate) return String is
+      Constraints : constant XE.Basic_Constraints :=
+        XE.Get_Basic_Constraints (Item);
+      Common      : constant String :=
+        CryptoLib.X509.Certificates.Subject_Common_Name (Item);
+   begin
+      if Constraints.Present and then Constraints.Is_CA then
+         return "";
+      end if;
+
+      for N in 1 .. XE.Subject_Alternative_Name_Count (Item) loop
+         if XE.Subject_Alternative_Name_Kind (Item, N) = XE.DNS_Name then
+            return "";
+         end if;
+      end loop;
+
+      return (if Looks_Like_Host (Common) then Common else "");
+   end Host_From_Common_Name;
+
    --  Walk one GeneralSubtrees, applying every base to the certificate.
    --
    --  Reports whether any subtree of a given kind was present, and whether
@@ -129,6 +191,7 @@ package body CryptoLib.X509.Name_Constraints is
       Cursor : Offset := Region.First;
       Status : CryptoLib.ASN1.Errors.Decode_Status;
       Names  : constant Natural := XE.Subject_Alternative_Name_Count (Item);
+      Common : constant String := Host_From_Common_Name (Item);
    begin
       Any_DNS := False;
       Any_IP := False;
@@ -184,6 +247,12 @@ package body CryptoLib.X509.Name_Constraints is
                            Inside_DNS := True;
                         end if;
                      end loop;
+
+                     if Common'Length > 0
+                       and then Within_DNS (Text, Common)
+                     then
+                        Inside_DNS := True;
+                     end if;
                   end;
 
                when 7 =>
@@ -235,6 +304,13 @@ package body CryptoLib.X509.Name_Constraints is
             Has_IP := True;
          end if;
       end loop;
+
+      --  A common name that will be read as a host counts as a DNS name for
+      --  this purpose, or the permitted-subtree test below would not apply to
+      --  it and a CN-only certificate would pass unconstrained.
+      if Host_From_Common_Name (Item)'Length > 0 then
+         Has_DNS := True;
+      end if;
 
       Cursor := Constraints_Value'First;
       DER_Reader.Read_Sequence

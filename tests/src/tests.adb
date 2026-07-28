@@ -5195,6 +5195,66 @@ procedure Tests is
         "e5dfd8f8ea41a60dbbae26882e87f4f88cf9f3365ea0f6ca509e864b1a1c48f0a0e5ad7959bf1c3c34ff2a8032" &
         "dab5189a0d7a6b78c5dbabd5e72b0f48f19b24";
 
+      NC_CN_Outside : constant String :=
+        "3082032130820209a0030201020214225bf909f00ff47d3f234a3cf54b618d148506e5300d06092a864886f70d" &
+        "01010b0500301a3118301606035504030c0f6e632d696e7465726d656469617465301e170d3236303732383231" &
+        "353234395a170d3237303732383231353234395a301c311a301806035504030c116f7574736964652e6576696c" &
+        "2e7465737430820122300d06092a864886f70d01010105000382010f003082010a0282010100b3c8a427dbf6ca" &
+        "44c1d40b899b1afe1c41a38fb86c10b9d5f7c0993da39ca977943c446f91d38dd9ee0adb6d9c4547d3c0776941" &
+        "15ffba5a24745374c60468ea6cc714202109e07436287a2b22d8279ed4bc2ca248d0b10541fbac1f34251f91a0" &
+        "1609838d325d685929f593ba99ce3cfacdb9e8bdff28ebd7381b33573cafbc2a2cbb0cde0a487f74f3145724f3" &
+        "91d905ff95b664c6546586a13a2d524e46099b6912fff41e66751a3ecc67f55e7a81912c076fbe31c70eae6504" &
+        "51007651e7dc2005d49f7dcd75bff6a4ae1edc275d3c27d877cbf1cca84b4b02507324ce984e4bd7866a78f5de" &
+        "3c5adc70382363bf62d405cdedfa17ddc3934f9e765663370203010001a35d305b30090603551d130402300030" &
+        "0e0603551d0f0101ff040403020780301d0603551d0e04160414cb3d0ef880a69090f1417ed3080eed86e282e0" &
+        "51301f0603551d23041830168014a83004ae9ec44164bd55c5536ba175f1afa07427300d06092a864886f70d01" &
+        "010b05000382010100c7315c2a309ddb3f4bbe50af9c565d46eba021d4bfd4ac4e8e5a9e5d05486f0fcb94f219" &
+        "a54627e800725fd0d5625638375ce620d9746b056aa00a6464486b24e8119d66408364976392781917fa4a7602" &
+        "f9a3338b42cf7a419782046af16d2b6f3ead8fd390f02fd6c1e075fe44d9fde6328140654f41f48a926a133aab" &
+        "bfd0afedacb5811ba7c5711e64edee20b8e756daf91da0ff7c216bf56b7c422b20e2283a12e57792db355c9109" &
+        "e013af1eea1f1d240d95f11aa236ea474db16cf25c74017e39d197030b1a63db4842e393c5032898f6b0fac892" &
+        "f6531c0d44636e495ba3d7af542cea339688cb6be6ff733cf71cf5a5aa20bbc0ddd5fc87e54a0726";
+
+      NC_CN_Inside : constant String :=
+        "308203223082020aa0030201020214225bf909f00ff47d3f234a3cf54b618d148506e6300d06092a864886f70d" &
+        "01010b0500301a3118301606035504030c0f6e632d696e7465726d656469617465301e170d3236303732383231" &
+        "353530335a170d3237303732383231353530335a301d311b301906035504030c12696e736964652e6578616d70" &
+        "6c652e636f6d30820122300d06092a864886f70d01010105000382010f003082010a0282010100bf72ceeb0601" &
+        "dd22c4c7c0bf10ff504d4c7575de778247e697a86e7ce9edc065ef13a9801c32468f0b8910dccfdbc532dc3cad" &
+        "0043fc59b735b4012588b29ac2795bdfa1bab59354d06249570ebb015a71d99a1e0dbf83fdce0960f14fc56969" &
+        "555f80485d1f5b3007de61237dfd2500377295b68a992d9276483742bae9ad58e8770a0945c5efb394bd737441" &
+        "c95073613e793a1e633b329167cf027cf368716ff64727a26f4df1f80ffaf6922b6a753ea38f3354cfeb599d85" &
+        "27258573b855b7a2ecf36c6e831304d5c84cdc0fe1f06bd4cc02b5bc28a9f14b1922b640cf55bb47013f807917" &
+        "7669eee688438a2c9104b78edd160743f6075205f2b6ea01950203010001a35d305b30090603551d1304023000" &
+        "300e0603551d0f0101ff040403020780301d0603551d0e04160414727c8d5f04ff913e7ea0cb018adf811bf2d7" &
+        "d559301f0603551d23041830168014a83004ae9ec44164bd55c5536ba175f1afa07427300d06092a864886f70d" &
+        "01010b0500038201010011d80d06a31ea98f284de3bdc7280b6ca8f83db10c2b74008ff024fd0f622ccb9ac5d9" &
+        "ea54900381ba858a3498aa315741623fe00ce337e21967a280129e87e7fe2bd9f65c882299e9d34448e10146c8" &
+        "05b36df68126e24ee38276a8040965f9cf80f5c00189e64c6f39ab3e379a49b9724913a24f0da6c57361f571b3" &
+        "9bb6f1d1804e146a2a74c51640b1993fd24d157a2aee440267723435ae11f87bc9649c4d8166307c9e2cbc589a" &
+        "36f2ab780a1ea7097ca6a0c17a7c01d671e6198c440eaf29ccecf456b53fc123357646509d1bcebee3dad6e8e2" &
+        "230f3fa00f19ae8369f51dfa9f6702facacf936a925373eff9f4e4ae2bd3973da87c821d89409b9e7c";
+
+      NC_CN_Org : constant String :=
+        "308203243082020ca0030201020214225bf909f00ff47d3f234a3cf54b618d148506e7300d06092a864886f70d" &
+        "01010b0500301a3118301606035504030c0f6e632d696e7465726d656469617465301e170d3236303732383231" &
+        "353530335a170d3237303732383231353530335a301f311d301b06035504030c144578616d706c65204c746420" &
+        "5061796d656e747330820122300d06092a864886f70d01010105000382010f003082010a0282010100bf228043" &
+        "53d918c8d33d79091210152a801f8aeceb8cd16822033f2443dde78c785b4920dcc892cbba0689774f40a68d79" &
+        "837a973f8d9f3622473cf9e912022019b7e2d1095787c7316402e1b94fe0dff6d02da2a2daec699f36a86c2895" &
+        "47b2c5e8347e1be1b8f80bf8117b4b8daa93ce406111637fe86fa5604ce51b4bee8899ab5cddb9b71bcdcb7e35" &
+        "aeb55ed0cbcb149fc77270ce8e28b44009c8fb47aae3a82be4a50d84183598c0e9df7af5e9579417d686e9edc3" &
+        "ba65cdb73bdd88c1cf2d7b301391067d1a5479b16480f5d7f138d176fb6d7dff0e588937f6f369bf29ca35f395" &
+        "8cc38a8e0e90f2cf57d477451053915ed51b7efc0badc5ae5f83030203010001a35d305b30090603551d130402" &
+        "3000300e0603551d0f0101ff040403020780301d0603551d0e041604141acefde153ff30854cb8c06d2a431f31" &
+        "179f5712301f0603551d23041830168014a83004ae9ec44164bd55c5536ba175f1afa07427300d06092a864886" &
+        "f70d01010b05000382010100947a3146e951ab5abf0784ef06d838b6f4dc5f746f9f31537189958e824672e0ec" &
+        "4c71bad2e419a1c574efb69af3ea62a0bfe632c1aa2180c2636ed23916bc39ad33cb2ce45bec4b27d4890b2730" &
+        "a805481e0be2319addb66dd7dc8ae2159a8f5442c348edfc1f727126e48c55e3e8d90e5f5d5fd5c668c400bed8" &
+        "b6c8863cd5e6a54f1cfe5e2b1c52ce7502fa44d643a85e4d720d2c4f1c44d29c442c80b40e92f48e70a8b7fc7b" &
+        "44dabaddf397d5f12d18102b03e3796bd7cd5a8da5c1ec980a0bdd2472deef46a2cfa92ac4a9c4880e88732974" &
+        "c6df6e3a6913c5b77864edc913b84d115cf33c8e741e5ad25cff46dc0dc363ed77fc1ae208ca99aa819b08";
+
       NC_Email_CA : constant String :=
         "3082033e30820226a0030201020214729dd4801a54586b73e69c048bc99eaeb8357e53300d06092a864886f70d" &
         "01010b050030123110300e06035504030c076e632d726f6f74301e170d3236303732383231343834365a170d33" &
@@ -5258,7 +5318,8 @@ procedure Tests is
 
       Status : CryptoLib.ASN1.Errors.Decode_Status;
 
-      type Which is (Inside, Outside, Lookalike, Email);
+      type Which is (Inside, Outside, Lookalike, CN_Outside, CN_Inside,
+                     CN_Org, Email);
 
       type Constrained_Path (Kind : Which) is limited new XV.Path_Source
         with null record;
@@ -5285,6 +5346,24 @@ procedure Tests is
              when Lookalike =>
                (if Index = 1
                 then X509C.Decode_DER (From_Hex (NC_Lookalike),
+                       CryptoLib.ASN1.Default_Limits, Status)
+                else X509C.Decode_DER (From_Hex (NC_CA),
+                       CryptoLib.ASN1.Default_Limits, Status)),
+             when CN_Outside =>
+               (if Index = 1
+                then X509C.Decode_DER (From_Hex (NC_CN_Outside),
+                       CryptoLib.ASN1.Default_Limits, Status)
+                else X509C.Decode_DER (From_Hex (NC_CA),
+                       CryptoLib.ASN1.Default_Limits, Status)),
+             when CN_Inside =>
+               (if Index = 1
+                then X509C.Decode_DER (From_Hex (NC_CN_Inside),
+                       CryptoLib.ASN1.Default_Limits, Status)
+                else X509C.Decode_DER (From_Hex (NC_CA),
+                       CryptoLib.ASN1.Default_Limits, Status)),
+             when CN_Org =>
+               (if Index = 1
+                then X509C.Decode_DER (From_Hex (NC_CN_Org),
                        CryptoLib.ASN1.Default_Limits, Status)
                 else X509C.Decode_DER (From_Hex (NC_CA),
                        CryptoLib.ASN1.Default_Limits, Status)),
@@ -5334,6 +5413,34 @@ procedure Tests is
       Check (not Result.Valid
              and then Result.Failure = XV.Name_Constraint_Violation,
              "a name that merely ends with the subtree is refused, got "
+             & XV.Failure_Image (Result.Failure));
+
+      --  A certificate with no alternative name at all, whose common name is
+      --  outside the subtree. Constraining only the alternative names would
+      --  let a constrained CA certify any host, so long as it named it in the
+      --  field the constraint did not look at -- and
+      --  CryptoLib.X509.Identity will read that field as a host when a caller
+      --  asks for the old behaviour. The two have to cover the same ground.
+      Result :=
+        XV.Validate_Path (Constrained_Path'(Kind => CN_Outside), Now_Time);
+      Check (not Result.Valid
+             and then Result.Failure = XV.Name_Constraint_Violation,
+             "a common name outside the subtree is refused when there is no "
+             & "alternative name, got " & XV.Failure_Image (Result.Failure));
+
+      Result :=
+        XV.Validate_Path (Constrained_Path'(Kind => CN_Inside), Now_Time);
+      Check (Result.Valid,
+             "and one inside it is allowed, got "
+             & XV.Failure_Image (Result.Failure));
+
+      --  A common name that is not a host name is not judged as one. Refusing
+      --  "Example Ltd Payments" against a domain subtree would reject chains
+      --  nobody meant to forbid.
+      Result :=
+        XV.Validate_Path (Constrained_Path'(Kind => CN_Org), Now_Time);
+      Check (Result.Valid,
+             "a common name that is not a host name is left alone, got "
              & XV.Failure_Image (Result.Failure));
 
       --  A constraint on a form this cannot apply. Refused rather than
