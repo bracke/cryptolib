@@ -367,6 +367,329 @@ package body CryptoLib.X509.Extensions is
       end;
    end Subject_Alternative_Name_Bytes;
 
+   --  A GeneralName's CHOICE tag is its kind.
+   function Kind_Of (Value : Element) return General_Name_Kind
+   is (case Value.Number is
+          when 1      => Email_Address,
+          when 2      => DNS_Name,
+          when 4      => Directory_Name,
+          when 6      => URI,
+          when 7      => IP_Address,
+          when others => Other_Name);
+
+   --  A GeneralName's content as text, for the kinds that have any.
+   function Text_Of
+     (Bytes : Octets; Value : Element) return String is
+   begin
+      if Kind_Of (Value) /= URI or else Is_Empty (Value) then
+         return "";
+      end if;
+
+      declare
+         Text : String (1 .. Content_Length (Value));
+      begin
+         for I in Text'Range loop
+            Text (I) := Character'Val (Bytes (Value.First + Offset (I - 1)));
+         end loop;
+         return Text;
+      end;
+   end Text_Of;
+
+   --  The authority information access value, re-fetched for slicing.
+   function AIA_Bytes (Item : Certificate) return Octets is
+      Present : Boolean;
+   begin
+      return
+        Value_Of (Item, OID_Table.Authority_Information_Access, Present);
+   end AIA_Bytes;
+
+   --  Walk the access descriptions, stopping at Wanted.
+   procedure Locate_Access
+     (Item   : Certificate;
+      Wanted : Natural;
+      Total  : out Natural;
+      Found  : out Boolean;
+      Method : out Access_Method;
+      Place  : out Element)
+   is
+      Bytes  : constant Octets := AIA_Bytes (Item);
+      Cursor : Offset;
+      Seq    : Element;
+      Status : Errors.Decode_Status;
+      Seen   : Natural := 0;
+   begin
+      Total := 0;
+      Found := False;
+      Method := Other_Access_Method;
+      Place := (others => <>);
+
+      if Bytes'Length = 0 then
+         return;
+      end if;
+
+      Cursor := Bytes'First;
+      DER_Reader.Read_Sequence
+        (Bytes, Cursor, Bytes'Last, 0, Limits, Seq, Status);
+      if Status /= Errors.Ok then
+         return;
+      end if;
+
+      --  AccessDescription ::= SEQUENCE { accessMethod OBJECT IDENTIFIER,
+      --                                   accessLocation GeneralName }
+      Cursor := Seq.First;
+      while not DER_Reader.At_End (Cursor, Seq.Last) loop
+         declare
+            Desc   : Element;
+            Inner  : Offset;
+            Method_OID, Location : Element;
+         begin
+            DER_Reader.Read_Sequence
+              (Bytes, Cursor, Seq.Last, 1, Limits, Desc, Status);
+            exit when Status /= Errors.Ok;
+
+            Seen := Seen + 1;
+            if Seen = Wanted then
+               Inner := Desc.First;
+               DER_Reader.Read_Object_Identifier
+                 (Bytes, Inner, Desc.Last, 2, Limits, Method_OID, Status);
+               exit when Status /= Errors.Ok;
+
+               if OID_Table.Matches (Bytes, Method_OID, OID_Table.AD_OCSP) then
+                  Method := OCSP_Responder;
+               elsif OID_Table.Matches
+                       (Bytes, Method_OID, OID_Table.AD_CA_Issuers)
+               then
+                  Method := CA_Issuers;
+               end if;
+
+               DER_Reader.Read
+                 (Bytes, Inner, Desc.Last, 2, Limits, Location, Status);
+               exit when Status /= Errors.Ok;
+
+               if Location.Class /= Context_Specific then
+                  exit;
+               end if;
+
+               Place := Location;
+               Found := True;
+            end if;
+         end;
+      end loop;
+
+      Total := Seen;
+   end Locate_Access;
+
+   function Authority_Info_Count (Item : Certificate) return Natural is
+      Total  : Natural;
+      Found  : Boolean;
+      Method : Access_Method;
+      Place  : Element;
+   begin
+      Locate_Access (Item, 0, Total, Found, Method, Place);
+      return Total;
+   end Authority_Info_Count;
+
+   function Authority_Info_Method
+     (Item : Certificate; Index : Positive) return Access_Method
+   is
+      Total  : Natural;
+      Found  : Boolean;
+      Method : Access_Method;
+      Place  : Element;
+   begin
+      Locate_Access (Item, Index, Total, Found, Method, Place);
+      return Method;
+   end Authority_Info_Method;
+
+   function Authority_Info_Kind
+     (Item : Certificate; Index : Positive) return General_Name_Kind
+   is
+      Total  : Natural;
+      Found  : Boolean;
+      Method : Access_Method;
+      Place  : Element;
+   begin
+      Locate_Access (Item, Index, Total, Found, Method, Place);
+      if not Found then
+         return Other_Name;
+      end if;
+      return Kind_Of (Place);
+   end Authority_Info_Kind;
+
+   function Authority_Info_URI
+     (Item : Certificate; Index : Positive) return String
+   is
+      Total  : Natural;
+      Found  : Boolean;
+      Method : Access_Method;
+      Place  : Element;
+   begin
+      Locate_Access (Item, Index, Total, Found, Method, Place);
+      if not Found then
+         return "";
+      end if;
+      return Text_Of (AIA_Bytes (Item), Place);
+   end Authority_Info_URI;
+
+   --  The first URI reached by this access method.
+   function First_URI_For
+     (Item : Certificate; Wanted : Access_Method) return String is
+   begin
+      for I in 1 .. Authority_Info_Count (Item) loop
+         if Authority_Info_Method (Item, I) = Wanted
+           and then Authority_Info_Kind (Item, I) = URI
+         then
+            return Authority_Info_URI (Item, I);
+         end if;
+      end loop;
+      return "";
+   end First_URI_For;
+
+   function OCSP_Responder_URI (Item : Certificate) return String
+   is (First_URI_For (Item, OCSP_Responder));
+
+   function CA_Issuers_URI (Item : Certificate) return String
+   is (First_URI_For (Item, CA_Issuers));
+
+   --  The CRL distribution points value, re-fetched for slicing.
+   function CDP_Bytes (Item : Certificate) return Octets is
+      Present : Boolean;
+   begin
+      return Value_Of (Item, OID_Table.CRL_Distribution_Points, Present);
+   end CDP_Bytes;
+
+   --  Walk the names inside every distribution point, stopping at Wanted.
+   --
+   --  Two levels of context tag stand between a distribution point and the
+   --  names it holds: [0] distributionPoint wrapping the CHOICE, then [0]
+   --  fullName inside it. The other arm of that CHOICE, [1]
+   --  nameRelativeToCRLIssuer, is a fragment of a name rather than a place,
+   --  so it is passed over rather than counted -- there is nothing to fetch
+   --  from it on its own.
+   procedure Locate_Distribution_Point
+     (Item   : Certificate;
+      Wanted : Natural;
+      Total  : out Natural;
+      Found  : out Boolean;
+      Value  : out Element)
+   is
+      Bytes  : constant Octets := CDP_Bytes (Item);
+      Cursor : Offset;
+      Seq    : Element;
+      Status : Errors.Decode_Status;
+      Seen   : Natural := 0;
+   begin
+      Total := 0;
+      Found := False;
+      Value := (others => <>);
+
+      if Bytes'Length = 0 then
+         return;
+      end if;
+
+      Cursor := Bytes'First;
+      DER_Reader.Read_Sequence
+        (Bytes, Cursor, Bytes'Last, 0, Limits, Seq, Status);
+      if Status /= Errors.Ok then
+         return;
+      end if;
+
+      Cursor := Seq.First;
+      while not DER_Reader.At_End (Cursor, Seq.Last) loop
+         declare
+            Point : Element;
+            Outer : Offset;
+            Wrap  : Element;
+            Names : Element;
+            Walk  : Offset;
+         begin
+            DER_Reader.Read_Sequence
+              (Bytes, Cursor, Seq.Last, 1, Limits, Point, Status);
+            exit when Status /= Errors.Ok;
+
+            --  distributionPoint is optional; a point carrying only reasons
+            --  or a cRLIssuer names no location.
+            if not DER_Reader.At_End (Point.First, Point.Last) then
+               Outer := Point.First;
+               DER_Reader.Read
+                 (Bytes, Outer, Point.Last, 2, Limits, Wrap, Status);
+               exit when Status /= Errors.Ok;
+
+               if Wrap.Class = Context_Specific and then Wrap.Number = 0
+                 and then not Is_Empty (Wrap)
+               then
+                  Walk := Wrap.First;
+                  DER_Reader.Read
+                    (Bytes, Walk, Wrap.Last, 3, Limits, Names, Status);
+                  exit when Status /= Errors.Ok;
+
+                  if Names.Class = Context_Specific
+                    and then Names.Number = 0
+                  then
+                     Walk := Names.First;
+                     while not DER_Reader.At_End (Walk, Names.Last) loop
+                        declare
+                           Name : Element;
+                        begin
+                           DER_Reader.Read
+                             (Bytes, Walk, Names.Last, 4, Limits, Name,
+                              Status);
+                           exit when Status /= Errors.Ok;
+
+                           Seen := Seen + 1;
+                           if Seen = Wanted then
+                              Value := Name;
+                              Found := True;
+                           end if;
+                        end;
+                     end loop;
+                     exit when Status /= Errors.Ok;
+                  end if;
+               end if;
+            end if;
+         end;
+      end loop;
+
+      Total := Seen;
+   end Locate_Distribution_Point;
+
+   function CRL_Distribution_Point_Count (Item : Certificate) return Natural is
+      Total : Natural;
+      Found : Boolean;
+      Value : Element;
+   begin
+      Locate_Distribution_Point (Item, 0, Total, Found, Value);
+      return Total;
+   end CRL_Distribution_Point_Count;
+
+   function CRL_Distribution_Point_Kind
+     (Item : Certificate; Index : Positive) return General_Name_Kind
+   is
+      Total : Natural;
+      Found : Boolean;
+      Value : Element;
+   begin
+      Locate_Distribution_Point (Item, Index, Total, Found, Value);
+      if not Found then
+         return Other_Name;
+      end if;
+      return Kind_Of (Value);
+   end CRL_Distribution_Point_Kind;
+
+   function CRL_Distribution_Point_URI
+     (Item : Certificate; Index : Positive) return String
+   is
+      Total : Natural;
+      Found : Boolean;
+      Value : Element;
+   begin
+      Locate_Distribution_Point (Item, Index, Total, Found, Value);
+      if not Found then
+         return "";
+      end if;
+      return Text_Of (CDP_Bytes (Item), Value);
+   end CRL_Distribution_Point_URI;
+
    function Subject_Key_Identifier (Item : Certificate) return Octets is
       Found  : Boolean;
       Data   : constant Octets :=

@@ -1897,6 +1897,148 @@ procedure Tests is
    --  The extensions that decide what a certificate is for. Every expected
    --  value here was read off "openssl x509 -text" for the same certificate
    --  before being written down.
+   --  Where a certificate says to ask about it, and where to fetch its
+   --  issuer. Reading these is what makes the revocation machinery reachable:
+   --  a caller told that fetching is its own job still needs to be told the
+   --  address.
+   procedure Check_X509_Access_Locations is
+      use type CryptoLib.ASN1.Errors.Decode_Status;
+      use type CryptoLib.X509.Extensions.Access_Method;
+      use type CryptoLib.X509.Extensions.General_Name_Kind;
+
+      package X509C renames CryptoLib.X509.Certificates;
+      package XE renames CryptoLib.X509.Extensions;
+
+      Rich_Locations_DER : constant String :=
+        "308202653082020ba003020102021442a799cc9ee44693e58977316c17422710dee46a300a06082a8648ce3d04" &
+        "030230123110300e06035504030c077375626a656374301e170d3236303732383232323732345a170d32363038" &
+        "32373232323732345a30123110300e06035504030c077375626a6563743059301306072a8648ce3d020106082a" &
+        "8648ce3d0301070342000485a12a9ae8f287719fb228ab6c3e7382797ae9f619dd81191c057c95fe5657fed0e7" &
+        "077ec57d20367034ca121396308c33f8f2caf86aa74d628dcfe8d675d097a382013d3082013930819906082b06" &
+        "01050507010104818c308189302106082b060105050730018615687474703a2f2f6f6373702e6578616d706c65" &
+        "2f61302306082b060105050730028617687474703a2f2f63612e6578616d706c652f692e637274301c06082b06" &
+        "01050507300181106f637370406578616d706c652e636f6d302106082b060105050730018615687474703a2f2f" &
+        "6f6373702e6578616d706c652f62307c0603551d1f047530733038a036a0348618687474703a2f2f63726c2e65" &
+        "78616d706c652f312e63726c8618687474703a2f2f63726c2e6578616d706c652f322e63726c3037a035a033a4" &
+        "1730153113301106035504030c0a63726c206973737565728618687474703a2f2f63726c2e6578616d706c652f" &
+        "332e63726c301d0603551d0e04160414fd1d94e663fdd9c8c5cc77056ed51f11a34760fb300a06082a8648ce3d" &
+        "0403020348003045022100a74db3351d4d7b5243fb3ee98f32c304e2103f79909ac3ae30db26bd9390c7480220" &
+        "3094ade938c48216df9851f5ebe6c419a4004b02f85c5b1bec00c40bf61dc9aa";
+
+      Relative_CRL_DER : constant String :=
+        "3082016c30820113a00302010202141d7d7ae17d3708b8e11237cd63c957816560baa6300a06082a8648ce3d04" &
+        "030230123110300e06035504030c077375626a656374301e170d3236303732383232323631335a170d32363038" &
+        "32373232323631335a30123110300e06035504030c077375626a6563743059301306072a8648ce3d020106082a" &
+        "8648ce3d0301070342000485a12a9ae8f287719fb228ab6c3e7382797ae9f619dd81191c057c95fe5657fed0e7" &
+        "077ec57d20367034ca121396308c33f8f2caf86aa74d628dcfe8d675d097a347304530240603551d1f041d301b" &
+        "3019a017a115301306035504030c0c72656c61746976652063726c301d0603551d0e04160414fd1d94e663fdd9" &
+        "c8c5cc77056ed51f11a34760fb300a06082a8648ce3d0403020347003044022066e115503346fdced94320de48" &
+        "193b36846f5be7bc4a42366ff1ada0c2324afe02205bf99505389f545214dca1452037398df88d4ce833fa7cbb" &
+        "1ddd7fcea157428c";
+
+      function From_Hex
+        (Text : String) return Ada.Streams.Stream_Element_Array
+      is
+         Result : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (Text'Length / 2));
+         function Nibble (C : Character) return Natural
+         is (case C is
+                when '0' .. '9' => Character'Pos (C) - Character'Pos ('0'),
+                when others     => Character'Pos (C) - Character'Pos ('a') + 10);
+      begin
+         for I in Result'Range loop
+            Result (I) :=
+              Ada.Streams.Stream_Element
+                (Nibble (Text (Text'First + 2 * Natural (I - 1))) * 16
+                 + Nibble (Text (Text'First + 2 * Natural (I - 1) + 1)));
+         end loop;
+         return Result;
+      end From_Hex;
+
+      Status : CryptoLib.ASN1.Errors.Decode_Status;
+      Rich   : constant X509C.Certificate :=
+        X509C.Decode_DER
+          (From_Hex (Rich_Locations_DER), CryptoLib.ASN1.Default_Limits,
+           Status);
+   begin
+      Check (Status = CryptoLib.ASN1.Errors.Ok,
+             "a certificate naming responders and CRLs decodes");
+
+      --  Four access descriptions, reported in the order the certificate
+      --  gives them. Order is not decoration: it is the issuer's preference,
+      --  and a caller working down the list is following it.
+      Check (XE.Authority_Info_Count (Rich) = 4,
+             "every access description is counted");
+      Check (XE.Authority_Info_Method (Rich, 1) = XE.OCSP_Responder
+             and then XE.Authority_Info_URI (Rich, 1)
+                      = "http://ocsp.example/a",
+             "the first entry is a responder");
+      Check (XE.Authority_Info_Method (Rich, 2) = XE.CA_Issuers
+             and then XE.Authority_Info_URI (Rich, 2)
+                      = "http://ca.example/i.crt",
+             "the second is where to fetch the issuer");
+      Check (XE.Authority_Info_Method (Rich, 4) = XE.OCSP_Responder
+             and then XE.Authority_Info_URI (Rich, 4)
+                      = "http://ocsp.example/b",
+             "the fourth is a second responder");
+
+      --  The third entry names a responder by mail address rather than URI.
+      --  It is still counted and its kind still reported: dropping it would
+      --  renumber everything after it, and a caller indexing the list would
+      --  quietly read the wrong entry.
+      Check (XE.Authority_Info_Method (Rich, 3) = XE.OCSP_Responder,
+             "a non-URI location keeps its place in the list");
+      Check (XE.Authority_Info_Kind (Rich, 3) = XE.Email_Address,
+             "and its kind is reported rather than guessed");
+      Check (XE.Authority_Info_URI (Rich, 3) = "",
+             "and it yields no URI, since it is not one");
+
+      Check (XE.OCSP_Responder_URI (Rich) = "http://ocsp.example/a",
+             "the first responder URI is the one to ask");
+      Check (XE.CA_Issuers_URI (Rich) = "http://ca.example/i.crt",
+             "and the issuer is fetched from the first caIssuers URI");
+
+      --  Four names across two distribution points -- three URIs and a
+      --  directory name -- flattened: a caller wants the places a CRL can be
+      --  fetched from, and which distribution point each came from does not
+      --  change where to go.
+      Check (XE.CRL_Distribution_Point_Count (Rich) = 4,
+             "names from every distribution point are counted");
+      Check (XE.CRL_Distribution_Point_URI (Rich, 1)
+             = "http://crl.example/1.crl"
+             and then XE.CRL_Distribution_Point_URI (Rich, 2)
+                      = "http://crl.example/2.crl",
+             "both names of the first distribution point are reached");
+      Check (XE.CRL_Distribution_Point_Kind (Rich, 3) = XE.Directory_Name,
+             "a directory name is reported as one");
+      Check (XE.CRL_Distribution_Point_URI (Rich, 4)
+             = "http://crl.example/3.crl",
+             "and the URI beside it is still reached");
+
+      --  A distribution point named relative to the CRL issuer is a fragment
+      --  of a name, not a place. Reporting it as a location would hand a
+      --  caller something it cannot fetch from.
+      declare
+         Relative : constant X509C.Certificate :=
+           X509C.Decode_DER
+             (From_Hex (Relative_CRL_DER), CryptoLib.ASN1.Default_Limits,
+              Status);
+      begin
+         Check (Status = CryptoLib.ASN1.Errors.Ok,
+                "a relative distribution point decodes");
+         Check (XE.CRL_Distribution_Point_Count (Relative) = 0,
+                "a distribution point relative to the CRL issuer names no "
+                & "place to fetch from");
+
+         --  Absent is not empty-and-present: a certificate naming nothing
+         --  must not read as one naming something unreachable.
+         Check (XE.Authority_Info_Count (Relative) = 0,
+                "a certificate with no access descriptions reports none");
+         Check (XE.OCSP_Responder_URI (Relative) = "",
+                "and names no responder");
+      end;
+   end Check_X509_Access_Locations;
+
    procedure Check_X509_Extensions is
       use type CryptoLib.ASN1.Errors.Decode_Status;
       use type CryptoLib.PEM.Decode_Status;
@@ -6176,6 +6318,7 @@ begin
    Check_X509_Decode;
    Check_X509_Verify;
    Check_X509_Extensions;
+   Check_X509_Access_Locations;
    Check_RSA_Verify;
    Check_ECDSA_Curves;
    Check_X509_Validation;

@@ -160,7 +160,13 @@ The RNG **fails closed**: if no OS source is available it returns
 - **Revocation is available but not wired into validation.** `X509.CRLs`
   decodes a CRL, verifies that its issuer signed it, and answers whether a
   serial is on it; `Validate_Path` does not consult one. Nothing here fetches a
-  CRL -- retrieval is the application's. `CryptoLib.OCSP` builds requests and
+  CRL -- retrieval is the application's, though `X509.Extensions` reads the
+  authority information access and CRL distribution point extensions, so the
+  application is at least told where to go: which responder to ask, where to
+  fetch the issuer, which URLs serve the CRL. A location named in a
+  certificate is a claim by its issuer and nothing more -- whatever comes back
+  from one still has to be verified like any other input.
+  `CryptoLib.OCSP` builds requests and
   checks responses, including whether the signer was the issuer or a delegate
   the issuer authorised with the OCSP-signing extended key usage; a response
   covering several certificates is searched for the one asked about rather than

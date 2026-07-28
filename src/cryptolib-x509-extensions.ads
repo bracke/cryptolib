@@ -124,6 +124,97 @@ package CryptoLib.X509.Extensions is
    function Subject_Alternative_Name_Bytes
      (Item : Certificate; Index : Positive) return Octets;
 
+   --  Which service an authority information access entry points at.
+   --
+   --  Other_Access_Method covers methods this crate does not name, which are
+   --  reported rather than dropped: the entry still has a location, and a
+   --  caller counting entries would otherwise see a gap.
+   type Access_Method is
+     (OCSP_Responder,
+      CA_Issuers,
+      Other_Access_Method);
+
+   --  How many entries does the authority information access extension carry?
+   --
+   --  This extension is what makes revocation checking possible at all: it is
+   --  where a certificate says which responder to ask about it, and where to
+   --  fetch the issuer that signed it. Reading it is this crate's job;
+   --  fetching what it names is not.
+   --  @param Item the certificate to inspect
+   --  @return the number of entries, zero when the extension is absent
+   function Authority_Info_Count (Item : Certificate) return Natural;
+
+   --  What does this entry point at?
+   --  @param Item the certificate to inspect
+   --  @param Index which entry, one through Authority_Info_Count
+   --  @return the access method
+   function Authority_Info_Method
+     (Item : Certificate; Index : Positive) return Access_Method;
+
+   --  What kind of location does this entry give?
+   --
+   --  In practice a URI, but the field is a GeneralName and a certificate may
+   --  carry any of them, so the kind is reported rather than assumed.
+   --  @param Item the certificate to inspect
+   --  @param Index which entry, one through Authority_Info_Count
+   --  @return the location's kind
+   function Authority_Info_Kind
+     (Item : Certificate; Index : Positive) return General_Name_Kind;
+
+   --  This entry's location as text.
+   --  @param Item the certificate to inspect
+   --  @param Index which entry, one through Authority_Info_Count
+   --  @return the URI, "" when this entry's location is not a URI
+   function Authority_Info_URI
+     (Item : Certificate; Index : Positive) return String;
+
+   --  Where to ask about this certificate's revocation.
+   --
+   --  The first OCSP URI the certificate names. A certificate may name
+   --  several responders, which the indexed accessors reach; this answers the
+   --  ordinary question of where to ask.
+   --  @param Item the certificate to inspect
+   --  @return the responder's URI, "" when the certificate names none
+   function OCSP_Responder_URI (Item : Certificate) return String;
+
+   --  Where to fetch the certificate that issued this one.
+   --
+   --  Useful for completing a chain that arrived a link short. What comes
+   --  back is still a certificate that has to be verified like any other --
+   --  the URI says where the issuer claims to be, not that anything found
+   --  there is trustworthy.
+   --  @param Item the certificate to inspect
+   --  @return the issuer's URI, "" when the certificate names none
+   function CA_Issuers_URI (Item : Certificate) return String;
+
+   --  How many CRL locations does this certificate name?
+   --
+   --  Counts the names inside every distribution point, not the distribution
+   --  points themselves: a caller wants the places a CRL can be fetched from,
+   --  and one distribution point may list several. A distribution point named
+   --  relative to the CRL issuer carries no location of its own and is not
+   --  counted, since there is nothing to fetch from it without the issuer's
+   --  own name to hang it off.
+   --  @param Item the certificate to inspect
+   --  @return the number of locations, zero when the extension is absent
+   function CRL_Distribution_Point_Count (Item : Certificate) return Natural;
+
+   --  What kind of location is this?
+   --  @param Item the certificate to inspect
+   --  @param Index which location, one through
+   --  CRL_Distribution_Point_Count
+   --  @return the location's kind
+   function CRL_Distribution_Point_Kind
+     (Item : Certificate; Index : Positive) return General_Name_Kind;
+
+   --  This CRL location as text.
+   --  @param Item the certificate to inspect
+   --  @param Index which location, one through
+   --  CRL_Distribution_Point_Count
+   --  @return the URI, "" when this location is not a URI
+   function CRL_Distribution_Point_URI
+     (Item : Certificate; Index : Positive) return String;
+
    --  The subject key identifier, if present.
    --  @param Item the certificate to inspect
    --  @return the identifier octets, empty when the extension is absent
