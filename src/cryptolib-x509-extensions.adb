@@ -459,6 +459,18 @@ package body CryptoLib.X509.Extensions is
          Consider (OID_Table.Subject_Alternative_Name);
          Consider (OID_Table.Subject_Key_Identifier);
          Consider (OID_Table.Authority_Key_Identifier);
+
+         --  Name constraints are here because CryptoLib.X509.Validation
+         --  applies them. Certificate policies are here because they impose
+         --  nothing by themselves: they say under which policies a
+         --  certificate was issued, and it takes a caller asking for a
+         --  particular policy to make that restrict anything. Policy
+         --  constraints and inhibitAnyPolicy are deliberately absent -- they
+         --  demand policy processing this crate does not do, so a chain
+         --  carrying them critically is refused rather than accepted with the
+         --  demand ignored.
+         Consider (OID_Table.Name_Constraints);
+         Consider (OID_Table.Certificate_Policies);
          return Known;
       end Understood;
    begin

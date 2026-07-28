@@ -46,6 +46,13 @@ package CryptoLib.X509.Validation is
       --  permits.
       Invalid_Key_Usage,
       --  An issuer's key usage does not permit signing certificates.
+      Name_Constraint_Violation,
+      --  A certificate carries a name the CA above it was not permitted to
+      --  certify.
+      Unsupported_Name_Constraint,
+      --  A CA constrains a form of name this crate cannot apply. Refused
+      --  rather than checked against only the part that could be applied: a
+      --  constraint half-applied is not the constraint the issuer imposed.
       Unknown_Critical_Extension,
       --  A certificate carries a critical extension this crate cannot
       --  interpret, so what it means cannot be established.

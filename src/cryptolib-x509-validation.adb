@@ -1,6 +1,8 @@
 with Ada.Streams;
 
+with CryptoLib.ASN1.OIDs;
 with CryptoLib.X509.Extensions;
+with CryptoLib.X509.Name_Constraints;
 with CryptoLib.X509.Signatures;
 
 package body CryptoLib.X509.Validation is
@@ -11,6 +13,7 @@ package body CryptoLib.X509.Validation is
 
    package X509C renames CryptoLib.X509.Certificates;
    package XE renames CryptoLib.X509.Extensions;
+   package NC renames CryptoLib.X509.Name_Constraints;
    package XS renames CryptoLib.X509.Signatures;
 
    function Failure_Image (Failure : Validation_Failure) return String is
@@ -29,6 +32,10 @@ package body CryptoLib.X509.Validation is
          when Invalid_Basic_Constraints  => return "invalid basic constraints";
          when Path_Length_Exceeded       => return "path length exceeded";
          when Invalid_Key_Usage          => return "invalid key usage";
+         when Name_Constraint_Violation  =>
+            return "name constraint violation";
+         when Unsupported_Name_Constraint =>
+            return "unsupported name constraint";
          when Unknown_Critical_Extension =>
             return "unknown critical extension";
          when Duplicate_Certificate      => return "duplicate certificate";
@@ -181,6 +188,44 @@ package body CryptoLib.X509.Validation is
                return Fail (Invalid_Signature, I);
             end if;
          end;
+      end loop;
+
+      --  Name constraints, applied by every CA above each certificate rather
+      --  than only by its immediate issuer: a constraint on a root binds
+      --  everything beneath it, and checking only one link would let an
+      --  intermediate certify outside what the root allowed.
+      for Subject_Index in 1 .. Path_Length - 1 loop
+         for Issuer_Index in Subject_Index + 1 .. Path_Length loop
+            declare
+               Above : constant Certificate := Get (Issuer_Index);
+               Where : constant Natural :=
+                 X509C.Find_Extension
+                   (Above, CryptoLib.ASN1.OIDs.Name_Constraints);
+            begin
+               if Where > 0 then
+                  declare
+                     Answer : constant NC.Verdict :=
+                       NC.Check
+                         (X509C.Extension_Value (Above, Where),
+                          Get (Subject_Index));
+                  begin
+                     case Answer is
+                        when NC.Permitted =>
+                           null;
+                        when NC.Excluded =>
+                           return Fail
+                             (Name_Constraint_Violation, Subject_Index);
+                        when NC.Unsupported_Constraint =>
+                           return Fail
+                             (Unsupported_Name_Constraint, Issuer_Index);
+                        when NC.Malformed =>
+                           return Fail
+                             (Malformed_Certificate, Issuer_Index);
+                     end case;
+                  end;
+               end if;
+            end;
+         end loop;
       end loop;
 
       --  The path must end somewhere the caller trusts. Asked last, so that a

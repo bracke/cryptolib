@@ -129,9 +129,17 @@ The RNG **fails closed**: if no OS source is available it returns
   `X509.Validation` verifies signatures along a chain, issuer/subject linkage,
   validity windows against a caller-supplied time, basic constraints and path
   length, keyCertSign, loops, and unknown critical extensions, and requires the
-  path to end at a certificate the caller declares trusted. **Name
-  constraints, certificate policies, and revocation (CRL/OCSP) are not
-  checked**, and there is no path building: finding a chain through
+  path to end at a certificate the caller declares trusted. **Name constraints
+  are enforced** for DNS and IP subtrees, by every CA above a certificate
+  rather than only its immediate issuer; a constraint naming a form this crate
+  cannot apply (email, directory name, URI) makes the chain fail rather than
+  be checked against only the part that could be applied. **Certificate policy
+  processing is not implemented**: `certificatePolicies` is recognised because
+  it restricts nothing without a caller-supplied policy set, while a critical
+  `policyConstraints` or `inhibitAnyPolicy` makes a chain fail, since honouring
+  those needs processing this does not do. **Revocation (CRL/OCSP) is not
+  consulted** by the validator. There is no path building here: finding a chain
+  through
   cross-signed roots is `X509.Path_Building`, kept separate: it searches and
   may be wrong, so a path it finds is a proposal that must still go through
   `Validate_Path`. The search verifies signatures as it goes rather than
