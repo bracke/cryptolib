@@ -29,6 +29,7 @@ The reference sources are:
 | X.509 (`Certificates`) | local CA, server/client/email issuance, CSR signing, PKCS#12 | PKCS#12 MAC key byte-exact vs OpenSSL; issued Ed25519 and P-384 certificates chain-verified against their CA by OpenSSL in the suite |
 | RSA | PKCS#1 v1.5 verification, SHA-256/384/512 | signatures produced by OpenSSL at 2048 and 3072 bits; a cube-root forgery against a low exponent is refused |
 | X.509 parsing (`ASN1`, `PEM`, `X509.*`) | DER reader, PEM armour, certificate decode, extensions, signature verification | field-by-field against `openssl x509 -text` on the same certificates; an OpenSSL-issued RSA chain verifies here and under `openssl verify` |
+| Revocation (`X509.CRLs`, `OCSP`) | CRL and OCSP parsing and signature checking | against a CRL and OCSP responses OpenSSL produced through `openssl ca -revoke`; the request builder is byte-identical to `openssl ocsp -reqout`; a delegate without OCSP-signing authority is refused |
 | Service identity (`X509.Identity`) | RFC 9525 DNS and IP matching | negative cases pinned: a wildcard matches neither the bare domain nor across two labels, an address is never matched as text, and the common name is consulted only when a caller asks for it |
 
 ## Constant-time properties
@@ -125,7 +126,10 @@ The RNG **fails closed**: if no OS source is available it returns
 - **Revocation is available but not wired into validation.** `X509.CRLs`
   decodes a CRL, verifies that its issuer signed it, and answers whether a
   serial is on it; `Validate_Path` does not consult one. Nothing here fetches a
-  CRL -- retrieval is the application's. OCSP is not implemented.
+  CRL -- retrieval is the application's. `CryptoLib.OCSP` builds requests and
+  checks responses, including whether the signer was the issuer or a delegate
+  the issuer authorised with the OCSP-signing extended key usage; it makes no
+  network requests either, and is likewise not consulted by `Validate_Path`.
 
 ## Test coverage
 

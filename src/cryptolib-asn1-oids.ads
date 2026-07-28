@@ -100,6 +100,16 @@ package CryptoLib.ASN1.OIDs is
    --  2.5.29.37.0
    EKU_Any : constant Octets := [16#55#, 16#1D#, 16#25#, 16#00#];
 
+   --  OCSP. The basic response is the only response type defined, and SHA-1
+   --  is what a CertID hashes the issuer name and key with -- not as a
+   --  security choice but because the identifier is a lookup key and the
+   --  responder computed it that way.
+   OCSP_Basic_Response : constant Octets :=
+     [16#2B#, 16#06#, 16#01#, 16#05#, 16#05#, 16#07#, 16#30#, 16#01#,
+      16#01#];
+   SHA1_Digest_Algorithm : constant Octets :=
+     [16#2B#, 16#0E#, 16#03#, 16#02#, 16#1A#];
+
    --  Is the identifier at Item within Data this one?
    --
    --  Takes the element rather than a slice so that a caller cannot
