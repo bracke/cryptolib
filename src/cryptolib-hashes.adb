@@ -1275,9 +1275,6 @@ package body CryptoLib.Hashes is
                 (Shift_Right (Hash, (7 - Index_Value) * 8) and 16#FF#);
          end loop;
       end return;
-   exception
-      when others =>
-         return [others => 0];
    end XXH3_64;
 
    function XXH128_Mix32B
@@ -1460,9 +1457,6 @@ package body CryptoLib.Hashes is
                 (Shift_Right (Hash.Low64, (7 - Index_Value) * 8) and 16#FF#);
          end loop;
       end return;
-   exception
-      when others =>
-         return [others => 0];
    end XXH3_128;
 
 end CryptoLib.Hashes;

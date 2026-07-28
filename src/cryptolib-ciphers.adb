@@ -1994,9 +1994,6 @@ package body CryptoLib.Ciphers is
            or Shift_Left (Word16 (L_Data (2 * Index_Value + 1)), 8);
       end loop;
       return Result;
-   exception
-      when others =>
-         return [others => 0];
    end RC2_Make_Key;
 
    function RC2_Decrypt_Block

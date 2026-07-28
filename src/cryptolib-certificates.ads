@@ -20,14 +20,32 @@ package CryptoLib.Certificates is
    --  keep what they had; a caller that wants to be trusted asks for P-384.
    type Key_Algorithm is (Ed25519_Key, P384_Key);
 
+   --  Render a status as short diagnostic text.
+   --  @param Status the status to describe
+   --  @return lower-case text naming the status
    function Status_Image (Status : Certificate_Status) return String;
 
+   --  Create a self-signed CA certificate and its private key.
+   --  @param Common_Name the CA's subject common name
+   --  @param Certificate_PEM receives the CA certificate in PEM form
+   --  @param Private_Key_PEM receives the CA private key in PEM form
+   --  @param Algorithm the key to issue the CA with; P384_Key for a CA a
+   --  browser can be made to trust
+   --  @return Ok on success, otherwise a deterministic failure status
    function Create_Local_CA
      (Common_Name     : String;
       Certificate_PEM : out Unbounded_String;
       Private_Key_PEM : out Unbounded_String;
       Algorithm       : Key_Algorithm := Ed25519_Key) return Certificate_Status;
 
+   --  Issue a server certificate under a CA, with a TLS server profile.
+   --  @param CA_Certificate_PEM the issuing CA certificate in PEM form
+   --  @param CA_Private_Key_PEM the issuing CA private key in PEM form
+   --  @param Common_Name the subject common name
+   --  @param Names subject alternative names; DNS names and IP addresses
+   --  @param Certificate_PEM receives the issued certificate in PEM form
+   --  @param Private_Key_PEM receives the issued private key in PEM form
+   --  @return Ok on success, otherwise a deterministic failure status
    function Issue_Server_Certificate
      (CA_Certificate_PEM : String;
       CA_Private_Key_PEM : String;
@@ -36,6 +54,14 @@ package CryptoLib.Certificates is
       Certificate_PEM    : out Unbounded_String;
       Private_Key_PEM    : out Unbounded_String) return Certificate_Status;
 
+   --  Issue a client certificate under a CA, with a TLS client profile.
+   --  @param CA_Certificate_PEM the issuing CA certificate in PEM form
+   --  @param CA_Private_Key_PEM the issuing CA private key in PEM form
+   --  @param Common_Name the subject common name
+   --  @param Names subject alternative names; DNS names and IP addresses
+   --  @param Certificate_PEM receives the issued certificate in PEM form
+   --  @param Private_Key_PEM receives the issued private key in PEM form
+   --  @return Ok on success, otherwise a deterministic failure status
    function Issue_Client_Certificate
      (CA_Certificate_PEM : String;
       CA_Private_Key_PEM : String;
@@ -44,6 +70,14 @@ package CryptoLib.Certificates is
       Certificate_PEM    : out Unbounded_String;
       Private_Key_PEM    : out Unbounded_String) return Certificate_Status;
 
+   --  Issue an email certificate under a CA, with an S/MIME profile.
+   --  @param CA_Certificate_PEM the issuing CA certificate in PEM form
+   --  @param CA_Private_Key_PEM the issuing CA private key in PEM form
+   --  @param Common_Name the subject common name
+   --  @param Emails subject alternative names; email addresses
+   --  @param Certificate_PEM receives the issued certificate in PEM form
+   --  @param Private_Key_PEM receives the issued private key in PEM form
+   --  @return Ok on success, otherwise a deterministic failure status
    function Issue_Email_Certificate
      (CA_Certificate_PEM : String;
       CA_Private_Key_PEM : String;
@@ -52,6 +86,12 @@ package CryptoLib.Certificates is
       Certificate_PEM    : out Unbounded_String;
       Private_Key_PEM    : out Unbounded_String) return Certificate_Status;
 
+   --  Sign a certificate signing request under a CA.
+   --  @param CA_Certificate_PEM the issuing CA certificate in PEM form
+   --  @param CA_Private_Key_PEM the issuing CA private key in PEM form
+   --  @param CSR_PEM the certificate signing request in PEM form
+   --  @param Certificate_PEM receives the issued certificate in PEM form
+   --  @return Ok on success, otherwise a deterministic failure status
    function Sign_CSR
      (CA_Certificate_PEM : String;
       CA_Private_Key_PEM : String;
@@ -67,8 +107,18 @@ package CryptoLib.Certificates is
    --  that could have been. The encoders below answer the same question by
    --  succeeding or failing; these answer it before anything is built, so a
    --  caller can say which identity was wrong and why.
+   --  @param Text the candidate DNS name
+   --  @return True when Text may stand as a DNS subject alternative name
    function Valid_DNS_Name (Text : String) return Boolean;
+
+   --  See Valid_DNS_Name.
+   --  @param Text the candidate IP address
+   --  @return True when Text may stand as an IP subject alternative name
    function Valid_IP_Address (Text : String) return Boolean;
+
+   --  See Valid_DNS_Name.
+   --  @param Text the candidate email address
+   --  @return True when Text may stand as an email subject alternative name
    function Valid_Email_Address (Text : String) return Boolean;
 
    --  The certificate's SHA-256 fingerprint, lower-case hex in colon-separated
@@ -79,6 +129,7 @@ package CryptoLib.Certificates is
    --  -- and the only one a person can compare with. Hashing the armoured text
    --  instead gives a number that matches nothing, and that changes when the
    --  same certificate is re-wrapped.
+   --  @param Certificate_PEM the certificate in PEM form
    --  @return "" when the text carries no certificate
    function Fingerprint (Certificate_PEM : String) return String;
 
@@ -87,18 +138,38 @@ package CryptoLib.Certificates is
    --  Comparing the text does not answer it: the same certificate may be
    --  wrapped at a different width, carry different line endings, or be armoured
    --  with a different label. This compares what the armour holds.
+   --  @param Left one PEM text
+   --  @param Right the other PEM text
+   --  @return True when both carry the same certificate
    function Same_Certificate (Left : String; Right : String) return Boolean;
 
-   --  Does this PEM text carry a certificate, or a private key?
+   --  Does this PEM text carry a certificate?
    --
    --  Asked of the armour, which is what says which of the two a file is.
+   --  @param Text the PEM text to inspect
+   --  @return True when Text carries a certificate
    function Contains_Certificate (Text : String) return Boolean;
+
+   --  Does this PEM text carry a private key?
+   --  @param Text the PEM text to inspect
+   --  @return True when Text carries a private key
    function Contains_Private_Key (Text : String) return Boolean;
 
+   --  Does this private key belong to this certificate?
+   --  @param Certificate_PEM the certificate in PEM form
+   --  @param Private_Key_PEM the private key in PEM form
+   --  @return Ok when the key matches, otherwise a deterministic failure status
    function Private_Key_Matches_Certificate
      (Certificate_PEM : String;
       Private_Key_PEM : String) return Certificate_Status;
 
+   --  Bundle a certificate and its private key as PKCS#12.
+   --  @param Certificate_PEM the certificate in PEM form
+   --  @param Private_Key_PEM the private key in PEM form
+   --  @param Friendly_Name the bundle's friendly name
+   --  @param Password the password protecting the bundle
+   --  @param Bundle_Data receives the PKCS#12 bundle
+   --  @return Ok on success, otherwise a deterministic failure status
    function Generate_PKCS12
      (Certificate_PEM : String;
       Private_Key_PEM : String;
