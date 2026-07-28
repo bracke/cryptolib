@@ -35,6 +35,10 @@ claims are meant to be checkable against the code.
   (depends on the shared `project_tools` at `../../project_tools`). Run
   `tools/bin/check_release_ready` from the crate root for the full preflight
   (build + test + manifest + test-suite + GNATdoc-tag checks).
+- **On a fresh checkout, `alr update` once before `alr build` in `tests/` and
+  `tools/`.** Their `alire/`, `config/`, `obj/`, and `bin/` are generated and
+  untracked, and `alr build` alone does not resolve the path pins from nothing
+  — it regenerates the directories and then fails to find `project_tools`.
 - Style is enforced by GNAT flags, not a formatter: Ada 2022, 3-space indent, max
   120 columns, `-gnatwa` (all warnings) + `-gnatVa` (validity). **Keep builds
   warning-clean** — the bar is zero warnings; clear any in code you touch. Note:

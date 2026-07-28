@@ -1,6 +1,0 @@
-dependency:cryptolib=0.1.0-dev=36a918a2d8bb3458732191c5f111568472ba450c018270bb4e03a2fb5f92b503
-dependency:project_tools=0.1.0=c3258f263e87dfd5141ce0af8cbac0d79d64065ab3a692080c1503486f82c789
-external:CRYPTOLIB_TOOLS_LIBRARY_TYPE=default
-external:LIBRARY_TYPE=default
-profile:cryptolib_tools=DEVELOPMENT
-switches:cryptolib_tools=-Og,-fdata-sections,-ffunction-sections,-g,-gnatVa,-gnatW8,-gnatw.X,-gnatwa,-gnaty-d,-gnaty3,-gnatyA,-gnatyB,-gnatyI,-gnatyO,-gnatyS,-gnatya,-gnatyb,-gnatyc,-gnatye,-gnatyf,-gnatyh,-gnatyi,-gnatyk,-gnatyl,-gnatym,-gnatyn,-gnatyp,-gnatyr,-gnatyt,-gnatyu,-gnatyx
