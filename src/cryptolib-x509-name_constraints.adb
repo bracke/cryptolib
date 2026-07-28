@@ -172,6 +172,140 @@ package body CryptoLib.X509.Name_Constraints is
       return (if Looks_Like_Host (Common) then Common else "");
    end Host_From_Common_Name;
 
+   --  Is Base an initial run of RDNs of Subject?
+   --
+   --  A directory-name subtree is a prefix of the distinguished name, not an
+   --  equality: a base of "C=DK, O=Example" covers every name beginning with
+   --  those two, which is how a CA is limited to one organisation. The RDNs
+   --  are compared as encoded, which can only be too strict -- being too
+   --  strict costs a chain that could have been built, being too lax admits
+   --  one that should not have been.
+   function Within_DN
+     (Base_Data : Octets; Base : Element;
+      Subj_Data : Octets) return Boolean
+   is
+      Limits    : constant Decode_Limits := Default_Limits;
+      Base_Seq  : Element;
+      Subj_Seq  : Element;
+      Base_At   : Offset;
+      Subj_At   : Offset;
+      Status    : CryptoLib.ASN1.Errors.Decode_Status;
+   begin
+      --  The base is a Name, which is a CHOICE, so its context tag is
+      --  explicit and the RDNSequence sits inside it.
+      Base_At := Base.First;
+      DER_Reader.Read_Sequence
+        (Base_Data, Base_At, Base.Last, 5, Limits, Base_Seq, Status);
+      if Status /= CryptoLib.ASN1.Errors.Ok then
+         return False;
+      end if;
+
+      --  The subject is a whole Name as encoded, so the sequence is read
+      --  from its start. Reading it as though its header had already been
+      --  consumed finds the first relative name where the sequence should be,
+      --  and nothing matches anything.
+      Subj_At := Subj_Data'First;
+      DER_Reader.Read_Sequence
+        (Subj_Data, Subj_At, Subj_Data'Last, 5, Limits, Subj_Seq, Status);
+      if Status /= CryptoLib.ASN1.Errors.Ok then
+         return False;
+      end if;
+
+      Base_At := Base_Seq.First;
+      Subj_At := Subj_Seq.First;
+
+      while not DER_Reader.At_End (Base_At, Base_Seq.Last) loop
+         declare
+            Base_RDN : Element;
+            Subj_RDN : Element;
+         begin
+            DER_Reader.Read
+              (Base_Data, Base_At, Base_Seq.Last, 6, Limits, Base_RDN,
+               Status);
+            if Status /= CryptoLib.ASN1.Errors.Ok then
+               return False;
+            end if;
+
+            if DER_Reader.At_End (Subj_At, Subj_Seq.Last) then
+               --  The subject is shorter than the base, so the base cannot be
+               --  a prefix of it.
+               return False;
+            end if;
+
+            DER_Reader.Read
+              (Subj_Data, Subj_At, Subj_Seq.Last, 6, Limits, Subj_RDN,
+               Status);
+            if Status /= CryptoLib.ASN1.Errors.Ok then
+               return False;
+            end if;
+
+            declare
+               Left  : constant Octets :=
+                 Base_Data (Encoded_First (Base_RDN) .. Encoded_Last (Base_RDN));
+               Right : constant Octets :=
+                 Subj_Data (Encoded_First (Subj_RDN) .. Encoded_Last (Subj_RDN));
+            begin
+               if Left'Length /= Right'Length then
+                  return False;
+               end if;
+               for I in 0 .. Left'Length - 1 loop
+                  if Left (Left'First + Offset (I))
+                    /= Right (Right'First + Offset (I))
+                  then
+                     return False;
+                  end if;
+               end loop;
+            end;
+         end;
+      end loop;
+
+      return True;
+   end Within_DN;
+
+   --  The host a URI names.
+   --
+   --  A URI subtree constrains the host and nothing else, so "example.com"
+   --  covers "http://www.example.com/anything". Anything before an "@" is
+   --  credentials rather than a host, and a port or a path ends it.
+   function Host_Of_URI (URI : String) return String is
+      Start : Natural := URI'First;
+      Stop  : Natural;
+      At_At : Natural := 0;
+   begin
+      for I in URI'Range loop
+         if I + 2 <= URI'Last and then URI (I .. I + 2) = "://" then
+            Start := I + 3;
+            exit;
+         end if;
+      end loop;
+
+      Stop := URI'Last;
+      for I in Start .. URI'Last loop
+         if URI (I) = '/' or else URI (I) = ':' or else URI (I) = '?'
+           or else URI (I) = '#'
+         then
+            Stop := I - 1;
+            exit;
+         end if;
+      end loop;
+
+      for I in Start .. Stop loop
+         if URI (I) = '@' then
+            At_At := I;
+         end if;
+      end loop;
+
+      if At_At /= 0 then
+         Start := At_At + 1;
+      end if;
+
+      if Stop < Start then
+         return "";
+      end if;
+
+      return URI (Start .. Stop);
+   end Host_Of_URI;
+
    --  Walk one GeneralSubtrees, applying every base to the certificate.
    --
    --  Reports whether any subtree of a given kind was present, and whether
@@ -183,8 +317,12 @@ package body CryptoLib.X509.Name_Constraints is
       Item       : Certificate;
       Any_DNS    : out Boolean;
       Any_IP     : out Boolean;
+      Any_DN     : out Boolean;
+      Any_URI    : out Boolean;
       Inside_DNS : out Boolean;
       Inside_IP  : out Boolean;
+      Inside_DN  : out Boolean;
+      Inside_URI : out Boolean;
       Usable     : out Boolean)
    is
       Limits : constant Decode_Limits := Default_Limits;
@@ -195,8 +333,12 @@ package body CryptoLib.X509.Name_Constraints is
    begin
       Any_DNS := False;
       Any_IP := False;
+      Any_DN := False;
+      Any_URI := False;
       Inside_DNS := False;
       Inside_IP := False;
+      Inside_DN := False;
+      Inside_URI := False;
       Usable := True;
 
       while not DER_Reader.At_End (Cursor, Region.Last) loop
@@ -269,9 +411,51 @@ package body CryptoLib.X509.Name_Constraints is
                      end if;
                   end loop;
 
+               when 4 =>
+                  --  A directory-name subtree, which constrains the subject
+                  --  itself rather than an alternative name -- that is how a
+                  --  CA is limited to an organisation rather than a domain.
+                  Any_DN := True;
+                  declare
+                     Subject : constant Octets :=
+                       CryptoLib.X509.Certificates.Subject_Bytes (Item);
+                  begin
+                     if Subject'Length > 0
+                       and then Within_DN (Data, Base, Subject)
+                     then
+                        Inside_DN := True;
+                     end if;
+                  end;
+
+               when 6 =>
+                  --  A URI subtree constrains the host the URI names.
+                  Any_URI := True;
+                  declare
+                     Text : String (1 .. Content_Length (Base));
+                  begin
+                     for I in Text'Range loop
+                        Text (I) :=
+                          Character'Val (Data (Base.First + Offset (I - 1)));
+                     end loop;
+
+                     for N in 1 .. Names loop
+                        if XE.Subject_Alternative_Name_Kind (Item, N)
+                          = XE.URI
+                          and then Within_DNS
+                                     (Text,
+                                      Host_Of_URI
+                                        (XE.Subject_Alternative_Name_Text
+                                           (Item, N)))
+                        then
+                           Inside_URI := True;
+                        end if;
+                     end loop;
+                  end;
+
                when others =>
-                  --  A form this cannot apply. Saying so beats ignoring it:
-                  --  an unapplied constraint is not a constraint.
+                  --  A form this cannot apply -- an email or an EDI party
+                  --  name. Saying so beats ignoring it: an unapplied
+                  --  constraint is not a constraint.
                   Usable := False;
                   return;
             end case;
@@ -292,6 +476,9 @@ package body CryptoLib.X509.Name_Constraints is
 
       Has_DNS : Boolean := False;
       Has_IP  : Boolean := False;
+      Has_URI : Boolean := False;
+      Has_DN  : constant Boolean :=
+        CryptoLib.X509.Certificates.Subject_Bytes (Item)'Length > 0;
    begin
       if Constraints_Value'Length = 0 then
          return Malformed;
@@ -302,6 +489,8 @@ package body CryptoLib.X509.Name_Constraints is
             Has_DNS := True;
          elsif XE.Subject_Alternative_Name_Kind (Item, N) = XE.IP_Address then
             Has_IP := True;
+         elsif XE.Subject_Alternative_Name_Kind (Item, N) = XE.URI then
+            Has_URI := True;
          end if;
       end loop;
 
@@ -326,8 +515,12 @@ package body CryptoLib.X509.Name_Constraints is
             Tag        : Element;
             Any_DNS    : Boolean;
             Any_IP     : Boolean;
+            Any_DN     : Boolean;
+            Any_URI    : Boolean;
             Inside_DNS : Boolean;
             Inside_IP  : Boolean;
+            Inside_DN  : Boolean;
+            Inside_URI : Boolean;
             Usable     : Boolean;
          begin
             DER_Reader.Read
@@ -339,8 +532,8 @@ package body CryptoLib.X509.Name_Constraints is
             end if;
 
             Scan_Subtrees
-              (Constraints_Value, Tag, Item, Any_DNS, Any_IP,
-               Inside_DNS, Inside_IP, Usable);
+              (Constraints_Value, Tag, Item, Any_DNS, Any_IP, Any_DN, Any_URI,
+               Inside_DNS, Inside_IP, Inside_DN, Inside_URI, Usable);
             if not Usable then
                return Unsupported_Constraint;
             end if;
@@ -357,10 +550,18 @@ package body CryptoLib.X509.Name_Constraints is
                   if Any_IP and then Has_IP and then not Inside_IP then
                      return Excluded;
                   end if;
+                  if Any_DN and then Has_DN and then not Inside_DN then
+                     return Excluded;
+                  end if;
+                  if Any_URI and then Has_URI and then not Inside_URI then
+                     return Excluded;
+                  end if;
 
                when 1 =>
                   --  Excluded: falling inside any subtree is fatal.
-                  if Inside_DNS or else Inside_IP then
+                  if Inside_DNS or else Inside_IP or else Inside_DN
+                    or else Inside_URI
+                  then
                      return Excluded;
                   end if;
 

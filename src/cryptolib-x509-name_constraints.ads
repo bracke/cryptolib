@@ -14,10 +14,14 @@ with CryptoLib.X509.Certificates;
 --  it turns a conservative refusal into a silent bypass, which is worse than
 --  refusing to validate the chain at all.
 --
---  DNS names and IP addresses are enforced. A constraint naming any other
---  form -- an email subtree, a directory name, a URI -- is reported as
---  unsupported rather than ignored, so a chain whose constraints this cannot
---  fully apply is refused rather than half-checked.
+--  DNS names, IP addresses, directory names and URIs are enforced. A
+--  directory-name subtree constrains the certificate's own subject rather
+--  than an alternative name, which is how a CA is limited to an organisation
+--  rather than to a domain; a URI subtree constrains the host the URI names.
+--  A constraint naming a form still not applied here -- an email subtree, an
+--  EDI party name -- is reported as unsupported rather than ignored, so a
+--  chain whose constraints this cannot fully apply is refused rather than
+--  half-checked.
 package CryptoLib.X509.Name_Constraints is
 
    subtype Certificate is CryptoLib.X509.Certificates.Certificate;

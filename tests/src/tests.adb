@@ -5255,6 +5255,154 @@ procedure Tests is
         "44dabaddf397d5f12d18102b03e3796bd7cd5a8da5c1ec980a0bdd2472deef46a2cfa92ac4a9c4880e88732974" &
         "c6df6e3a6913c5b77864edc913b84d115cf33c8e741e5ad25cff46dc0dc363ed77fc1ae208ca99aa819b08";
 
+      NC_DN_CA : constant String :=
+        "3082035830820240a0030201020214729dd4801a54586b73e69c048bc99eaeb8357e59300d06092a864886f70d" &
+        "01010b050030123110300e06035504030c076e632d726f6f74301e170d3236303732383231353930395a170d33" &
+        "36303732353231353930395a301a3118301606035504030c0f6e632d696e7465726d6564696174653082012230" &
+        "0d06092a864886f70d01010105000382010f003082010a0282010100f25a28ff863d5122743363eb7b815d4b49" &
+        "bbf25bf9d4c9a67acea1d03c869468645ebba4ce16de248dc0667fc5c3630187ff2ad73a0488f4728b3794d279" &
+        "ede6e431f096a23ce4037621828b762db7e1d83649616e1753ddff36db01170dd53e86545cecb1b153fee190c2" &
+        "3bfb4beb1a03629049d049b7013332fbf4effb038a6095800f20168feca771b27071c565acf9d426b4ac0ba414" &
+        "3a25646d3f58c03b69e903a2a838dc56028e4bbd2e36eb573ba4b2d3409c89a0e77b3d9ecea3a86cdb86f80cf9" &
+        "94bc6f504c30a27276815d5514bd6df3f6d5b71ed7acaa523a0924c9f87ab479838628c5012ed265e4ceee7968" &
+        "169ec9595e8433f2b0f516f8b8ff0203010001a3819d30819a300f0603551d130101ff040530030101ff300e06" &
+        "03551d0f0101ff04040302020430370603551d1e0101ff042d302ba0293027a4253023310b3009060355040613" &
+        "02444b31143012060355040a0c0b4578616d706c65204c7464301d0603551d0e04160414a83004ae9ec44164bd" &
+        "55c5536ba175f1afa07427301f0603551d2304183016801460feba9da8bbc8d72217d5d3f13c65afc74d119830" &
+        "0d06092a864886f70d01010b0500038201010061d04bcc6a902b0799a1c587f2cba8ab664817e580004f88c6e1" &
+        "16303a9411af2465941e4d57c8cbc5a578dbd150c3ff687e06a101ea321f7efe55475c83fcf3debf5cea394220" &
+        "86680ef1fefc1d88df869f89dfd22a86cf817cffd3e88f18a5a89f002caa3a5f271ec8a58e4ce72670d0373ef6" &
+        "caa42b3b8549fd2ddff0b691971a0572aa8c787f0f976eaa3b67f253fe075b3444167d45482c40954c784208b7" &
+        "d8b7439cdb3bacbeb6b00c1a20abd16deebd90b557ca964b861fe928d9644ce6d8baccaca0445fbb8ee87a67c5" &
+        "eec2c2a83aeb6a4297eb16b3157178b3121a04d4c71bacec04c8ea4002130817aa6842f752e7fcf9c2f3b83618" &
+        "078a99c53b";
+
+      NC_DN_Inside : constant String :=
+        "3082034130820229a00302010202144b1efa83ff472588a7b5ec65041b57c341737eae300d06092a864886f70d" &
+        "01010b0500301a3118301606035504030c0f6e632d696e7465726d656469617465301e170d3236303732383231" &
+        "353931305a170d3237303732383231353931305a303c310b300906035504061302444b31143012060355040a0c" &
+        "0b4578616d706c65204c74643117301506035504030c0e696e2e6578616d706c652e636f6d30820122300d0609" &
+        "2a864886f70d01010105000382010f003082010a0282010100f3538c0f7d6a9f1584ed48feb29a7a2814b06afe" &
+        "db1d37fa34928f6b7ed50f428bc01d8bfcce9929876f443190ddb9841f4e257c69128af2165297eafc05190779" &
+        "70709d55677aebd3eb38f5adefdfc0a891dad716fc5f7b4c23bda5a80e6f140edb4380ff4eb47e1f00fdacf1c6" &
+        "f0284599f36497cf55bff64b3aaa7d30f8821367f279052ce2d9f0a8caef69a39892f55f76bb495035c41fc769" &
+        "130fe9c51bb658b1e72e5e51996bb4b1d8b9f481148e028ad0afaf77422f977cfaccc6d51bd95aae47bf49dfe7" &
+        "d44dbd79ebb748890513b1f554ac4eeb16629e865e7e9f6fde6ed74b925f07ce92b5e2fc0b5644bc70e64e5f2a" &
+        "9356b80426033f3824f7990203010001a35d305b30090603551d1304023000300e0603551d0f0101ff04040302" &
+        "0780301d0603551d0e04160414faf0aa1138db982b4bf9973d05a3f369b4c08f35301f0603551d230418301680" &
+        "14a83004ae9ec44164bd55c5536ba175f1afa07427300d06092a864886f70d01010b05000382010100d5c8229c" &
+        "d13eac8ae4d1d545a3bd764bed38c6f50018c1821abb2407f06fc7d8ce505eda09f48662c57c082d7d4eb77e3b" &
+        "d5a635375cd3c7909bb139545e86947ff47bf84a64c5d23b9983d59dde1bfbe277a992540aa636aaa28f611343" &
+        "b7d102ea931283f80d2460cdc8ca6540d3292912a627aad66b3d6cfc5d029428e77162f84a6c17e756dcbb516d" &
+        "3f2351074cbaa3387fd094fd33f6710741b4a916020fcf74d08663781ca928af0cd09219719f35afe26ddb7a84" &
+        "fed60a284303ef4b0d12ccaf4cce14b4c1b11e2a17fbb147c8d21eb12ba2bfaf62458327fd46d0965bc0bbe0f6" &
+        "89f8d4c92122e274d27acac7043e3854ded143c8546b952dd06c9f";
+
+      NC_DN_Outside : constant String :=
+        "3082034030820228a00302010202144b1efa83ff472588a7b5ec65041b57c341737eaf300d06092a864886f70d" &
+        "01010b0500301a3118301606035504030c0f6e632d696e7465726d656469617465301e170d3236303732383231" &
+        "353931305a170d3237303732383231353931305a303b310b300906035504061302444b31123010060355040a0c" &
+        "094f74686572204c74643118301606035504030c0f6f75742e6578616d706c652e636f6d30820122300d06092a" &
+        "864886f70d01010105000382010f003082010a0282010100984497d9c2ae1574cab962d3dc4043268363ac3b71" &
+        "6ceb798b68aa0b9b600696dd3112f3e7071c95dabaea67c19f6d5e420e9a5e86b60d0fe988f56ed41bbbe498a9" &
+        "f9e55398497fd1bdf4c70f6dd6eaf302b54b24375ad948592b61972914c237459da50e060155439c7d98b7c81a" &
+        "42d92bcb9e8afb1ccb8ef4bf639224e21e173b693e2fbbfb7a665a405cad0255cb872df76d622cf5868872a239" &
+        "84f7f2534eb63e3dafcd66e114ce49ebe10c2556e14b27b4a280b05dc47b563434998ce66f878df8a2e0d04248" &
+        "9897ae8d88595d7b98cf016f145e7bd85595841e50cdefddd71cf85d1c00d84b4e0b793ee566f46cbfe161017c" &
+        "d4fe3ca56cb2be0f250d0203010001a35d305b30090603551d1304023000300e0603551d0f0101ff0404030207" &
+        "80301d0603551d0e0416041464084e16d2d043ada30fe6f68890b97e759ee3b0301f0603551d23041830168014" &
+        "a83004ae9ec44164bd55c5536ba175f1afa07427300d06092a864886f70d01010b05000382010100075e3d5674" &
+        "998a0eed88d6f1d3c793ae6cca3491abf020a2174dfd2e7e47a6f38262ba4e724ea667a78ce236719e5bc54eea" &
+        "8dbe31aace2cae1d9174903e06761897b1fa9029f8cc8bd5b258f2d84369e35c00a4b63fd91b5ee0c4738adab0" &
+        "7048c881adec9a550ef09a9ca6f605015b5165520c35e2bb9d31ec545f107baf260bed071e55b879c81863801f" &
+        "92aa504e8ede678cc4c53c70c6aee781cd36d3ca16d7c65bbe7279cc1f360f11cc086bcf871c66b699b85d846d" &
+        "6b2a08598cb9f93c486cbcbce208a162e008105e70f392afb9ad7254573c2849cd71d750205daf8d6156e9ffc2" &
+        "3a10437c897b8bb2a48c22f0fbe62d94bb1712090855085f6245";
+
+      NC_URI_CA : constant String :=
+        "3082033f30820227a0030201020214729dd4801a54586b73e69c048bc99eaeb8357e5a300d06092a864886f70d" &
+        "01010b050030123110300e06035504030c076e632d726f6f74301e170d3236303732383232303032335a170d33" &
+        "36303732353232303032335a301a3118301606035504030c0f6e632d696e7465726d6564696174653082012230" &
+        "0d06092a864886f70d01010105000382010f003082010a0282010100f25a28ff863d5122743363eb7b815d4b49" &
+        "bbf25bf9d4c9a67acea1d03c869468645ebba4ce16de248dc0667fc5c3630187ff2ad73a0488f4728b3794d279" &
+        "ede6e431f096a23ce4037621828b762db7e1d83649616e1753ddff36db01170dd53e86545cecb1b153fee190c2" &
+        "3bfb4beb1a03629049d049b7013332fbf4effb038a6095800f20168feca771b27071c565acf9d426b4ac0ba414" &
+        "3a25646d3f58c03b69e903a2a838dc56028e4bbd2e36eb573ba4b2d3409c89a0e77b3d9ecea3a86cdb86f80cf9" &
+        "94bc6f504c30a27276815d5514bd6df3f6d5b71ed7acaa523a0924c9f87ab479838628c5012ed265e4ceee7968" &
+        "169ec9595e8433f2b0f516f8b8ff0203010001a38184308181300f0603551d130101ff040530030101ff300e06" &
+        "03551d0f0101ff040403020204301e0603551d1e0101ff04143012a010300e860c2e6578616d706c652e636f6d" &
+        "301d0603551d0e04160414a83004ae9ec44164bd55c5536ba175f1afa07427301f0603551d2304183016801460" &
+        "feba9da8bbc8d72217d5d3f13c65afc74d1198300d06092a864886f70d01010b0500038201010085ca15f1caa8" &
+        "6b63b217bd7aff1bdef4db1fadbc9a12fb896309aae6daf586097c5ca8c3c7b930dd358064c42c072b37c88b8c" &
+        "c512ce06a9b86069a0455fd9b96366f66a9dd4fa1baff8ca1be6d21b118b76bd2b11e7f3d008ac336c65e85448" &
+        "5d513f67ae8799421497960ba9f835dad70d7595d4af7c2e6b431dfd9b88f507045e2f7716e4d0cfbdc124c434" &
+        "2be2a87e739f3550f1dba4740c02627db33538950877d22ce4bb092b3c9cf8e57336452e59d79202f59caf97ce" &
+        "a61ba2f27eda675ac87a2ccab21e5ce91e990733dbfd9a2467018b58b9725af9aed593d6fc1ef86092c2f80615" &
+        "52575edef850ab820765a4ea3ea3075f29847aedb141b2403e";
+
+      NC_URI_Inside : constant String :=
+        "308203453082022da00302010202145778eca098da68b36e73bedb8a9db6422f3aa137300d06092a864886f70d" &
+        "01010b0500301a3118301606035504030c0f6e632d696e7465726d656469617465301e170d3236303732383232" &
+        "303032335a170d3237303732383232303032335a30153113301106035504030c0a7572692d696e736964653082" &
+        "0122300d06092a864886f70d01010105000382010f003082010a0282010100a2a0c1ea1b96738be83742a97517" &
+        "e448864e435a8b5ec2c0adf2c6bf2a4b3cbd8b05391d509fda551dd4c8f411810835f2bbc5eae812e46191e066" &
+        "7b08c6dd68baa76d505300d3c7ef94e2cde8f436ba2e326ef72e1d0126c18c896ebc47721d569fa798057013dc" &
+        "f5c62b83266d8f7e262d0ef1ba8b7bae5429374c557c6aa4910460794ff9a0632d14149644ef10aa630f77a774" &
+        "fb7188c8bed2fa76be160bec6a4286f5849ccc8fbb1c15d00b4d62e70f8d5d7ad6445bc4b6bc6119f34d95bc13" &
+        "8c70154e9aa6350fc99afa132a6aca6b2ed2a5de3bfe2e1f813946adc59e268b2789751bcf6eb8a8b9995686d3" &
+        "704e827aa4c08aebbfacd38dc297b07f630203010001a3818730818430090603551d1304023000300e0603551d" &
+        "0f0101ff04040302078030270603551d110420301e861c68747470733a2f2f7777772e6578616d706c652e636f" &
+        "6d2f70617468301d0603551d0e04160414cb48de9bea1dd73cad4438ce2e70da6373bd9020301f0603551d2304" &
+        "1830168014a83004ae9ec44164bd55c5536ba175f1afa07427300d06092a864886f70d01010b05000382010100" &
+        "3717bf8edcc48064a8b92313af1ce9ab1417891f2c92a6827b74c8031b808cf763270ef76d638c7f9923544e5e" &
+        "f3ed4e7d165cb579adcee127144c8277af0202b6b56173a766dae8c9ffe9b3f9bdc8e0d39701e57c538fc91073" &
+        "7ea0f6f21d6745ba7081bf9a4ff93fa3ee30ccb90888790e957b7f107fe4f129a7a79f545c9c7411446ffa5526" &
+        "bc975b50caa141e58e38128ec7e6020560d561afedc2aacaf8648255a6ac5ec0cf65092af3757ab13984fad9b2" &
+        "f33d56c642d919debe353dcb1f516aee91c4f95149454dd9498f085bfad57845857816100be186edee7a63b354" &
+        "c6a02d65deaaa06c6b72fe945f3dc6ec7bec1d13260e24417cc537c8c08a43";
+
+      NC_URI_Outside : constant String :=
+        "308203443082022ca00302010202145778eca098da68b36e73bedb8a9db6422f3aa138300d06092a864886f70d" &
+        "01010b0500301a3118301606035504030c0f6e632d696e7465726d656469617465301e170d3236303732383232" &
+        "303032335a170d3237303732383232303032335a30163114301206035504030c0b7572692d6f75747369646530" &
+        "820122300d06092a864886f70d01010105000382010f003082010a0282010100bdcf160b3726aa01518049936e" &
+        "6dc8aa7669b7a998a7cf68664ea7c6ddf8905de5067a80a8b0579215ee47c75b8f1ee466219e729172e5714ce7" &
+        "32cc4b7e5addc34323f664e5ab7a3f08253515cef1f1df9e19b7058ac73fab7ffa52bc8d56df3219834a63ca9a" &
+        "4ba635a6a7fa4ff219813f700fb47a70023b2d452ca14e6fdc6ba6c7277181bafeb0d09ce8a0cce8e4af901f35" &
+        "f4814ee89c11487ff4987d8770f48c718f4220e45fab249f0cbe5c939bc474ad3af2750e08c9b1f629df51713b" &
+        "dba28932246bff7c4625f6c39d2710a346ed58280808c6a18bb20be8716515d011ca43c68340a2bbf4ca223401" &
+        "c1a922dcd93e6131411bcdb127683367744d0203010001a3818530818230090603551d1304023000300e060355" &
+        "1d0f0101ff04040302078030250603551d11041e301c861a68747470733a2f2f7777772e6576696c2e74657374" &
+        "2f70617468301d0603551d0e041604149c4a5ede9436c4892287c44da0a4209b25fb7913301f0603551d230418" &
+        "30168014a83004ae9ec44164bd55c5536ba175f1afa07427300d06092a864886f70d01010b0500038201010093" &
+        "dde370784a8cee2eba6c08850cc1e0773cc97df10499b453b70cc8d4acfc1b7f28324e3713fa2f20298ab0abd2" &
+        "32652d6f632e02b99e9787151f59fe17c4a77163adba2343c3a7aaada7a6c67ac03303c5557524ff364cbcbe1e" &
+        "4a3957fe29fdc1130176b17c3e3b4c8b07a896a3f686e4bad11d3db228c331c67efc4d4c0b1c165538f5c784ff" &
+        "264119e90b9ffd162cd96035cfcfe5c493d444bac1abd0ce675d960b28ac7a726e44d5b755b16969de56dfffdf" &
+        "97d8e7623a5b341b3b388ad89b03fbdf909e491addc66620fadd960608cb326e45cf9902c396b9e7193a670cc9" &
+        "f01ee3b374b72d4524ace8045d484e2bcb68fe931b29ce691b8e153f06f4";
+
+      NC_URI_Userinfo : constant String :=
+        "3082034e30820236a00302010202145778eca098da68b36e73bedb8a9db6422f3aa139300d06092a864886f70d" &
+        "01010b0500301a3118301606035504030c0f6e632d696e7465726d656469617465301e170d3236303732383232" &
+        "303032345a170d3237303732383232303032345a30173115301306035504030c0c7572692d75736572696e666f" &
+        "30820122300d06092a864886f70d01010105000382010f003082010a0282010100b4f72b0206d1fbae18524cf2" &
+        "7edcfc0abc5291845a6b7404ff5543c22dca776ab3a945686467b5137670932da35278e7e041bb2bc40d3ca90d" &
+        "5f446451de4243dd7a7845babe8ca2c9099c3cab78c746eb48d73a7bd6cd5ec8b772b116a2aff779b6779bbd43" &
+        "451a0f37730b136978fac66539a0c85e59c3cea94a85d04a955ba5229f19dd517b836b0b932915e49e9cddf333" &
+        "01886b7ba80ef2c6cf027082bc76dbec02265ec6979944b755173dec666e966f1bdd52c8b4a6a2da6942d02b64" &
+        "c9e9b46a8d43e22914449210116591e91c66ee593fd8e16a01ec098962788edaece76d783c893c90f2a945c3ee" &
+        "a40621439b915fcaa64d9def2f3eea33f1b2b50203010001a3818e30818b30090603551d1304023000300e0603" &
+        "551d0f0101ff040403020780302e0603551d1104273025862368747470733a2f2f75736572407372762e657861" &
+        "6d706c652e636f6d3a383434332f78301d0603551d0e041604146ba04546d9e0790bc0e42b42d93ea2b8e456d5" &
+        "49301f0603551d23041830168014a83004ae9ec44164bd55c5536ba175f1afa07427300d06092a864886f70d01" &
+        "010b05000382010100a1f171f7b7bfb99526cb7832ac0b0cb192c0e428cd936539797c5306676fd5aec812355a" &
+        "e4d0f286e1d09e6b7c970922ca5d7b46bf24fd91145424ace7657c1181e10ecdcff5f00956c236557c357c1f64" &
+        "d498de9588fa4e9ff4ac8a1396f384b33933282c7d6df201ffcb72b518f5ef3ed71909d20e98a4c09ba8e3d839" &
+        "3bf1604eec6478ed64b61385b89a6b465ee530dcbe50c051283ebb2ba5ec09a6c3e5f963b3eb6895d6545287ec" &
+        "864100abb5931e19f39c357902f59a931a5c2883904b6d55ea877e22fca29ff707095902475e993eba68fe58d1" &
+        "4f869d863401b611d00552e06fc41c2677443a22de6aab786e294288bef07ce7cc5c7240e62de3e3";
+
       NC_Email_CA : constant String :=
         "3082033e30820226a0030201020214729dd4801a54586b73e69c048bc99eaeb8357e53300d06092a864886f70d" &
         "01010b050030123110300e06035504030c076e632d726f6f74301e170d3236303732383231343834365a170d33" &
@@ -5319,7 +5467,8 @@ procedure Tests is
       Status : CryptoLib.ASN1.Errors.Decode_Status;
 
       type Which is (Inside, Outside, Lookalike, CN_Outside, CN_Inside,
-                     CN_Org, Email);
+                     CN_Org, DN_Inside, DN_Outside, URI_Inside,
+                     URI_Outside, URI_Userinfo, Email);
 
       type Constrained_Path (Kind : Which) is limited new XV.Path_Source
         with null record;
@@ -5366,6 +5515,36 @@ procedure Tests is
                 then X509C.Decode_DER (From_Hex (NC_CN_Org),
                        CryptoLib.ASN1.Default_Limits, Status)
                 else X509C.Decode_DER (From_Hex (NC_CA),
+                       CryptoLib.ASN1.Default_Limits, Status)),
+             when DN_Inside =>
+               (if Index = 1
+                then X509C.Decode_DER (From_Hex (NC_DN_Inside),
+                       CryptoLib.ASN1.Default_Limits, Status)
+                else X509C.Decode_DER (From_Hex (NC_DN_CA),
+                       CryptoLib.ASN1.Default_Limits, Status)),
+             when DN_Outside =>
+               (if Index = 1
+                then X509C.Decode_DER (From_Hex (NC_DN_Outside),
+                       CryptoLib.ASN1.Default_Limits, Status)
+                else X509C.Decode_DER (From_Hex (NC_DN_CA),
+                       CryptoLib.ASN1.Default_Limits, Status)),
+             when URI_Inside =>
+               (if Index = 1
+                then X509C.Decode_DER (From_Hex (NC_URI_Inside),
+                       CryptoLib.ASN1.Default_Limits, Status)
+                else X509C.Decode_DER (From_Hex (NC_URI_CA),
+                       CryptoLib.ASN1.Default_Limits, Status)),
+             when URI_Outside =>
+               (if Index = 1
+                then X509C.Decode_DER (From_Hex (NC_URI_Outside),
+                       CryptoLib.ASN1.Default_Limits, Status)
+                else X509C.Decode_DER (From_Hex (NC_URI_CA),
+                       CryptoLib.ASN1.Default_Limits, Status)),
+             when URI_Userinfo =>
+               (if Index = 1
+                then X509C.Decode_DER (From_Hex (NC_URI_Userinfo),
+                       CryptoLib.ASN1.Default_Limits, Status)
+                else X509C.Decode_DER (From_Hex (NC_URI_CA),
                        CryptoLib.ASN1.Default_Limits, Status)),
              when Email =>
                (if Index = 1
@@ -5443,6 +5622,45 @@ procedure Tests is
              "a common name that is not a host name is left alone, got "
              & XV.Failure_Image (Result.Failure));
 
+      --  A directory-name subtree constrains the certificate's own subject,
+      --  which is how a CA is limited to an organisation rather than to a
+      --  domain. It is a prefix of the name, not the whole of it: the base
+      --  "C=DK, O=Example Ltd" covers every subject beginning with those two.
+      Result :=
+        XV.Validate_Path (Constrained_Path'(Kind => DN_Inside), Now_Time);
+      Check (Result.Valid,
+             "a subject beginning with the permitted name validates, got "
+             & XV.Failure_Image (Result.Failure));
+
+      Result :=
+        XV.Validate_Path (Constrained_Path'(Kind => DN_Outside), Now_Time);
+      Check (not Result.Valid
+             and then Result.Failure = XV.Name_Constraint_Violation,
+             "a subject in another organisation is refused, got "
+             & XV.Failure_Image (Result.Failure));
+
+      --  A URI subtree constrains the host the URI names and nothing else.
+      Result :=
+        XV.Validate_Path (Constrained_Path'(Kind => URI_Inside), Now_Time);
+      Check (Result.Valid,
+             "a URI whose host is inside the subtree validates, got "
+             & XV.Failure_Image (Result.Failure));
+
+      Result :=
+        XV.Validate_Path (Constrained_Path'(Kind => URI_Outside), Now_Time);
+      Check (not Result.Valid
+             and then Result.Failure = XV.Name_Constraint_Violation,
+             "a URI whose host is outside it is refused");
+
+      --  Credentials and a port are not part of the host. Reading
+      --  "user@srv.example.com:8443" as the host would put every URI outside
+      --  every subtree, which fails safe and is still wrong.
+      Result :=
+        XV.Validate_Path (Constrained_Path'(Kind => URI_Userinfo), Now_Time);
+      Check (Result.Valid,
+             "a URI with credentials and a port is judged on its host, got "
+             & XV.Failure_Image (Result.Failure));
+
       --  A constraint on a form this cannot apply. Refused rather than
       --  checked against only the part it could apply: a constraint half
       --  applied is not the constraint the issuer imposed.
@@ -5450,7 +5668,7 @@ procedure Tests is
         XV.Validate_Path (Constrained_Path'(Kind => Email), Now_Time);
       Check (not Result.Valid
              and then Result.Failure = XV.Unsupported_Name_Constraint,
-             "a constraint this cannot apply is refused, got "
+             "a constraint on a form still not applied is refused, got "
              & XV.Failure_Image (Result.Failure));
 
       --  The subtree rule is not a suffix match. "example.com" covers
