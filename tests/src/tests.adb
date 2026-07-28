@@ -9,6 +9,7 @@ with CryptoLib.PEM;
 with CryptoLib.X509;
 with CryptoLib.X509.Certificates;
 with CryptoLib.X509.Extensions;
+with CryptoLib.X509.Identity;
 with CryptoLib.X509.Validation;
 with CryptoLib.X509.Signatures;
 with CryptoLib.ASN1.DER;
@@ -2515,6 +2516,158 @@ procedure Tests is
    end Check_X509_Validation;
 
 
+   --  Service identity matching. The interesting cases are all the ones that
+   --  must NOT match: a wildcard reaching too far is how a certificate for
+   --  one name gets used for another.
+   procedure Check_X509_Identity is
+      use type CryptoLib.PEM.Decode_Status;
+      use type CryptoLib.X509.Identity.Match_Result;
+
+      package X509C renames CryptoLib.X509.Certificates;
+      package XI renames CryptoLib.X509.Identity;
+
+      CA_PEM   : Unbounded_String;
+      CA_Key   : Unbounded_String;
+      Outcome  : CryptoLib.Certificates.Certificate_Status;
+
+      function Decoded (Text : String) return X509C.Certificate is
+         Buffer : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset
+                   (CryptoLib.PEM.Maximum_Decoded_Length (Text)));
+         Last   : Ada.Streams.Stream_Element_Offset;
+         From   : Positive := Text'First;
+         P      : CryptoLib.PEM.Decode_Status;
+         D      : CryptoLib.ASN1.Errors.Decode_Status;
+      begin
+         CryptoLib.PEM.Decode_Block
+           (Text, CryptoLib.PEM.Certificate_Label, From, Buffer, Last, P);
+         Check (P = CryptoLib.PEM.Ok, "fixture: armour decodes");
+         return X509C.Decode_DER
+           (Buffer (Buffer'First .. Last), CryptoLib.ASN1.Default_Limits, D);
+      end Decoded;
+
+      --  Issue a leaf carrying the given names and hand it back decoded.
+      function Leaf_With
+        (Names : CryptoLib.Certificates.Subject_Alternative_Name_List)
+         return X509C.Certificate
+      is
+         Leaf_PEM : Unbounded_String;
+         Leaf_Key : Unbounded_String;
+         St       : CryptoLib.Certificates.Certificate_Status;
+      begin
+         St :=
+           CryptoLib.Certificates.Issue_Server_Certificate
+             (To_String (CA_PEM), To_String (CA_Key),
+              To_String (Names (Names'First)), Names, Leaf_PEM, Leaf_Key);
+         Check (St = CryptoLib.Certificates.Ok, "fixture: leaf issued");
+         return Decoded (To_String (Leaf_PEM));
+      end Leaf_With;
+   begin
+      Outcome :=
+        CryptoLib.Certificates.Create_Local_CA
+          ("identity-ca", CA_PEM, CA_Key,
+           CryptoLib.Certificates.P384_Key);
+      Check (Outcome = CryptoLib.Certificates.Ok, "fixture: CA created");
+
+      declare
+         Exact : constant X509C.Certificate :=
+           Leaf_With ([1 => To_Unbounded_String ("host.example.com")]);
+      begin
+         Check (XI.Match_DNS_Name (Exact, "host.example.com") = XI.Matched,
+                "an exact name matches");
+         Check (XI.Match_DNS_Name (Exact, "HOST.Example.COM") = XI.Matched,
+                "the comparison is case-insensitive");
+         Check (XI.Match_DNS_Name (Exact, "host.example.com.") = XI.Matched,
+                "a trailing root dot is the same name");
+         Check (XI.Match_DNS_Name (Exact, "other.example.com") = XI.No_Match,
+                "a different name does not match");
+         Check (XI.Match_DNS_Name (Exact, "host.example.com.evil.test")
+                  = XI.No_Match,
+                "a name with the wanted one as a prefix does not match");
+
+         --  A certificate with no address must say so rather than say no.
+         Check (XI.Match_IP_Address (Exact, [127, 0, 0, 1])
+                  = XI.No_Names_Present,
+                "a certificate carrying no address says so");
+
+         Check (XI.Match_DNS_Name (Exact, "") = XI.Malformed_Reference,
+                "an empty reference is not a name");
+         Check (XI.Match_DNS_Name (Exact, "a..example.com")
+                  = XI.Malformed_Reference,
+                "a name with an empty label is refused");
+         Check (XI.Match_DNS_Name (Exact, "host.example.com" & ASCII.NUL)
+                  = XI.Malformed_Reference,
+                "a reference with a NUL in it is refused");
+      end;
+
+      --  Wildcards: one label, leftmost, whole label.
+      declare
+         Wild : constant X509C.Certificate :=
+           Leaf_With ([1 => To_Unbounded_String ("*.example.com")]);
+      begin
+         Check (XI.Match_DNS_Name (Wild, "a.example.com") = XI.Matched,
+                "a wildcard matches one label");
+         Check (XI.Match_DNS_Name (Wild, "A.Example.Com") = XI.Matched,
+                "a wildcard match is case-insensitive too");
+
+         --  The two that matter.
+         Check (XI.Match_DNS_Name (Wild, "example.com") = XI.No_Match,
+                "a wildcard does not match the bare domain");
+         Check (XI.Match_DNS_Name (Wild, "a.b.example.com") = XI.No_Match,
+                "a wildcard does not stretch across two labels");
+
+         Check (XI.Match_DNS_Name (Wild, "a.other.com") = XI.No_Match,
+                "a wildcard does not match a different domain");
+
+         --  A caller that refuses wildcards gets no wildcard matching.
+         Check (XI.Match_DNS_Name
+                  (Wild, "a.example.com",
+                   (Allow_Wildcards            => False,
+                    Allow_Common_Name_Fallback => False)) = XI.No_Match,
+                "wildcards can be switched off");
+      end;
+
+      --  Addresses are octets, and a certificate naming one does not thereby
+      --  name the text of it.
+      declare
+         Addressed : constant X509C.Certificate :=
+           Leaf_With ([1 => To_Unbounded_String ("host.example.com"),
+                       2 => To_Unbounded_String ("192.0.2.10")]);
+      begin
+         Check (XI.Match_IP_Address (Addressed, [192, 0, 2, 10]) = XI.Matched,
+                "an address matches its octets");
+         Check (XI.Match_IP_Address (Addressed, [192, 0, 2, 11]) = XI.No_Match,
+                "a different address does not match");
+         Check (XI.Match_DNS_Name (Addressed, "192.0.2.10") = XI.No_Match,
+                "an address is not matched as a DNS name");
+         Check (XI.Match_IP_Address (Addressed, [1 => 192])
+                  = XI.Malformed_Reference,
+                "an address of the wrong width is refused");
+         Check (XI.Match_DNS_Name (Addressed, "host.example.com")
+                  = XI.Matched,
+                "the DNS name alongside an address still matches");
+      end;
+
+      --  The common name is not a service identity. A certificate whose name
+      --  lives only there does not match unless the caller asks for the old
+      --  behaviour by name.
+      declare
+         CN_Only : constant X509C.Certificate :=
+           Decoded (To_String (CA_PEM));
+      begin
+         Check (XI.Match_DNS_Name (CN_Only, "identity-ca")
+                  = XI.No_Names_Present,
+                "a certificate with no subject alternative name says so "
+                & "rather than falling back to the common name");
+         Check (XI.Match_DNS_Name
+                  (CN_Only, "identity-ca",
+                   (Allow_Wildcards            => True,
+                    Allow_Common_Name_Fallback => True)) = XI.Matched,
+                "the common name is consulted only when asked for");
+      end;
+   end Check_X509_Identity;
+
+
 begin
    Check_PBKDF2_SHA1;
    Check_PBKDF2_SHA2;
@@ -2537,6 +2690,7 @@ begin
    Check_RSA_Verify;
    Check_ECDSA_Curves;
    Check_X509_Validation;
+   Check_X509_Identity;
    Check_Identity_Predicates;
    Check_PKCS12_Mac_Key;
    Check_ECDSA_P384_Verify;
