@@ -5,6 +5,9 @@ with Interfaces;
 with System;
 
 with CryptoLib.ASN1;
+with CryptoLib.PEM;
+with CryptoLib.X509;
+with CryptoLib.X509.Certificates;
 with CryptoLib.ASN1.DER;
 with CryptoLib.ASN1.Errors;
 with CryptoLib.ASN1.OIDs;
@@ -1414,6 +1417,271 @@ procedure Tests is
    end Check_ASN1_DER;
 
 
+   --  Decoding a certificate this crate has just issued, end to end: PEM
+   --  armour off, DER in, fields out. The CA is P-384 because that exercises
+   --  the EC parameter path -- the curve is named beside the algorithm rather
+   --  than implied by it, and getting that wrong yields a key of unknown type
+   --  rather than a parse failure, which is the quieter mistake.
+   procedure Check_X509_Decode is
+      use type CryptoLib.ASN1.Errors.Decode_Status;
+      use type CryptoLib.PEM.Decode_Status;
+      use type CryptoLib.X509.Public_Key_Algorithm;
+      use type CryptoLib.X509.Signature_Algorithm;
+
+      package X509C renames CryptoLib.X509.Certificates;
+
+      CA_PEM  : Unbounded_String;
+      CA_Key  : Unbounded_String;
+      Leaf    : Unbounded_String;
+      Leaf_Key : Unbounded_String;
+      Outcome : CryptoLib.Certificates.Certificate_Status;
+   begin
+      Outcome :=
+        CryptoLib.Certificates.Create_Local_CA
+          (Common_Name     => "asn1-decode-test-ca",
+           Certificate_PEM => CA_PEM,
+           Private_Key_PEM => CA_Key,
+           Algorithm       => CryptoLib.Certificates.P384_Key);
+      Check (Outcome = CryptoLib.Certificates.Ok,
+             "fixture: the P-384 CA must be created");
+
+      Outcome :=
+        CryptoLib.Certificates.Issue_Server_Certificate
+          (CA_Certificate_PEM => To_String (CA_PEM),
+           CA_Private_Key_PEM => To_String (CA_Key),
+           Common_Name        => "leaf.example",
+           Names              =>
+             [1 => To_Unbounded_String ("leaf.example")],
+           Certificate_PEM    => Leaf,
+           Private_Key_PEM    => Leaf_Key);
+      Check (Outcome = CryptoLib.Certificates.Ok,
+             "fixture: the leaf certificate must be issued");
+
+      declare
+         Text   : constant String := To_String (CA_PEM);
+         Buffer : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset
+                   (CryptoLib.PEM.Maximum_Decoded_Length (Text)));
+         Last   : Ada.Streams.Stream_Element_Offset;
+         From   : Positive := Text'First;
+         PEM_St : CryptoLib.PEM.Decode_Status;
+         Parsed : CryptoLib.ASN1.Errors.Decode_Status;
+      begin
+         Check (CryptoLib.PEM.Block_Count (Text, CryptoLib.PEM.Certificate_Label) = 1,
+                "the CA text holds exactly one certificate block");
+
+         CryptoLib.PEM.Decode_Block
+           (Text, CryptoLib.PEM.Certificate_Label, From, Buffer, Last, PEM_St);
+         Check (PEM_St = CryptoLib.PEM.Ok,
+                "the CA armour decodes: "
+                & CryptoLib.PEM.Status_Image (PEM_St));
+
+         declare
+            CA : constant X509C.Certificate :=
+              X509C.Decode_DER
+                (Buffer (Buffer'First .. Last),
+                 CryptoLib.ASN1.Default_Limits, Parsed);
+         begin
+            Check (Parsed = CryptoLib.ASN1.Errors.Ok,
+                   "the CA certificate decodes: "
+                   & CryptoLib.ASN1.Errors.Status_Image (Parsed));
+            Check (X509C.Is_Present (CA), "the decoded CA is present");
+            Check (X509C.Version (CA) = 3, "a CA issued here is v3");
+            Check (X509C.Subject_Common_Name (CA) = "asn1-decode-test-ca",
+                   "the subject common name is the one asked for, got "
+                   & X509C.Subject_Common_Name (CA));
+            Check (X509C.Is_Self_Issued (CA),
+                   "a local CA names itself as issuer");
+            Check (X509C.Public_Key_Algorithm_Of (CA)
+                     = CryptoLib.X509.ECDSA_P384,
+                   "the CA key is recognised as P-384");
+            Check (X509C.Signature_Algorithm_Of (CA)
+                     = CryptoLib.X509.ECDSA_With_SHA384,
+                   "the CA signature algorithm is ecdsa-with-SHA384");
+            Check (X509C.Serial_Number (CA)'Length > 0,
+                   "the CA carries a serial number");
+            Check (CryptoLib.X509.Is_Not_After
+                     (X509C.Not_Before (CA), X509C.Not_After (CA)),
+                   "the CA's validity window is not inverted");
+            Check (X509C.Not_Before (CA).Year >= 2000,
+                   "the notBefore year decodes into this century");
+
+            --  basicConstraints is what makes a CA a CA, and it must be
+            --  critical for anything to honour it.
+            declare
+               Index : constant Natural :=
+                 X509C.Find_Extension
+                   (CA, CryptoLib.ASN1.OIDs.Basic_Constraints);
+            begin
+               Check (Index > 0, "the CA carries basicConstraints");
+               Check (X509C.Extension_Is_Critical (CA, Index),
+                      "basicConstraints is critical on a CA");
+            end;
+
+            --  The signed bytes must be the ones that were signed: the TBS
+            --  span has to sit inside the certificate and start with a
+            --  SEQUENCE header.
+            declare
+               TBS : constant Ada.Streams.Stream_Element_Array :=
+                 X509C.TBS_Bytes (CA);
+               Whole : constant Ada.Streams.Stream_Element_Array :=
+                 X509C.DER_Bytes (CA);
+            begin
+               Check (TBS'Length > 0 and then TBS'Length < Whole'Length,
+                      "the signed bytes are a proper part of the certificate");
+               Check (TBS (TBS'First) = 16#30#,
+                      "the signed bytes begin at the TBSCertificate header");
+               Check (Whole'Length = Last - Buffer'First + 1,
+                      "the certificate kept the whole encoding it was given");
+            end;
+         end;
+      end;
+
+      --  The leaf, which must name the CA as issuer rather than itself.
+      declare
+         Text   : constant String := To_String (Leaf);
+         Buffer : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset
+                   (CryptoLib.PEM.Maximum_Decoded_Length (Text)));
+         Last   : Ada.Streams.Stream_Element_Offset;
+         From   : Positive := Text'First;
+         PEM_St : CryptoLib.PEM.Decode_Status;
+         Parsed : CryptoLib.ASN1.Errors.Decode_Status;
+      begin
+         CryptoLib.PEM.Decode_Block
+           (Text, CryptoLib.PEM.Certificate_Label, From, Buffer, Last, PEM_St);
+         Check (PEM_St = CryptoLib.PEM.Ok, "the leaf armour decodes");
+
+         declare
+            Cert : constant X509C.Certificate :=
+              X509C.Decode_DER
+                (Buffer (Buffer'First .. Last),
+                 CryptoLib.ASN1.Default_Limits, Parsed);
+         begin
+            Check (Parsed = CryptoLib.ASN1.Errors.Ok,
+                   "the leaf certificate decodes: "
+                   & CryptoLib.ASN1.Errors.Status_Image (Parsed));
+            Check (X509C.Subject_Common_Name (Cert) = "leaf.example",
+                   "the leaf subject is the one asked for");
+            Check (X509C.Issuer_Common_Name (Cert) = "asn1-decode-test-ca",
+                   "the leaf names the CA as its issuer, got "
+                   & X509C.Issuer_Common_Name (Cert));
+            Check (not X509C.Is_Self_Issued (Cert),
+                   "an issued leaf is not self-issued");
+            Check (X509C.Find_Extension
+                     (Cert, CryptoLib.ASN1.OIDs.Subject_Alternative_Name) > 0,
+                   "the leaf carries a subject alternative name");
+            Check (X509C.Extension_Count (Cert) > 0,
+                   "the leaf carries extensions");
+         end;
+      end;
+
+      --  PEM armour, refused where it should be.
+      declare
+         Buffer : Ada.Streams.Stream_Element_Array (1 .. 64);
+         Last   : Ada.Streams.Stream_Element_Offset;
+         From   : Positive;
+         St     : CryptoLib.PEM.Decode_Status;
+
+         Crossed : constant String :=
+           "-----BEGIN CERTIFICATE-----" & ASCII.LF & "QUJD" & ASCII.LF
+           & "-----END PRIVATE KEY-----" & ASCII.LF;
+         Junk : constant String :=
+           "-----BEGIN CERTIFICATE-----" & ASCII.LF & "QU!C" & ASCII.LF
+           & "-----END CERTIFICATE-----" & ASCII.LF;
+         Good : constant String :=
+           "-----BEGIN CERTIFICATE-----" & ASCII.LF & "QUJD" & ASCII.LF
+           & "-----END CERTIFICATE-----" & ASCII.LF;
+         Preamble : constant String :=
+           "Alias name: mykey" & ASCII.LF & "Entry type: PrivateKeyEntry"
+           & ASCII.LF & Good;
+      begin
+         From := Crossed'First;
+         CryptoLib.PEM.Decode_Block
+           (Crossed, CryptoLib.PEM.Certificate_Label, From, Buffer, Last, St);
+         Check (St = CryptoLib.PEM.Malformed_Armour,
+                "a block closed by a different label is refused");
+
+         From := Junk'First;
+         CryptoLib.PEM.Decode_Block
+           (Junk, CryptoLib.PEM.Certificate_Label, From, Buffer, Last, St);
+         Check (St = CryptoLib.PEM.Invalid_Base64,
+                "a character that is not base64 is refused, not skipped");
+
+         From := Good'First;
+         CryptoLib.PEM.Decode_Block
+           (Good, CryptoLib.PEM.Certificate_Label, From, Buffer, Last, St);
+         Check (St = CryptoLib.PEM.Ok
+                and then Last = Buffer'First + 2
+                and then Buffer (Buffer'First) = Character'Pos ('A'),
+                "a well-formed block decodes to its bytes");
+
+         --  The preamble case that broke this once: text before the armour
+         --  must not become part of the payload.
+         From := Preamble'First;
+         CryptoLib.PEM.Decode_Block
+           (Preamble, CryptoLib.PEM.Certificate_Label, From, Buffer, Last,
+            St);
+         Check (St = CryptoLib.PEM.Ok
+                and then Last = Buffer'First + 2
+                and then Buffer (Buffer'First) = Character'Pos ('A'),
+                "text before the armour is not swept into the payload");
+
+         --  Walking a two-block chain.
+         declare
+            Chain : constant String := Good & Good;
+         begin
+            Check (CryptoLib.PEM.Block_Count
+                     (Chain, CryptoLib.PEM.Certificate_Label) = 2,
+                   "two blocks are counted");
+            From := Chain'First;
+            CryptoLib.PEM.Decode_Block
+              (Chain, CryptoLib.PEM.Certificate_Label, From, Buffer, Last, St);
+            Check (St = CryptoLib.PEM.Ok, "the first block of a chain decodes");
+            CryptoLib.PEM.Decode_Block
+              (Chain, CryptoLib.PEM.Certificate_Label, From, Buffer, Last, St);
+            Check (St = CryptoLib.PEM.Ok,
+                   "the walk reaches the second block");
+            CryptoLib.PEM.Decode_Block
+              (Chain, CryptoLib.PEM.Certificate_Label, From, Buffer, Last, St);
+            Check (St = CryptoLib.PEM.No_Block_Found,
+                   "the walk ends after the last block");
+         end;
+      end;
+
+      --  Trailing bytes after the certificate are not part of what was
+      --  signed, so they must not be waved through.
+      declare
+         Text   : constant String := To_String (CA_PEM);
+         Buffer : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset
+                   (CryptoLib.PEM.Maximum_Decoded_Length (Text)) + 1);
+         Last   : Ada.Streams.Stream_Element_Offset;
+         From   : Positive := Text'First;
+         PEM_St : CryptoLib.PEM.Decode_Status;
+         Parsed : CryptoLib.ASN1.Errors.Decode_Status;
+      begin
+         CryptoLib.PEM.Decode_Block
+           (Text, CryptoLib.PEM.Certificate_Label, From,
+            Buffer (Buffer'First .. Buffer'Last - 1), Last, PEM_St);
+         Check (PEM_St = CryptoLib.PEM.Ok, "fixture: the CA decodes");
+         Buffer (Last + 1) := 0;
+
+         declare
+            Cert : constant X509C.Certificate :=
+              X509C.Decode_DER
+                (Buffer (Buffer'First .. Last + 1),
+                 CryptoLib.ASN1.Default_Limits, Parsed);
+            pragma Unreferenced (Cert);
+         begin
+            Check (Parsed = CryptoLib.ASN1.Errors.Trailing_Data,
+                   "a byte after the certificate is refused, got "
+                   & CryptoLib.ASN1.Errors.Status_Image (Parsed));
+         end;
+      end;
+   end Check_X509_Decode;
+
+
 begin
    Check_PBKDF2_SHA1;
    Check_PBKDF2_SHA2;
@@ -1430,6 +1698,7 @@ begin
    Check_ECDSA_P384_Public_Key;
    Check_P384_Local_CA;
    Check_ASN1_DER;
+   Check_X509_Decode;
    Check_Identity_Predicates;
    Check_PKCS12_Mac_Key;
    Check_ECDSA_P384_Verify;
