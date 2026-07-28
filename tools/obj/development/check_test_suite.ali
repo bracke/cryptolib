@@ -50,7 +50,7 @@ RV NO_STANDARD_STORAGE_POOLS
 RV NO_DYNAMIC_SIZED_OBJECTS
 RV NO_IMPLEMENTATION_PRAGMAS
 
-U check_test_suite%b	check_test_suite.adb	cc9d6b51 NE OO SU
+U check_test_suite%b	check_test_suite.adb	3f86f9d0 NE OO SU
 W ada%s			ada.ads			ada.ali
 W ada.command_line%s	a-comlin.adb		a-comlin.ali
 W ada.strings%s		a-string.ads		a-string.ali
@@ -87,7 +87,7 @@ D interfac.ads		20250808065140 9111f9c1 interfaces%s
 D i-c.ads		20250808065140 e94c966a interfaces.c%s
 D i-cstrea.ads		20250808065140 ffd01b9d interfaces.c_streams%s
 D project_tools.ads	20260608162800 377f12dc project_tools%s
-D project_tools-files.ads  20260720052732 f25794cd project_tools.files%s
+D project_tools-files.ads  20260726220051 014c064c project_tools.files%s
 D system.ads		20250808065140 14286b0f system%s
 D s-atocou.ads		20250808065140 dc18efc3 system.atomic_counters%s
 D s-crtl.ads		20250808065140 beb39b9e system.crtl%s
@@ -159,7 +159,7 @@ X 19 check_test_suite.adb
 X 23 project_tools.ads
 1K9*Project_Tools 19|5r6 38r11 46r39 23|3e18
 X 24 project_tools-files.ads
-3K23*Files 19|5w20 38r25 46r53 24|203e24
+3K23*Files 19|5w20 38r25 46r53 24|208e24
 12V13*File_Exists{boolean} 19|38s31
 25V13*Read_Raw_File{string} 19|46s59
 

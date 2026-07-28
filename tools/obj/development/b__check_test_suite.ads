@@ -40,7 +40,7 @@ package ada_main is
    pragma Export (C, main, "main");
 
    type Version_32 is mod 2 ** 32;
-   u00001 : constant Version_32 := 16#cc9d6b51#;
+   u00001 : constant Version_32 := 16#3f86f9d0#;
    pragma Export (C, u00001, "check_test_suiteB");
    u00002 : constant Version_32 := 16#b2cfab41#;
    pragma Export (C, u00002, "system__standard_libraryB");
@@ -328,9 +328,9 @@ package ada_main is
    pragma Export (C, u00143, "system__file_control_blockS");
    u00144 : constant Version_32 := 16#377f12dc#;
    pragma Export (C, u00144, "project_toolsS");
-   u00145 : constant Version_32 := 16#bd9373d1#;
+   u00145 : constant Version_32 := 16#b1e8a6ae#;
    pragma Export (C, u00145, "project_tools__filesB");
-   u00146 : constant Version_32 := 16#742ff6ba#;
+   u00146 : constant Version_32 := 16#8734643b#;
    pragma Export (C, u00146, "project_tools__filesS");
    u00147 : constant Version_32 := 16#c3b32edd#;
    pragma Export (C, u00147, "ada__containers__helpersB");
@@ -408,48 +408,56 @@ package ada_main is
    pragma Export (C, u00183, "system__storage_poolsB");
    u00184 : constant Version_32 := 16#8e431254#;
    pragma Export (C, u00184, "system__storage_poolsS");
-   u00185 : constant Version_32 := 16#2252a12d#;
-   pragma Export (C, u00185, "ada__streams__stream_ioB");
-   u00186 : constant Version_32 := 16#5dc4c9e4#;
-   pragma Export (C, u00186, "ada__streams__stream_ioS");
-   u00187 : constant Version_32 := 16#5de653db#;
-   pragma Export (C, u00187, "system__communicationB");
-   u00188 : constant Version_32 := 16#bb9c8d3c#;
-   pragma Export (C, u00188, "system__communicationS");
-   u00189 : constant Version_32 := 16#b5988c27#;
-   pragma Export (C, u00189, "gnatS");
-   u00190 : constant Version_32 := 16#40fe4806#;
-   pragma Export (C, u00190, "gnat__regexpS");
-   u00191 : constant Version_32 := 16#3f48f1e0#;
-   pragma Export (C, u00191, "project_tools__linksB");
-   u00192 : constant Version_32 := 16#e9bbd0e5#;
-   pragma Export (C, u00192, "project_tools__linksS");
-   u00193 : constant Version_32 := 16#656efae9#;
-   pragma Export (C, u00193, "gnat__os_libS");
-   u00194 : constant Version_32 := 16#f2d07175#;
-   pragma Export (C, u00194, "project_tools__textB");
-   u00195 : constant Version_32 := 16#95ccbf63#;
-   pragma Export (C, u00195, "project_tools__textS");
-   u00196 : constant Version_32 := 16#ae5b86de#;
-   pragma Export (C, u00196, "system__pool_globalB");
-   u00197 : constant Version_32 := 16#a07c1f1e#;
-   pragma Export (C, u00197, "system__pool_globalS");
-   u00198 : constant Version_32 := 16#0ddbd91f#;
-   pragma Export (C, u00198, "system__memoryB");
-   u00199 : constant Version_32 := 16#0cbcf715#;
-   pragma Export (C, u00199, "system__memoryS");
-   u00200 : constant Version_32 := 16#690693e0#;
-   pragma Export (C, u00200, "system__storage_pools__subpoolsB");
-   u00201 : constant Version_32 := 16#23a252fc#;
-   pragma Export (C, u00201, "system__storage_pools__subpoolsS");
-   u00202 : constant Version_32 := 16#3676fd0b#;
-   pragma Export (C, u00202, "system__storage_pools__subpools__finalizationB");
-   u00203 : constant Version_32 := 16#54c94065#;
-   pragma Export (C, u00203, "system__storage_pools__subpools__finalizationS");
-   u00204 : constant Version_32 := 16#b3f7543e#;
-   pragma Export (C, u00204, "system__strings__stream_opsB");
-   u00205 : constant Version_32 := 16#46dadf54#;
-   pragma Export (C, u00205, "system__strings__stream_opsS");
+   u00185 : constant Version_32 := 16#8d235f7e#;
+   pragma Export (C, u00185, "ada__environment_variablesB");
+   u00186 : constant Version_32 := 16#767099b7#;
+   pragma Export (C, u00186, "ada__environment_variablesS");
+   u00187 : constant Version_32 := 16#58c21abc#;
+   pragma Export (C, u00187, "interfaces__c__stringsB");
+   u00188 : constant Version_32 := 16#bd4557ce#;
+   pragma Export (C, u00188, "interfaces__c__stringsS");
+   u00189 : constant Version_32 := 16#2252a12d#;
+   pragma Export (C, u00189, "ada__streams__stream_ioB");
+   u00190 : constant Version_32 := 16#5dc4c9e4#;
+   pragma Export (C, u00190, "ada__streams__stream_ioS");
+   u00191 : constant Version_32 := 16#5de653db#;
+   pragma Export (C, u00191, "system__communicationB");
+   u00192 : constant Version_32 := 16#bb9c8d3c#;
+   pragma Export (C, u00192, "system__communicationS");
+   u00193 : constant Version_32 := 16#b5988c27#;
+   pragma Export (C, u00193, "gnatS");
+   u00194 : constant Version_32 := 16#40fe4806#;
+   pragma Export (C, u00194, "gnat__regexpS");
+   u00195 : constant Version_32 := 16#3f48f1e0#;
+   pragma Export (C, u00195, "project_tools__linksB");
+   u00196 : constant Version_32 := 16#e9bbd0e5#;
+   pragma Export (C, u00196, "project_tools__linksS");
+   u00197 : constant Version_32 := 16#656efae9#;
+   pragma Export (C, u00197, "gnat__os_libS");
+   u00198 : constant Version_32 := 16#f2d07175#;
+   pragma Export (C, u00198, "project_tools__textB");
+   u00199 : constant Version_32 := 16#95ccbf63#;
+   pragma Export (C, u00199, "project_tools__textS");
+   u00200 : constant Version_32 := 16#ae5b86de#;
+   pragma Export (C, u00200, "system__pool_globalB");
+   u00201 : constant Version_32 := 16#a07c1f1e#;
+   pragma Export (C, u00201, "system__pool_globalS");
+   u00202 : constant Version_32 := 16#0ddbd91f#;
+   pragma Export (C, u00202, "system__memoryB");
+   u00203 : constant Version_32 := 16#0cbcf715#;
+   pragma Export (C, u00203, "system__memoryS");
+   u00204 : constant Version_32 := 16#690693e0#;
+   pragma Export (C, u00204, "system__storage_pools__subpoolsB");
+   u00205 : constant Version_32 := 16#23a252fc#;
+   pragma Export (C, u00205, "system__storage_pools__subpoolsS");
+   u00206 : constant Version_32 := 16#3676fd0b#;
+   pragma Export (C, u00206, "system__storage_pools__subpools__finalizationB");
+   u00207 : constant Version_32 := 16#54c94065#;
+   pragma Export (C, u00207, "system__storage_pools__subpools__finalizationS");
+   u00208 : constant Version_32 := 16#b3f7543e#;
+   pragma Export (C, u00208, "system__strings__stream_opsB");
+   u00209 : constant Version_32 := 16#46dadf54#;
+   pragma Export (C, u00209, "system__strings__stream_opsS");
 
    --  BEGIN ELABORATION ORDER
    --  ada%s
@@ -585,6 +593,10 @@ package ada_main is
    --  ada.strings.text_buffers.utils%b
    --  gnat%s
    --  gnat.os_lib%s
+   --  interfaces.c.strings%s
+   --  interfaces.c.strings%b
+   --  ada.environment_variables%s
+   --  ada.environment_variables%b
    --  system.arith_64%s
    --  system.arith_64%b
    --  system.atomic_counters%s

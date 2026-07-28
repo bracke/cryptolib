@@ -24,6 +24,7 @@ The reference sources are:
 | ECDSA | P-256 (in `ssh_lib`), P-384 / P-521 sign | **RFC 6979 A.2.5** (P-384, byte-exact) + P-521 (pyca cross-verified) |
 | Finite-field DH | groups 1 / 14 / 16 / 18 | live vs OpenSSH; group16/18 pin the exact RFC 3526 primes |
 | Post-quantum | ML-KEM-768, sntrup761 (+ hybrid x25519 KEX) | NIST / live vs OpenSSH sntrup761x25519 |
+| X.509 (`Certificates`) | local CA, server/client/email issuance, CSR signing, PKCS#12 | PKCS#12 MAC key byte-exact vs OpenSSL; issued certificates parsed and verified with OpenSSL |
 
 ## Constant-time properties
 

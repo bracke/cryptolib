@@ -50,7 +50,7 @@ RV NO_IO
 RV NO_DYNAMIC_SIZED_OBJECTS
 RV NO_IMPLEMENTATION_PRAGMAS
 
-U check_alire_manifest%b  check_alire_manifest.adb  300c2142 NE OO SU
+U check_alire_manifest%b  check_alire_manifest.adb  c317b3c3 NE OO SU
 W ada%s			ada.ads			ada.ali
 W ada.command_line%s	a-comlin.adb		a-comlin.ali
 Z ada.strings.text_buffers%s  a-sttebu.adb	a-sttebu.ali
@@ -82,7 +82,7 @@ D i-c.ads		20250808065140 e94c966a interfaces.c%s
 D i-cstrea.ads		20250808065140 ffd01b9d interfaces.c_streams%s
 D project_tools.ads	20260608162800 377f12dc project_tools%s
 D project_tools-alire_manifests.ads  20260608175458 09b270e4 project_tools.alire_manifests%s
-D project_tools-files.ads  20260720052732 f25794cd project_tools.files%s
+D project_tools-files.ads  20260726220051 014c064c project_tools.files%s
 D system.ads		20250808065140 14286b0f system%s
 D s-atocou.ads		20250808065140 dc18efc3 system.atomic_counters%s
 D s-crtl.ads		20250808065140 beb39b9e system.crtl%s
@@ -139,7 +139,7 @@ X 23 project_tools-alire_manifests.ads
 44a7 Manifest{string} 18|48r7
 45a7 Name{string} 18|49r7
 X 24 project_tools-files.ads
-3K23*Files 18|5w20 13r28 18r31 24|203e24
+3K23*Files 18|5w20 13r28 18r31 24|208e24
 12V13*File_Exists{boolean} 18|13s34
 20V13*File_Contains{boolean} 18|18s37
 

@@ -9,6 +9,8 @@ with CryptoLib.Hashes;
 with CryptoLib.Macs;
 with CryptoLib.Random;
 
+with CryptoLib.Secure_Wipe;
+
 package body CryptoLib.Certificates is
    use Ada.Strings.Unbounded;
    use type Ada.Streams.Stream_Element_Offset;
@@ -1304,11 +1306,20 @@ package body CryptoLib.Certificates is
         (1 .. (if Algorithm = Ed25519_Key then Seed_Length else Scalar_Length));
       Public : Ada.Streams.Stream_Element_Array
         (1 .. (if Algorithm = Ed25519_Key then Seed_Length else Point_Length));
+
+      --  The seed is the CA's private key. It leaves this subprogram only
+      --  inside Private_Key_PEM, so the copy on the stack is scrubbed on every
+      --  exit; an assignment of zeros would be a dead store and removed.
+      procedure Scrub is
+      begin
+         CryptoLib.Secure_Wipe.Wipe (Seed'Address, Seed'Length);
+      end Scrub;
    begin
       Certificate_PEM := Null_Unbounded_String;
       Private_Key_PEM := Null_Unbounded_String;
 
       if not Valid_Name (Common_Name) then
+         Scrub;
          return Invalid_Input;
       end if;
 
@@ -1318,12 +1329,14 @@ package body CryptoLib.Certificates is
             if CryptoLib.Ed25519.Generate_Keypair (Rng, Seed, Public)
               /= CryptoLib.Errors.Ok
             then
+               Scrub;
                return Internal_Error;
             end if;
          when P384_Key =>
             if CryptoLib.ECDSA.Generate_Nistp384_Keypair (Rng, Seed, Public)
               /= CryptoLib.Errors.Ok
             then
+               Scrub;
                return Internal_Error;
             end if;
       end case;
@@ -1342,6 +1355,7 @@ package body CryptoLib.Certificates is
               Algorithm   => Algorithm,
               Subject_Algorithm => Algorithm));
       if Length (Cert) = 0 then
+         Scrub;
          return Internal_Error;
       end if;
 
@@ -1351,8 +1365,71 @@ package body CryptoLib.Certificates is
              (case Algorithm is
                  when Ed25519_Key => Private_Key_DER (Seed),
                  when P384_Key    => P384_Private_Key_DER (Seed, Public)));
+      Scrub;
       return Ok;
    end Create_Local_CA;
+
+   --  The subject common name of a certificate, read from its DER.
+   --
+   --  A leaf's issuer name has to be the CA's subject name exactly, or no
+   --  verifier can build the chain: OpenSSL looks the issuer up by subject and
+   --  reports "unable to get local issuer certificate" when they differ. Taking
+   --  it from the CA certificate is the only way to be sure they match, which
+   --  is what CA_Certificate_PEM is for.
+   function Certificate_Subject_CN
+     (Certificate_PEM : String;
+      Common_Name     : out Unbounded_String) return Boolean
+   is
+      DER : constant String := Base64_Decode (Certificate_PEM);
+      Outer, TBS, Field : Unbounded_String;
+      Pos : Natural;
+   begin
+      Common_Name := Null_Unbounded_String;
+      if DER'Length = 0 then
+         return False;
+      end if;
+
+      Pos := DER'First;
+      if not Read_TLV (DER, Pos, 16#30#, Outer) then
+         return False;
+      end if;
+
+      declare
+         Outer_Text : constant String := To_String (Outer);
+         Outer_Pos  : Natural := Outer_Text'First;
+      begin
+         if not Read_TLV (Outer_Text, Outer_Pos, 16#30#, TBS) then
+            return False;
+         end if;
+      end;
+
+      declare
+         TBS_Text : constant String := To_String (TBS);
+         TBS_Pos  : Natural := TBS_Text'First;
+      begin
+         --  version [0], serial, signature algorithm, issuer, validity, then
+         --  the subject this reads.
+         if not Read_TLV (TBS_Text, TBS_Pos, 16#A0#, Field) then
+            return False;
+         end if;
+         if not Read_TLV (TBS_Text, TBS_Pos, 16#02#, Field) then
+            return False;
+         end if;
+         if not Read_TLV (TBS_Text, TBS_Pos, 16#30#, Field) then
+            return False;
+         end if;
+         if not Read_TLV (TBS_Text, TBS_Pos, 16#30#, Field) then
+            return False;
+         end if;
+         if not Read_TLV (TBS_Text, TBS_Pos, 16#30#, Field) then
+            return False;
+         end if;
+         if not Read_TLV (TBS_Text, TBS_Pos, 16#30#, Field) then
+            return False;
+         end if;
+         return Extract_Common_Name (To_String (Field), Common_Name);
+      end;
+   end Certificate_Subject_CN;
 
    function Issue_Profile_Certificate
      (CA_Certificate_PEM : String;
@@ -1363,8 +1440,12 @@ package body CryptoLib.Certificates is
       Certificate_PEM    : out Unbounded_String;
       Private_Key_PEM    : out Unbounded_String) return Certificate_Status
    is
-      pragma Unreferenced (CA_Certificate_PEM);
       Rng : CryptoLib.Random.Random_Source;
+
+      --  The issuer name must equal the CA's subject name exactly.
+      Issuer_Name : Unbounded_String;
+      Have_Issuer : constant Boolean :=
+        Certificate_Subject_CN (CA_Certificate_PEM, Issuer_Name);
 
       --  A leaf is signed by the CA and has to be verifiable by whatever
       --  accepts the CA, so it carries the same kind of key. Nothing asks the
@@ -1382,40 +1463,58 @@ package body CryptoLib.Certificates is
       Public    : Ada.Streams.Stream_Element_Array
         (1 .. (if Is_EC then 97 else 32));
       Cert      : Unbounded_String;
+
+      --  Both private keys are secrets: the CA's, recovered from its PEM, and
+      --  the leaf's, generated here. Only the leaf's leaves this subprogram,
+      --  and only inside Private_Key_PEM.
+      procedure Scrub is
+      begin
+         CryptoLib.Secure_Wipe.Wipe (CA_Seed'Address, CA_Seed'Length);
+         CryptoLib.Secure_Wipe.Wipe (Seed'Address, Seed'Length);
+      end Scrub;
    begin
       Certificate_PEM := Null_Unbounded_String;
       Private_Key_PEM := Null_Unbounded_String;
 
-      if CA_Private_Key_PEM = ""
+      --  Without the CA's certificate there is no issuer name to sign with,
+      --  and a certificate carrying the wrong one cannot be chained to it.
+      if not Have_Issuer
+        or else CA_Private_Key_PEM = ""
         or else not Valid_Profile_Name (Profile, Common_Name)
         or else Names'Length = 0
         or else Profile = CA_Profile
       then
+         Scrub;
          return Invalid_Input;
       end if;
 
       for Name of Names loop
          if not Valid_Profile_Name (Profile, To_String (Name)) then
+            Scrub;
             return Invalid_Input;
          end if;
       end loop;
 
       if Is_EC then
          if not Scalar_From_Private_Key_PEM (CA_Private_Key_PEM, CA_Seed) then
+            Scrub;
             return Invalid_Input;
          end if;
          if CryptoLib.ECDSA.Public_Nistp384_Raw (CA_Seed, CA_Public)
            /= CryptoLib.Errors.Ok
          then
+            Scrub;
             return Internal_Error;
          end if;
       else
          if not Seed_From_Private_Key_PEM (CA_Private_Key_PEM, CA_Seed) then
+            Scrub;
             return Invalid_Input;
          end if;
          if CryptoLib.Ed25519.Public_Key_From_Seed (CA_Seed, CA_Public)
            /= CryptoLib.Errors.Ok
          then
+            Scrub;
             return Internal_Error;
          end if;
       end if;
@@ -1425,11 +1524,13 @@ package body CryptoLib.Certificates is
          if CryptoLib.ECDSA.Generate_Nistp384_Keypair (Rng, Seed, Public)
            /= CryptoLib.Errors.Ok
          then
+            Scrub;
             return Internal_Error;
          end if;
       elsif CryptoLib.Ed25519.Generate_Keypair (Rng, Seed, Public)
         /= CryptoLib.Errors.Ok
       then
+         Scrub;
          return Internal_Error;
       end if;
 
@@ -1437,7 +1538,7 @@ package body CryptoLib.Certificates is
         To_Unbounded_String
           (Sign_Certificate
              (Serial      => 10,
-              Issuer_CN   => "devcert-local-development-ca",
+              Issuer_CN   => To_String (Issuer_Name),
               Subject_CN  => Common_Name,
               Subject_Key => Public,
               Sign_Seed   => CA_Seed,
@@ -1447,6 +1548,7 @@ package body CryptoLib.Certificates is
               Algorithm   => Algorithm,
               Subject_Algorithm => Algorithm));
       if Length (Cert) = 0 then
+         Scrub;
          return Internal_Error;
       end if;
 
@@ -1455,11 +1557,13 @@ package body CryptoLib.Certificates is
         PEM ("PRIVATE KEY",
              (if Is_EC then P384_Private_Key_DER (Seed, Public)
               else Private_Key_DER (Seed)));
+      Scrub;
       return Ok;
    exception
       when others =>
          Certificate_PEM := Null_Unbounded_String;
          Private_Key_PEM := Null_Unbounded_String;
+         Scrub;
          return Internal_Error;
    end Issue_Profile_Certificate;
 
@@ -1508,14 +1612,25 @@ package body CryptoLib.Certificates is
       CSR_PEM            : String;
       Certificate_PEM    : out Unbounded_String) return Certificate_Status
    is
-      pragma Unreferenced (CA_Certificate_PEM);
       Algorithm : constant Key_Algorithm :=
         Algorithm_Of_Private_Key (CA_Private_Key_PEM);
+
+      --  The issuer name must equal the CA's subject name exactly.
+      Issuer_Name : Unbounded_String;
+      Have_Issuer : constant Boolean :=
+        Certificate_Subject_CN (CA_Certificate_PEM, Issuer_Name);
       Is_EC     : constant Boolean := Algorithm = P384_Key;
       CA_Seed   : Ada.Streams.Stream_Element_Array
         (1 .. (if Is_EC then 48 else 32));
       CA_Public : Ada.Streams.Stream_Element_Array
         (1 .. (if Is_EC then 97 else 32));
+
+      --  The CA's private key, recovered from its PEM to sign with.
+      procedure Scrub is
+      begin
+         CryptoLib.Secure_Wipe.Wipe (CA_Seed'Address, CA_Seed'Length);
+      end Scrub;
+
       Subject   : Unbounded_String;
       --  The CSR carries an Ed25519 key: this reads and verifies that shape
       --  only, whatever the CA itself is signed with.
@@ -1523,25 +1638,32 @@ package body CryptoLib.Certificates is
       Cert      : Unbounded_String;
    begin
       Certificate_PEM := Null_Unbounded_String;
-      if CA_Private_Key_PEM = "" or else CSR_PEM = "" then
+      --  Without the CA's certificate there is no issuer name to sign with.
+      if not Have_Issuer or else CA_Private_Key_PEM = "" or else CSR_PEM = ""
+      then
+         Scrub;
          return Invalid_Input;
       end if;
       if Is_EC then
          if not Scalar_From_Private_Key_PEM (CA_Private_Key_PEM, CA_Seed) then
+            Scrub;
             return Invalid_Input;
          end if;
          if CryptoLib.ECDSA.Public_Nistp384_Raw (CA_Seed, CA_Public)
            /= CryptoLib.Errors.Ok
          then
+            Scrub;
             return Internal_Error;
          end if;
       else
          if not Seed_From_Private_Key_PEM (CA_Private_Key_PEM, CA_Seed) then
+            Scrub;
             return Invalid_Input;
          end if;
          if CryptoLib.Ed25519.Public_Key_From_Seed (CA_Seed, CA_Public)
            /= CryptoLib.Errors.Ok
          then
+            Scrub;
             return Internal_Error;
          end if;
       end if;
@@ -1556,7 +1678,7 @@ package body CryptoLib.Certificates is
               To_Unbounded_String
                 (Sign_Certificate
                    (Serial      => 20,
-                    Issuer_CN   => "devcert-local-development-ca",
+                    Issuer_CN   => To_String (Issuer_Name),
                     Subject_CN  => To_String (Subject),
                     Subject_Key => EC_Public,
                     Sign_Seed   => CA_Seed,
@@ -1566,14 +1688,17 @@ package body CryptoLib.Certificates is
                     Algorithm   => Algorithm,
                     Subject_Algorithm => P384_Key));
             if Length (Cert) = 0 then
+               Scrub;
                return Internal_Error;
             end if;
             Certificate_PEM := PEM ("CERTIFICATE", To_String (Cert));
+            Scrub;
             return Ok;
          end if;
       end;
 
       if not Extract_CSR (CSR_PEM, Subject, CSR_Public) then
+         Scrub;
          return Invalid_Input;
       end if;
 
@@ -1581,7 +1706,7 @@ package body CryptoLib.Certificates is
         To_Unbounded_String
           (Sign_Certificate
              (Serial      => 20,
-              Issuer_CN   => "devcert-local-development-ca",
+              Issuer_CN   => To_String (Issuer_Name),
               Subject_CN  => To_String (Subject),
               Subject_Key => CSR_Public,
               Sign_Seed   => CA_Seed,
@@ -1591,9 +1716,11 @@ package body CryptoLib.Certificates is
               Algorithm   => Algorithm,
               Subject_Algorithm => Ed25519_Key));
       if Length (Cert) = 0 then
+         Scrub;
          return Internal_Error;
       end if;
       Certificate_PEM := PEM ("CERTIFICATE", To_String (Cert));
+      Scrub;
       return Ok;
    end Sign_CSR;
 

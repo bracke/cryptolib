@@ -26,24 +26,25 @@ package body ada_main is
    E111 : Short_Integer; pragma Import (Ada, E111, "ada__strings__utf_encoding_E");
    E119 : Short_Integer; pragma Import (Ada, E119, "ada__tags_E");
    E109 : Short_Integer; pragma Import (Ada, E109, "ada__strings__text_buffers_E");
-   E189 : Short_Integer; pragma Import (Ada, E189, "gnat_E");
+   E193 : Short_Integer; pragma Import (Ada, E193, "gnat_E");
+   E188 : Short_Integer; pragma Import (Ada, E188, "interfaces__c__strings_E");
    E127 : Short_Integer; pragma Import (Ada, E127, "ada__streams_E");
    E143 : Short_Integer; pragma Import (Ada, E143, "system__file_control_block_E");
    E138 : Short_Integer; pragma Import (Ada, E138, "system__finalization_root_E");
    E136 : Short_Integer; pragma Import (Ada, E136, "ada__finalization_E");
    E135 : Short_Integer; pragma Import (Ada, E135, "system__file_io_E");
-   E186 : Short_Integer; pragma Import (Ada, E186, "ada__streams__stream_io_E");
+   E190 : Short_Integer; pragma Import (Ada, E190, "ada__streams__stream_io_E");
    E184 : Short_Integer; pragma Import (Ada, E184, "system__storage_pools_E");
-   E201 : Short_Integer; pragma Import (Ada, E201, "system__storage_pools__subpools_E");
+   E205 : Short_Integer; pragma Import (Ada, E205, "system__storage_pools__subpools_E");
    E171 : Short_Integer; pragma Import (Ada, E171, "ada__strings__unbounded_E");
    E154 : Short_Integer; pragma Import (Ada, E154, "ada__calendar_E");
    E160 : Short_Integer; pragma Import (Ada, E160, "ada__calendar__time_zones_E");
    E125 : Short_Integer; pragma Import (Ada, E125, "ada__text_io_E");
-   E197 : Short_Integer; pragma Import (Ada, E197, "system__pool_global_E");
+   E201 : Short_Integer; pragma Import (Ada, E201, "system__pool_global_E");
    E182 : Short_Integer; pragma Import (Ada, E182, "system__regexp_E");
    E152 : Short_Integer; pragma Import (Ada, E152, "ada__directories_E");
-   E192 : Short_Integer; pragma Import (Ada, E192, "project_tools__links_E");
-   E195 : Short_Integer; pragma Import (Ada, E195, "project_tools__text_E");
+   E196 : Short_Integer; pragma Import (Ada, E196, "project_tools__links_E");
+   E199 : Short_Integer; pragma Import (Ada, E199, "project_tools__text_E");
    E146 : Short_Integer; pragma Import (Ada, E146, "project_tools__files_E");
 
    Sec_Default_Sized_Stacks : array (1 .. 1) of aliased System.Secondary_Stack.SS_Stack (System.Parameters.Runtime_Default_Sec_Stack_Size);
@@ -82,7 +83,7 @@ package body ada_main is
       begin
          F4;
       end;
-      E197 := E197 - 1;
+      E201 := E201 - 1;
       declare
          procedure F5;
          pragma Import (Ada, F5, "system__pool_global__finalize_spec");
@@ -103,14 +104,14 @@ package body ada_main is
       begin
          F7;
       end;
-      E201 := E201 - 1;
+      E205 := E205 - 1;
       declare
          procedure F8;
          pragma Import (Ada, F8, "system__storage_pools__subpools__finalize_spec");
       begin
          F8;
       end;
-      E186 := E186 - 1;
+      E190 := E190 - 1;
       declare
          procedure F9;
          pragma Import (Ada, F9, "ada__streams__stream_io__finalize_spec");
@@ -273,7 +274,9 @@ package body ada_main is
       Ada.Strings.Text_Buffers'Elab_Spec;
       E109 := E109 + 1;
       Gnat'Elab_Spec;
-      E189 := E189 + 1;
+      E193 := E193 + 1;
+      Interfaces.C.Strings'Elab_Spec;
+      E188 := E188 + 1;
       Ada.Streams'Elab_Spec;
       E127 := E127 + 1;
       System.File_Control_Block'Elab_Spec;
@@ -285,11 +288,11 @@ package body ada_main is
       System.File_Io'Elab_Body;
       E135 := E135 + 1;
       Ada.Streams.Stream_Io'Elab_Spec;
-      E186 := E186 + 1;
+      E190 := E190 + 1;
       System.Storage_Pools'Elab_Spec;
       E184 := E184 + 1;
       System.Storage_Pools.Subpools'Elab_Spec;
-      E201 := E201 + 1;
+      E205 := E205 + 1;
       Ada.Strings.Unbounded'Elab_Spec;
       E171 := E171 + 1;
       Ada.Calendar'Elab_Spec;
@@ -301,14 +304,14 @@ package body ada_main is
       Ada.Text_Io'Elab_Body;
       E125 := E125 + 1;
       System.Pool_Global'Elab_Spec;
-      E197 := E197 + 1;
+      E201 := E201 + 1;
       System.Regexp'Elab_Spec;
       E182 := E182 + 1;
       Ada.Directories'Elab_Spec;
       Ada.Directories'Elab_Body;
       E152 := E152 + 1;
-      E192 := E192 + 1;
-      E195 := E195 + 1;
+      E196 := E196 + 1;
+      E199 := E199 + 1;
       Project_Tools.Files'Elab_Body;
       E146 := E146 + 1;
    end adainit;

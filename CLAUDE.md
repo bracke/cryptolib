@@ -14,8 +14,10 @@ OpenSSL only for cross-checks. It is consumed by `ssh_lib` (and transitively by
 
 `README.md` documents usage; `SECURITY.md` documents the security properties,
 constant-time guarantees, and known limitations. **Keep both accurate** when you
-change behavior — every code example in `README.md` is verified to compile, and
-`SECURITY.md`'s claims are meant to be checkable against the code.
+change behavior. `README.md`'s snippets are fragments chosen to read well; each
+has a compilable counterpart under `examples/` that the release preflight
+builds, so an example that stops compiling is caught. `SECURITY.md`'s
+claims are meant to be checkable against the code.
 
 ## Build, test, style
 

@@ -252,6 +252,34 @@ procedure Tests is
         (CryptoLib.Certificates.Create_Local_CA
            ("devcert-test-ca", CA_Cert, CA_Key) = CryptoLib.Certificates.Ok,
          "local CA creation succeeds");
+
+      --  The issuer name has to come from the CA certificate, or the leaf
+      --  cannot be chained to it: it was once a fixed string, so any CA not
+      --  named that produced certificates no verifier would accept. Issuing
+      --  without a readable CA certificate must fail rather than sign with a
+      --  name of its own choosing.
+      declare
+         Orphan_Cert : Ada.Strings.Unbounded.Unbounded_String;
+         Orphan_Key  : Ada.Strings.Unbounded.Unbounded_String;
+      begin
+         Check
+           (CryptoLib.Certificates.Issue_Server_Certificate
+              ("",
+               Ada.Strings.Unbounded.To_String (CA_Key),
+               "orphan.example",
+               [1 => Ada.Strings.Unbounded.To_Unbounded_String
+                       ("orphan.example")],
+               Orphan_Cert, Orphan_Key)
+            = CryptoLib.Certificates.Invalid_Input,
+            "issuing without a CA certificate is refused");
+         Check
+           (CryptoLib.Certificates.Sign_CSR
+              ("",
+               Ada.Strings.Unbounded.To_String (CA_Key),
+               "not a csr", Orphan_Cert)
+            = CryptoLib.Certificates.Invalid_Input,
+            "signing a CSR without a CA certificate is refused");
+      end;
       Check
         (Ada.Strings.Unbounded.Index
            (CA_Cert, "BEGIN CERTIFICATE") /= 0,

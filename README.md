@@ -41,7 +41,12 @@ Do not run plain system `gnat*`, `gnatmake`, `gnatls`, `gnatprove`,
 | `CryptoLib.Random` | CSPRNG (getrandom/urandom/BCryptGenRandom), fail-closed |
 | `CryptoLib.Secure_Wipe` | non-elidable secret zeroization |
 | `CryptoLib.Constant_Time` | constant-time byte comparison |
+| `CryptoLib.Certificates` | X.509: local CA, server/client/email issuance, CSR signing, PKCS#12, fingerprints |
 | `CryptoLib.Errors`, `CryptoLib.Buffers`, `CryptoLib.Fingerprints` | status codes, packet buffers, key fingerprints |
+
+The snippets below are fragments, chosen to show the call rather than a whole
+program. `examples/` holds compilable counterparts that the release preflight
+builds.
 
 ## Conventions
 

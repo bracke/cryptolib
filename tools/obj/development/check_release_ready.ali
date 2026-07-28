@@ -52,7 +52,7 @@ RV NO_STANDARD_STORAGE_POOLS
 RV NO_DYNAMIC_SIZED_OBJECTS
 RV NO_IMPLEMENTATION_PRAGMAS
 
-U check_release_ready%b	check_release_ready.adb	d89ba807 NE OO SU
+U check_release_ready%b	check_release_ready.adb	96403489 NE OO SU
 W ada%s			ada.ads			ada.ali
 W ada.command_line%s	a-comlin.adb		a-comlin.ali
 W ada.strings%s		a-string.ads		a-string.ali
@@ -82,7 +82,7 @@ D a-tags.ads		20250808065140 fbca0ad5 ada.tags%s
 D a-textio.ads		20250808065140 34ef47de ada.text_io%s
 D a-unccon.ads		20250808065140 0e9b276f ada.unchecked_conversion%s
 D a-uncdea.ads		20250808065140 c3a8ac65 ada.unchecked_deallocation%s
-D check_release_ready.adb  20260705231055 010c19f1 check_release_ready%b
+D check_release_ready.adb  20260728132832 4fd7857f check_release_ready%b
 D gnat.ads		20250808065140 b5988c27 gnat%s
 D g-os_lib.ads		20250808065140 0db74523 gnat.os_lib%s
 D interfac.ads		20250808065140 9111f9c1 interfaces%s
@@ -120,15 +120,15 @@ G r c none [check_release_ready standard 10 11 none] [run_shell project_tools__p
 X 1 ada.ads
 18K9*Ada 22e8 20|1r6 2r6 3r6 17r10 18r13 20r10 20r44 22r13 23r10 24r13 27r10
 . 27r44 31r7 36r7 37r7 39r10 40r13 42r10 42r44 47r7 48r7 49r10 50r7 50r41
-. 62r4 63r4 63r38
+. 63r4 64r4 64r38
 X 4 a-comlin.ads
 40K13*Command_Line 148e21 20|1w10 20r14 20r48 27r14 27r48 42r14 42r48 47r11
-. 50r11 50r45 63r8 63r42
+. 50r11 50r45 64r8 64r42
 43V13*Argument_Count{natural} 20|47s24
 74I9*Exit_Status<integer>
-76i4*Success{74I9} 20|63r55
+76i4*Success{74I9} 20|64r55
 77i4*Failure{74I9} 20|20r61 27r61 42r61 50r58
-79U14*Set_Exit_Status 20|20s27 27s27 42s27 50s24 63s21
+79U14*Set_Exit_Status 20|20s27 27s27 42s27 50s24 64s21
 X 9 a-string.ads
 16K13*Strings 35e16 20|2r10 22r17
 X 10 a-strfix.ads
@@ -136,17 +136,17 @@ X 10 a-strfix.ads
 252V13*Index{natural} 20|22s31
 X 17 a-textio.ads
 58K13*Text_IO 785e16 20|3w10 17r14 18r17 23r14 24r17 31r11 36r11 37r11 39r14
-. 40r17 48r11 49r14 62r8
+. 40r17 48r11 49r14 63r8
 67P9*File_Type
 189V13*Standard_Error{67P9} 20|18s25 24s25 40s25 49s22
 284U14*New_Line 20|36s19
 555U14*Put_Line 20|17s22 23s22 39s22 48s19
-565U14*Put_Line 20|31s19 37s19 62s16
+565U14*Put_Line 20|31s19 37s19 63s16
 X 20 check_release_ready.adb
-10U11*Check_Release_Ready 10b11 67l5 67t24
+10U11*Check_Release_Ready 10b11 68l5 68t24
 11U14 Require_Alire_GNAT_15 11b14 32l8 32t29 54s4
 12a7 Output_Text{string} 16r10 22r38 26r15 31r62
-34U14 Step 34b14 34>20 34>36 45l8 45t12 55s4 56s4 57s4 58s4 59s4 60s4
+34U14 Step 34b14 34>20 34>36 45l8 45t12 55s4 56s4 57s4 58s4 59s4 60s4 61s4
 34a20 Label{string} 37r38 41r60
 34a36 Command{string} 38r45
 X 26 project_tools.ads
