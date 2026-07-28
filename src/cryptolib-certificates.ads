@@ -58,6 +58,32 @@ package CryptoLib.Certificates is
       CSR_PEM            : String;
       Certificate_PEM    : out Unbounded_String) return Certificate_Status;
 
+   --  Is this a DNS name, an IP address, an email address that may stand as a
+   --  subject alternative name?
+   --
+   --  Here because this decides what a certificate may contain, and because a
+   --  caller that validates for itself ends up with rules that disagree with
+   --  these: it accepts an identity that then cannot be encoded, or refuses one
+   --  that could have been. The encoders below answer the same question by
+   --  succeeding or failing; these answer it before anything is built, so a
+   --  caller can say which identity was wrong and why.
+   function Valid_DNS_Name (Text : String) return Boolean;
+   function Valid_IP_Address (Text : String) return Boolean;
+   function Valid_Email_Address (Text : String) return Boolean;
+
+   --  Do these two PEM texts carry the same certificate?
+   --
+   --  Comparing the text does not answer it: the same certificate may be
+   --  wrapped at a different width, carry different line endings, or be armoured
+   --  with a different label. This compares what the armour holds.
+   function Same_Certificate (Left : String; Right : String) return Boolean;
+
+   --  Does this PEM text carry a certificate, or a private key?
+   --
+   --  Asked of the armour, which is what says which of the two a file is.
+   function Contains_Certificate (Text : String) return Boolean;
+   function Contains_Private_Key (Text : String) return Boolean;
+
    function Private_Key_Matches_Certificate
      (Certificate_PEM : String;
       Private_Key_PEM : String) return Certificate_Status;

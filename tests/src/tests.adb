@@ -748,6 +748,83 @@ procedure Tests is
       return 0;
    end Index_Of;
 
+   --  These decide what a certificate may contain, and they moved here from a
+   --  caller that had its own copy of the rules. Both copies could not have
+   --  been checked against each other; one can be checked against the encoder.
+   procedure Check_Identity_Predicates is
+      Cert, Key, Other_Cert, Other_Key : Ada.Strings.Unbounded.Unbounded_String;
+      Status : CryptoLib.Certificates.Certificate_Status;
+   begin
+      Check (CryptoLib.Certificates.Valid_DNS_Name ("localhost"), "plain host");
+      Check (CryptoLib.Certificates.Valid_DNS_Name ("a.b.example"), "dotted name");
+      Check
+        (CryptoLib.Certificates.Valid_DNS_Name ("x-1.example"),
+         "a hyphen inside a label");
+      Check
+        (not CryptoLib.Certificates.Valid_DNS_Name ("-bad.example"),
+         "a label may not begin with a hyphen");
+      Check
+        (not CryptoLib.Certificates.Valid_DNS_Name ("bad-.example"),
+         "a label may not end with a hyphen");
+      Check
+        (not CryptoLib.Certificates.Valid_DNS_Name ("trailing.dot."),
+         "a trailing dot is not a label");
+      Check (not CryptoLib.Certificates.Valid_DNS_Name (""), "an empty name");
+      Check
+        (not CryptoLib.Certificates.Valid_DNS_Name ("under_score.example"),
+         "an underscore is not a DNS character");
+
+      Check (CryptoLib.Certificates.Valid_IP_Address ("127.0.0.1"), "IPv4");
+      Check (CryptoLib.Certificates.Valid_IP_Address ("::1"), "IPv6");
+      Check
+        (not CryptoLib.Certificates.Valid_IP_Address ("256.0.0.1"),
+         "an octet above 255 is not an address");
+      Check
+        (CryptoLib.Certificates.Valid_Email_Address ("someone@example.test"),
+         "an email address");
+      Check
+        (not CryptoLib.Certificates.Valid_Email_Address ("no-at-sign"),
+         "an address needs an at sign");
+
+      --  Same certificate, different armour width: the text differs, the
+      --  certificate does not.
+      Status :=
+        CryptoLib.Certificates.Create_Local_CA ("compare-ca", Cert, Key);
+      Check (Status = CryptoLib.Certificates.Ok, "comparison CA");
+      Status :=
+        CryptoLib.Certificates.Create_Local_CA
+          ("compare-other", Other_Cert, Other_Key);
+      Check (Status = CryptoLib.Certificates.Ok, "second comparison CA");
+
+      declare
+         Text : constant String := Ada.Strings.Unbounded.To_String (Cert);
+         --  The same bytes, armoured with different line endings.
+         Rewrapped : constant String := Text & ASCII.LF & ASCII.LF;
+      begin
+         Check
+           (CryptoLib.Certificates.Same_Certificate (Text, Rewrapped),
+            "the same certificate compares equal through its armour");
+         Check
+           (not CryptoLib.Certificates.Same_Certificate
+              (Text, Ada.Strings.Unbounded.To_String (Other_Cert)),
+            "a different certificate does not");
+         Check
+           (not CryptoLib.Certificates.Same_Certificate
+              (Text, Ada.Strings.Unbounded.To_String (Key)),
+            "a private key is not that certificate");
+         Check
+           (CryptoLib.Certificates.Contains_Certificate (Text),
+            "a certificate is recognised by its armour");
+         Check
+           (not CryptoLib.Certificates.Contains_Private_Key (Text),
+            "and is not mistaken for a key");
+         Check
+           (CryptoLib.Certificates.Contains_Private_Key
+              (Ada.Strings.Unbounded.To_String (Key)),
+            "a private key is recognised by its armour");
+      end;
+   end Check_Identity_Predicates;
+
    procedure Check_P384_Local_CA is
       Cert, Key : Ada.Strings.Unbounded.Unbounded_String;
       Status    : CryptoLib.Certificates.Certificate_Status;
@@ -885,6 +962,7 @@ begin
    Check_ECDSA_P384_P521_Signing;
    Check_ECDSA_P384_Public_Key;
    Check_P384_Local_CA;
+   Check_Identity_Predicates;
    Check_ECDSA_P384_Verify;
    Check_Certificates;
    Check_XXH3;

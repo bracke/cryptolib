@@ -1609,6 +1609,85 @@ package body CryptoLib.Certificates is
       return Ok;
    end Sign_CSR;
 
+   --  Label rules, not a character set: a DNS label is 1 to 63 characters, may
+   --  hold hyphens inside but not at either end, and the name may not be one
+   --  long label of dots. A charset check accepts "-.-" and a trailing dot,
+   --  which no resolver will.
+   function Valid_DNS_Name (Text : String) return Boolean is
+      Label_Start : Positive;
+      Label_Len   : Natural := 0;
+
+      function Alpha_Num (C : Character) return Boolean is
+        (C in 'a' .. 'z' or else C in 'A' .. 'Z' or else C in '0' .. '9');
+
+      function Valid_Label (First : Positive; Last : Natural) return Boolean is
+      begin
+         if Last < First or else Last - First + 1 > 63 then
+            return False;
+         elsif not Alpha_Num (Text (First)) or else not Alpha_Num (Text (Last))
+         then
+            return False;
+         end if;
+
+         for I in First .. Last loop
+            if not Alpha_Num (Text (I)) and then Text (I) /= '-' then
+               return False;
+            end if;
+         end loop;
+         return True;
+      end Valid_Label;
+   begin
+      if Text'Length = 0 or else Text'Length > 253 then
+         return False;
+      end if;
+
+      Label_Start := Text'First;
+      for I in Text'Range loop
+         if Text (I) = '.' then
+            if not Valid_Label (Label_Start, I - 1) then
+               return False;
+            end if;
+            Label_Start := I + 1;
+            Label_Len := 0;
+         else
+            Label_Len := Label_Len + 1;
+         end if;
+      end loop;
+
+      return Label_Len > 0 and then Valid_Label (Label_Start, Text'Last);
+   end Valid_DNS_Name;
+
+   --  The encoder is the authority: an address is valid exactly when it can be
+   --  turned into the bytes a certificate carries.
+   function Valid_IP_Address (Text : String) return Boolean is
+   begin
+      return IP_Bytes (Text) /= "";
+   end Valid_IP_Address;
+
+   function Valid_Email_Address (Text : String) return Boolean is
+   begin
+      return Valid_Email (Text);
+   end Valid_Email_Address;
+
+   function Same_Certificate (Left : String; Right : String) return Boolean is
+      Left_DER  : constant String := Base64_Decode (Left);
+      Right_DER : constant String := Base64_Decode (Right);
+   begin
+      return Left_DER /= "" and then Left_DER = Right_DER;
+   end Same_Certificate;
+
+   function Contains_Certificate (Text : String) return Boolean is
+   begin
+      return Contains (Text, "BEGIN CERTIFICATE")
+        and then Contains (Text, "END CERTIFICATE");
+   end Contains_Certificate;
+
+   function Contains_Private_Key (Text : String) return Boolean is
+   begin
+      return Contains (Text, "BEGIN PRIVATE KEY")
+        and then Contains (Text, "END PRIVATE KEY");
+   end Contains_Private_Key;
+
    function Private_Key_Matches_Certificate
      (Certificate_PEM : String;
       Private_Key_PEM : String) return Certificate_Status
