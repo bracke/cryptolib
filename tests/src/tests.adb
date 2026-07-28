@@ -3961,6 +3961,69 @@ procedure Tests is
    end Check_PKCS8;
 
 
+   --  A private scalar is read by its width, not by its first byte.
+   --
+   --  An SSH mpint pads a value whose top bit is set with a leading zero, so
+   --  it is one octet wider than the curve; a raw scalar is exactly the
+   --  curve's width whatever its top byte. Reading the first byte instead
+   --  refused every raw scalar of 16#80# or above -- about half of the P-384
+   --  keys generated anywhere but here, which is why it went unnoticed: this
+   --  crate only ever produced scalars the old reading accepted.
+   procedure Check_ECDSA_Scalar_Encodings is
+      --  Two scalars that differ only in whether the top bit is set, and the
+      --  same values written as mpints.
+      Low_Raw : constant Ada.Streams.Stream_Element_Array (1 .. 48) :=
+        [1 => 16#7F#, others => 16#11#];
+      High_Raw : constant Ada.Streams.Stream_Element_Array (1 .. 48) :=
+        [1 => 16#C0#, others => 16#11#];
+      High_Mpint : constant Ada.Streams.Stream_Element_Array (1 .. 49) :=
+        [1 => 16#00#, 2 => 16#C0#, others => 16#11#];
+
+      Low_Point   : Ada.Streams.Stream_Element_Array (1 .. 97);
+      High_Point  : Ada.Streams.Stream_Element_Array (1 .. 97);
+      Mpint_Point : Ada.Streams.Stream_Element_Array (1 .. 97);
+   begin
+      Check (CryptoLib.ECDSA.Public_Nistp384_Raw (Low_Raw, Low_Point)
+               = CryptoLib.Errors.Ok,
+             "a raw scalar whose top bit is clear is read");
+
+      --  The case that used to be refused.
+      Check (CryptoLib.ECDSA.Public_Nistp384_Raw (High_Raw, High_Point)
+               = CryptoLib.Errors.Ok,
+             "a raw scalar whose top bit is set is read too");
+
+      --  And the mpint spelling of that same value still is, which is what
+      --  sshlib hands in from an identity file.
+      Check (CryptoLib.ECDSA.Public_Nistp384_Raw (High_Mpint, Mpint_Point)
+               = CryptoLib.Errors.Ok,
+             "the mpint spelling of the same scalar is read");
+      Check (High_Point = Mpint_Point,
+             "and yields the same public key, because it is the same scalar");
+
+      --  Zero is not a scalar, however it is written.
+      declare
+         Zero_Raw : constant Ada.Streams.Stream_Element_Array (1 .. 48) :=
+           [others => 0];
+         Point    : Ada.Streams.Stream_Element_Array (1 .. 97);
+      begin
+         Check (CryptoLib.ECDSA.Public_Nistp384_Raw (Zero_Raw, Point)
+                  /= CryptoLib.Errors.Ok,
+                "a zero scalar is refused");
+      end;
+
+      --  Wider than the curve, with nothing but padding to remove.
+      declare
+         Too_Wide : constant Ada.Streams.Stream_Element_Array (1 .. 50) :=
+           [1 => 16#01#, others => 16#11#];
+         Point    : Ada.Streams.Stream_Element_Array (1 .. 97);
+      begin
+         Check (CryptoLib.ECDSA.Public_Nistp384_Raw (Too_Wide, Point)
+                  /= CryptoLib.Errors.Ok,
+                "a value too wide for the curve is refused");
+      end;
+   end Check_ECDSA_Scalar_Encodings;
+
+
 begin
    Check_PBKDF2_SHA1;
    Check_PBKDF2_SHA2;
@@ -3992,6 +4055,7 @@ begin
    Check_X509_Path_Building;
    Check_PKCS10;
    Check_PKCS8;
+   Check_ECDSA_Scalar_Encodings;
    Check_Identity_Predicates;
    Check_PKCS12_Mac_Key;
    Check_ECDSA_P384_Verify;

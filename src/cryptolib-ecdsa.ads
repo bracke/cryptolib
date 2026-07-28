@@ -12,7 +12,9 @@ with CryptoLib.Random;
 package CryptoLib.ECDSA is
 
    --  Deterministically sign a pre-formed message over NIST P-384 (SHA-384).
-   --  @param Private_Scalar_Mpint the private scalar d as an SSH mpint
+   --  @param Private_Scalar_Mpint the private scalar d, as an SSH mpint or
+   --  as the curve's width in big-endian bytes; both are read, and the name
+   --  is kept for the callers that pass an mpint
    --         (big-endian magnitude, optional leading 0x00 sign byte), in [1, n-1]
    --  @param Message_Bytes the message to sign (hashed internally with SHA-384)
    --  @param R_Bytes the signature component r as 48 big-endian bytes
@@ -28,7 +30,9 @@ package CryptoLib.ECDSA is
       return CryptoLib.Errors.Status;
 
    --  Deterministically sign a pre-formed message over NIST P-521 (SHA-512).
-   --  @param Private_Scalar_Mpint the private scalar d as an SSH mpint
+   --  @param Private_Scalar_Mpint the private scalar d, as an SSH mpint or
+   --  as the curve's width in big-endian bytes; both are read, and the name
+   --  is kept for the callers that pass an mpint
    --         (big-endian magnitude, optional leading 0x00 sign byte), in [1, n-1]
    --  @param Message_Bytes the message to sign (hashed internally with SHA-512)
    --  @param R_Bytes the signature component r as 66 big-endian bytes
@@ -49,7 +53,9 @@ package CryptoLib.ECDSA is
    --  Signing alone was enough for SSH, which carries the public key beside
    --  the signature. A certificate has to state the key it is about, so the
    --  point has to be derivable from the scalar.
-   --  @param Private_Scalar_Mpint the private scalar d as an SSH mpint
+   --  @param Private_Scalar_Mpint the private scalar d, as an SSH mpint or
+   --  as the curve's width in big-endian bytes; both are read, and the name
+   --  is kept for the callers that pass an mpint
    --  @param Public_Point 97 bytes: 16#04#, then X and Y as 48 bytes each
    --  @return Ok, Authentication_Failed for a scalar outside [1, n-1],
    --          Handshake_Failed on a wrong-length output buffer

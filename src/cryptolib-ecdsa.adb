@@ -535,6 +535,25 @@ package body CryptoLib.ECDSA is
    end Nonce_For;
 
    --  Parse an mpint private scalar and validate it is in [1, n-1].
+   --  Read a private scalar, however it was written.
+   --
+   --  Two encodings arrive here and both are legitimate. An SSH mpint pads a
+   --  value whose top bit is set with a leading zero octet, so it is one
+   --  wider than the curve; a raw scalar is exactly the curve's width
+   --  whatever its top byte happens to be. They are told apart by length,
+   --  which is the only thing that distinguishes them.
+   --
+   --  Reading the first byte instead is what this did before, and it refused
+   --  any raw scalar of 16#80# or above -- about half of every P-384 key
+   --  generated anywhere else. This crate did not notice because its own
+   --  generation only produced scalars the old reading accepted, so keys made
+   --  here worked and keys made by OpenSSL failed on a coin toss.
+   --
+   --  Leading zeros are stripped only while the value is too wide to be the
+   --  scalar, so a raw scalar that genuinely begins with a zero octet keeps
+   --  it. Non-minimal padding is accepted rather than refused: unlike a
+   --  signature, a private scalar has no canonical encoding whose violation
+   --  means anything, and the value is the same either way.
    function Parse_Private
      (Data : Stream_Element_Array; Cv : Curve_Data; Value : out Element)
       return Boolean
@@ -545,17 +564,20 @@ package body CryptoLib.ECDSA is
       if Data'Length = 0 then
          return False;
       end if;
-      if Data (First) = 0 then
-         if Data'Length = 1 or else Data (First + 1) < 16#80# then
-            return False;
-         end if;
+
+      while First <= Data'Last
+        and then Natural (Data'Last - First + 1) > Cv.Byte_Length
+        and then Data (First) = 0
+      loop
          First := First + 1;
-      elsif Data (First) >= 16#80# then
+      end loop;
+
+      if First > Data'Last
+        or else Natural (Data'Last - First + 1) > Cv.Byte_Length
+      then
          return False;
       end if;
-      if Natural (Data'Last - First + 1) > Cv.Byte_Length then
-         return False;
-      end if;
+
       Value := From_Bytes (Cv.Order, Data (First .. Data'Last));
       return Geq_Mask (Value, Modulus (Cv.Order)) = 0
         and then Is_Zero_Mask (Value) = 0;
