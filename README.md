@@ -49,6 +49,7 @@ Do not run plain system `gnat*`, `gnatmake`, `gnatls`, `gnatprove`,
 | `CryptoLib.X509.Identity` | RFC 9525 service identity matching: DNS names, wildcards, IP addresses |
 | `CryptoLib.X509.Purposes` | may this certificate serve TLS, sign code, act as a CA |
 | `CryptoLib.X509.Names` | distinguished names by attribute; RFC 4514 formatting kept separate |
+| `CryptoLib.X509.CRLs` | revocation lists: decode, verify the issuer's signature, look a serial up |
 | `CryptoLib.Certificates` | X.509: local CA, server/client/email issuance, CSR signing, PKCS#12, fingerprints |
 | `CryptoLib.Errors`, `CryptoLib.Buffers`, `CryptoLib.Fingerprints` | status codes, packet buffers, key fingerprints |
 

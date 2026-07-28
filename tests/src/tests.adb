@@ -13,6 +13,7 @@ with CryptoLib.X509.Extensions;
 with CryptoLib.X509.Identity;
 with CryptoLib.X509.Purposes;
 with CryptoLib.X509.Names;
+with CryptoLib.X509.CRLs;
 with CryptoLib.X509.Validation;
 with CryptoLib.X509.Signatures;
 with CryptoLib.ASN1.DER;
@@ -3081,6 +3082,172 @@ procedure Tests is
    end Check_Certificate_Armour;
 
 
+   --  A revocation list made by OpenSSL, with a certificate genuinely
+   --  revoked through "openssl ca -revoke".
+   procedure Check_X509_CRL is
+      use type CryptoLib.ASN1.Errors.Decode_Status;
+      use type CryptoLib.X509.Signatures.Verification_Result;
+
+      package X509C renames CryptoLib.X509.Certificates;
+      package XC renames CryptoLib.X509.CRLs;
+
+      CRL_DER : constant String :=
+        "308201863070020101300d06092a864886f70d01010b050030163114301206035504030c0b63726c2d74657374" &
+        "2d6361170d3236303732383230313534375a170d3236303832373230313534375a3015301302021000170d3236" &
+        "303732383230313534375aa00f300d300b0603551d14040402021000300d06092a864886f70d01010b05000382" &
+        "0101006658640fbac6a1af6d6ae781e8565bde72e4d010700077d31961e4927583013585ed7dbe4fc3a86e1a5f" &
+        "ad9bfd07334f077af62093de31acb5c1d137d1a25e67ba5d7faa7330cb422947461d2a395068594ddde4f739be" &
+        "3bd345e04807299af988b58413704b2227863de0cfdfc8eb4090620bb5f299a7952a194ba4d273d6453c7cb9d0" &
+        "d5ddab9a0365ebe032d1abfb3a10bed8a02d52aff966391e0bef4601150fccf121628bdbf5302e155cbc492ced" &
+        "d9b07a9d8faf65476f1e3494ca0835eaaa97ea86bd0e0c4aa0f63584a3829891fc7a8b9d79522ed10c8d627a69" &
+        "a018f0630976bf890136c61568406f615df99b62cd3db8eb62fbe778914516b4d902";
+
+      CRL_CA_DER : constant String :=
+        "3082030d308201f5a0030201020214695a2eb222fd6509af65d97b7099306d68b399eb300d06092a864886f70d" &
+        "01010b050030163114301206035504030c0b63726c2d746573742d6361301e170d323630373238323031353437" &
+        "5a170d3336303732353230313534375a30163114301206035504030c0b63726c2d746573742d63613082012230" &
+        "0d06092a864886f70d01010105000382010f003082010a0282010100b5e60ee7058f7f9e991a038feeac5eb95d" &
+        "99b6b52f543a4cf379d9b84ab68125a82424b27f07a1f6a39f6f6e5ac4df194a06d3683fafc31123427f768f60" &
+        "24aa6b2d5f759d0629a578497370038d70020ea20e261a913c332504d70327b2cd747a2ae0f415764976ae21d8" &
+        "c34874405cfabefd83ffc5b03de5c6521a611c333189ead8755a0bf56113ad088deb953cf1febb465a377d256b" &
+        "ad055bf627727ccfffa616cfe8edc009a49f318a6c1e935dc42b69ab1d2aa9ee2173defdf45fbb595b99aced52" &
+        "9fca129587fac967025980f7617070edde4748fa62cd395a608475ba22bd65c29f1fabdefe5e8aeed28baa1703" &
+        "88bca8bb6490db6bacea3473ed8f0203010001a3533051301d0603551d0e04160414a1f6d41f7e7b24380aa8a0" &
+        "cd33926e4452de852f301f0603551d23041830168014a1f6d41f7e7b24380aa8a0cd33926e4452de852f300f06" &
+        "03551d130101ff040530030101ff300d06092a864886f70d01010b050003820101005f484fd12f7d522aa3787c" &
+        "0ee05c3e06067d91b3f51a3747e1ffcd7d57e839f17a9bfcf878faa9c4af435426aa06ed4907dfb9c29ca36c6b" &
+        "53af27ce22516b5bd4cb19e9d912893e3800a1f7acc3abefbc18a6c899793b6ff9d378f2a77e0feb03659f8a24" &
+        "09bee7a4804773be1f8428608fb9041ac74581b1943d0d90dd2939be1b74015bcd676cf483167988523fba452b" &
+        "255b49146d3c5be21408d8c9848f6794a4fa588ab2d6d326bc7d92920c3547d3f4d9270c01ec4d368c98e11a61" &
+        "1f40cd6672de148b3bf435f812eda7e9e5d383ff2eefcf1384d136c45b1c062f731fc3414a237cf1b971994cce" &
+        "d2b6852b3f4314e9335fc96ba21fd8949c58f5c5";
+
+      CRL_Leaf_DER : constant String :=
+        "308202a53082018d02021000300d06092a864886f70d01010b050030163114301206035504030c0b63726c2d74" &
+        "6573742d6361301e170d3236303732383230313534375a170d3237303732383230313534375a301a3118301606" &
+        "035504030c0f7265766f6b65642e6578616d706c6530820122300d06092a864886f70d01010105000382010f00" &
+        "3082010a0282010100c0ed219d3150260bb4a5a976fd93941636a1dcdc8976321a5c82e468c74ff7e755f29a69" &
+        "40524606cf7e70308e8c3ed01c6954e7e7a45fdedd1d914b6cf2459cbba0b0a2f3a248771f69301ac2735a408a" &
+        "f830e03b7c3941648de0810c102c79f17da1d486a3b676993fd30102ed86ee4d4cde770d3abf8dd4b178885132" &
+        "f79e8799c63595af16af350d94207d96a5d830c19e2eff9edb43607e7c8e5ba3e737b82f71937a7ca59ffcac9d" &
+        "fc633aa69ce1e08aabf84a068c4e1dfa9f7ca28f959062408140c1c8cf63d66761609bc2dff8b3d4bd3250ee0a" &
+        "86b507023e9f9aee80b2184c01758ffaf3c280eeeff0fb0926de9c83cfc2f327c4dcd6254a0447150203010001" &
+        "300d06092a864886f70d01010b0500038201010080e42f4484be128c22efd3e63c0ea74f0efc8937b0a9529a0d" &
+        "90efd502c75e3647fa117adca923af965a184fa141d74ce910ad9fbed2fb1f1eb295f9cd28ebff73c6b8ea6ace" &
+        "a4d54009be31e34a52fa63c4277ebe37865d16ce20d7776ff9dbfee953305678b1dc967f59f836b6fc5ce4f166" &
+        "c3e4d20a992bbdb0b2ac53f8c8a23b9176097ae12e84bcebe9e81b77da3571a2f2bcf77d7e516102c37352c1e0" &
+        "fba2439d98a01280abcefe8a91b5857a2f515e6ae71c14f10fa56fb4710798b987f0a0b89a2510995a6f6cfa27" &
+        "2f10d60bcd56e3add0eb664aaa565ee2471a1f5b00eae79e62e58b987db98503855bb0bd82b803d2b7ee27f40c" &
+        "f62c878f5876";
+
+      function From_Hex
+        (Text : String) return Ada.Streams.Stream_Element_Array
+      is
+         Result : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (Text'Length / 2));
+         function Nibble (C : Character) return Natural
+         is (case C is
+                when '0' .. '9' => Character'Pos (C) - Character'Pos ('0'),
+                when others     => Character'Pos (C) - Character'Pos ('a') + 10);
+      begin
+         for I in Result'Range loop
+            Result (I) :=
+              Ada.Streams.Stream_Element
+                (Nibble (Text (Text'First + 2 * Natural (I - 1))) * 16
+                 + Nibble (Text (Text'First + 2 * Natural (I - 1) + 1)));
+         end loop;
+         return Result;
+      end From_Hex;
+
+      Status : CryptoLib.ASN1.Errors.Decode_Status;
+
+      CA : constant X509C.Certificate :=
+        X509C.Decode_DER
+          (From_Hex (CRL_CA_DER), CryptoLib.ASN1.Default_Limits, Status);
+      Leaf : constant X509C.Certificate :=
+        X509C.Decode_DER
+          (From_Hex (CRL_Leaf_DER), CryptoLib.ASN1.Default_Limits, Status);
+      List : constant XC.Revocation_List :=
+        XC.Decode_DER
+          (From_Hex (CRL_DER), CryptoLib.ASN1.Default_Limits, Status);
+   begin
+      Check (Status = CryptoLib.ASN1.Errors.Ok and then XC.Is_Present (List),
+             "the CRL decodes: "
+             & CryptoLib.ASN1.Errors.Status_Image (Status));
+      Check (X509C.Is_Present (CA) and then X509C.Is_Present (Leaf),
+             "fixture: the CA and the revoked certificate decode");
+
+      --  Issued by the CA it claims, which is what makes it about these
+      --  certificates at all.
+      Check (XC.Issuer_Bytes (List) = X509C.Subject_Bytes (CA),
+             "the CRL's issuer is the CA's subject");
+
+      Check (XC.This_Update (List).Year = 2026,
+             "thisUpdate decodes to the year OpenSSL wrote");
+      Check (XC.Has_Next_Update (List),
+             "this CRL states when the next one is due");
+      Check (CryptoLib.X509.Is_Not_After
+               (XC.This_Update (List), XC.Next_Update (List)),
+             "the update window is not inverted");
+
+      Check (XC.Entry_Count (List) = 1,
+             "the list carries one revoked certificate, got"
+             & Natural'Image (XC.Entry_Count (List)));
+
+      --  The certificate that was revoked, looked up by the serial its own
+      --  encoding carries.
+      Check (XC.Is_Revoked (List, X509C.Serial_Number (Leaf)),
+             "the revoked certificate is on the list");
+
+      --  One that was not.
+      Check (not XC.Is_Revoked (List, [16#7F#, 16#FF#]),
+             "a serial that was never issued is not on the list");
+
+      --  A serial written with a sign-preserving leading zero is the same
+      --  number. Missing that would treat a revoked certificate as good.
+      declare
+         Serial : constant Ada.Streams.Stream_Element_Array :=
+           X509C.Serial_Number (Leaf);
+         Padded : constant Ada.Streams.Stream_Element_Array :=
+           [0] & Serial;
+      begin
+         Check (XC.Is_Revoked (List, Padded),
+                "a serial with a leading zero is the same serial");
+      end;
+
+      --  The CA really signed it.
+      Check (XC.Verify_Signature (List, CA)
+               = CryptoLib.X509.Signatures.Valid,
+             "the CRL verifies under its issuer's key");
+
+      --  And the leaf did not.
+      Check (XC.Verify_Signature (List, Leaf)
+               /= CryptoLib.X509.Signatures.Valid,
+             "the CRL does not verify under an unrelated key");
+
+      --  A CRL with a byte changed inside the signed body must not verify.
+      declare
+         Damaged : Ada.Streams.Stream_Element_Array := From_Hex (CRL_DER);
+         Broken  : CryptoLib.ASN1.Errors.Decode_Status;
+      begin
+         --  Inside the TBSCertList rather than in the signature: this is the
+         --  alteration a signature exists to detect.
+         Damaged (Damaged'First + 30) := Damaged (Damaged'First + 30) xor 1;
+         declare
+            Altered : constant XC.Revocation_List :=
+              XC.Decode_DER
+                (Damaged, CryptoLib.ASN1.Default_Limits, Broken);
+         begin
+            if Broken = CryptoLib.ASN1.Errors.Ok then
+               Check (XC.Verify_Signature (Altered, CA)
+                        /= CryptoLib.X509.Signatures.Valid,
+                      "an altered CRL does not verify");
+            end if;
+         end;
+      end;
+   end Check_X509_CRL;
+
+
 begin
    Check_PBKDF2_SHA1;
    Check_PBKDF2_SHA2;
@@ -3107,6 +3274,7 @@ begin
    Check_X509_Purposes;
    Check_X509_Names;
    Check_Certificate_Armour;
+   Check_X509_CRL;
    Check_Identity_Predicates;
    Check_PKCS12_Mac_Key;
    Check_ECDSA_P384_Verify;

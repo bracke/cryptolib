@@ -122,6 +122,10 @@ The RNG **fails closed**: if no OS source is available it returns
   cross-signed roots is a separate problem and is not implemented. Trust is
   never inferred -- a self-signed certificate is not an anchor unless the
   caller says so.
+- **Revocation is available but not wired into validation.** `X509.CRLs`
+  decodes a CRL, verifies that its issuer signed it, and answers whether a
+  serial is on it; `Validate_Path` does not consult one. Nothing here fetches a
+  CRL -- retrieval is the application's. OCSP is not implemented.
 
 ## Test coverage
 

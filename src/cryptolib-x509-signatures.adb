@@ -197,17 +197,17 @@ package body CryptoLib.X509.Signatures is
       Ok := DER_Reader.At_End (Cursor, Outer.Last);
    end Split_ECDSA_Signature;
 
-   function Verify_Certificate_Signature
-     (Item   : CryptoLib.X509.Certificates.Certificate;
-      Issuer : CryptoLib.X509.Certificates.Certificate)
+   function Verify_Signed_Data
+     (Signed    : CryptoLib.ASN1.Octets;
+      Signature : CryptoLib.ASN1.Octets;
+      Algorithm : Signature_Algorithm;
+      Issuer    : CryptoLib.X509.Certificates.Certificate)
       return Verification_Result
    is
-      Algorithm : constant Signature_Algorithm :=
-        X509C.Signature_Algorithm_Of (Item);
-      Key_Kind  : constant Public_Key_Algorithm :=
+      Key_Kind : constant Public_Key_Algorithm :=
         X509C.Public_Key_Algorithm_Of (Issuer);
    begin
-      if not X509C.Is_Present (Item) or else not X509C.Is_Present (Issuer) then
+      if not X509C.Is_Present (Issuer) then
          return Missing_Input;
       end if;
 
@@ -216,10 +216,8 @@ package body CryptoLib.X509.Signatures is
       end if;
 
       declare
-         Message : constant Ada.Streams.Stream_Element_Array :=
-           X509C.TBS_Bytes (Item);
-         Sig     : constant Ada.Streams.Stream_Element_Array :=
-           X509C.Signature_Bytes (Item);
+         Message : Ada.Streams.Stream_Element_Array renames Signed;
+         Sig     : Ada.Streams.Stream_Element_Array renames Signature;
          Key     : constant Ada.Streams.Stream_Element_Array :=
            X509C.Public_Key (Issuer);
       begin
@@ -366,6 +364,23 @@ package body CryptoLib.X509.Signatures is
                return Unsupported_Algorithm;
          end case;
       end;
+   end Verify_Signed_Data;
+
+   function Verify_Certificate_Signature
+     (Item   : CryptoLib.X509.Certificates.Certificate;
+      Issuer : CryptoLib.X509.Certificates.Certificate)
+      return Verification_Result
+   is
+   begin
+      if not X509C.Is_Present (Item) then
+         return Missing_Input;
+      end if;
+
+      return Verify_Signed_Data
+        (Signed    => X509C.TBS_Bytes (Item),
+         Signature => X509C.Signature_Bytes (Item),
+         Algorithm => X509C.Signature_Algorithm_Of (Item),
+         Issuer    => Issuer);
    end Verify_Certificate_Signature;
 
 end CryptoLib.X509.Signatures;

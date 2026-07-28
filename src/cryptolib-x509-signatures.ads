@@ -1,3 +1,4 @@
+with CryptoLib.ASN1;
 with CryptoLib.X509.Certificates;
 
 --  @summary Checking that one certificate was signed by another's key.
@@ -54,6 +55,26 @@ package CryptoLib.X509.Signatures is
    function Verify_Certificate_Signature
      (Item   : CryptoLib.X509.Certificates.Certificate;
       Issuer : CryptoLib.X509.Certificates.Certificate)
+      return Verification_Result;
+
+   --  Is this signature over these bytes the issuer key's?
+   --
+   --  The primitive behind Verify_Certificate_Signature, exposed because a
+   --  certificate is not the only thing an issuer signs: a CRL is signed the
+   --  same way over its own body. Sharing this means the algorithm dispatch,
+   --  the key checks and the ECDSA signature decoding cannot be right for one
+   --  and wrong for the other.
+   --  @param Signed the exact bytes that were signed
+   --  @param Signature the signature value, without its BIT STRING wrapper
+   --  @param Algorithm the algorithm the signature claims to be
+   --  @param Issuer the certificate whose public key is proposed as signer
+   --  @return Valid only when the signature verifies; see the type for what
+   --  the other results mean
+   function Verify_Signed_Data
+     (Signed    : CryptoLib.ASN1.Octets;
+      Signature : CryptoLib.ASN1.Octets;
+      Algorithm : Signature_Algorithm;
+      Issuer    : CryptoLib.X509.Certificates.Certificate)
       return Verification_Result;
 
    --  Can this crate verify signatures of this algorithm at all?
