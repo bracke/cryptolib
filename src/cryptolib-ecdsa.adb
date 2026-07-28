@@ -19,7 +19,7 @@ package body CryptoLib.ECDSA is
    use Ada.Streams;
    use CryptoLib.Errors;
 
-   type Curve_Kind is (Nistp384, Nistp521);
+   type Curve_Kind is (Nistp256, Nistp384, Nistp521);
 
    type Point is record
       X, Y, Z : Element;                       --  projective, Montgomery-p form
@@ -74,6 +74,48 @@ package body CryptoLib.ECDSA is
       Minus := Slot;
       Minus (Minus'Last) := Minus (Minus'Last) - 2;
    end Fill_Modulus;
+
+   --  P-256, taken from the curve OpenSSL prints for prime256v1 rather than
+   --  from memory. a is p - 3, which is what the shared point arithmetic
+   --  assumes; a curve where it were not could not use A3_Mont.
+   function P256_Curve return Curve_Data is
+      Cv : Curve_Data;
+      P_Hex : constant String :=
+        "ffffffff00000001000000000000000000000000ffffffffffffffffffffffff";
+      N_Hex : constant String :=
+        "ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551";
+      Gx : constant Stream_Element_Array := From_Hex
+        ("6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296");
+      Gy : constant Stream_Element_Array := From_Hex
+        ("4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5");
+      B_Bytes : constant Stream_Element_Array := From_Hex
+        ("5ac635d8aa3a93e7b3ebbd55769886bc651d06b0cc53b0f63bce3c3e27d2604b");
+   begin
+      Cv.Kind := Nistp256;
+      Cv.Byte_Length := 32;
+      Cv.Q_Bits := 256;
+      Cv.Nonce_Shift := 0;
+      Cv.P_Len := 32;
+      Fill_Modulus (P_Hex, Cv.P_Bytes, Cv.P_Minus_2);
+      Fill_Modulus (N_Hex, Cv.N_Bytes, Cv.N_Minus_2);
+      Cv.Field := Make_Context (From_Hex (P_Hex));
+      Cv.Order := Make_Context (From_Hex (N_Hex));
+      Cv.Base :=
+        (X => To_Mont (Cv.Field, From_Bytes (Cv.Field, Gx)),
+         Y => To_Mont (Cv.Field, From_Bytes (Cv.Field, Gy)),
+         Z => One_Mont (Cv.Field));
+      declare
+         B_El  : constant Element := From_Bytes (Cv.Field, B_Bytes);
+         B3_El : constant Element :=
+           Add (Cv.Field, B_El, Add (Cv.Field, B_El, B_El));
+         Three : constant Element :=
+           From_Bytes (Cv.Field, Stream_Element_Array'(1 => 3));
+      begin
+         Cv.B3_Mont := To_Mont (Cv.Field, B3_El);
+         Cv.A3_Mont := To_Mont (Cv.Field, Sub (Cv.Field, Zero, Three));
+      end;
+      return Cv;
+   end P256_Curve;
 
    function P384_Curve return Curve_Data is
       Cv : Curve_Data;
@@ -283,6 +325,18 @@ package body CryptoLib.ECDSA is
    end Shift_Bits;
 
    function Digest_Array
+     (Digest_Value : CryptoLib.Hashes.SHA256_Digest) return Stream_Element_Array
+   is
+      R : Stream_Element_Array (1 .. Digest_Value'Length);
+      C : Stream_Element_Offset := R'First;
+   begin
+      for B of Digest_Value loop
+         R (C) := B; C := C + 1;
+      end loop;
+      return R;
+   end Digest_Array;
+
+   function Digest_Array
      (Digest_Value : CryptoLib.Hashes.SHA384_Digest) return Stream_Element_Array
    is
       R : Stream_Element_Array (1 .. Digest_Value'Length);
@@ -306,17 +360,55 @@ package body CryptoLib.ECDSA is
       return R;
    end Digest_Array;
 
+   function Hash_For
+     (Digest : Digest_Id; Message_Bytes : Stream_Element_Array)
+      return Stream_Element_Array
+   is
+   begin
+      case Digest is
+         when SHA256 =>
+            return Digest_Array (CryptoLib.Hashes.SHA256 (Message_Bytes));
+         when SHA384 =>
+            return Digest_Array (CryptoLib.Hashes.SHA384 (Message_Bytes));
+         when SHA512 =>
+            return Digest_Array (CryptoLib.Hashes.SHA512 (Message_Bytes));
+      end case;
+   end Hash_For;
+
+   --  The digest a curve's own algorithms pair with, for the signing paths
+   --  and for the fixed-curve verify entry points.
+   function Matching_Digest (Cv : Curve_Data) return Digest_Id
+   is (case Cv.Kind is
+          when Nistp256 => SHA256,
+          when Nistp384 => SHA384,
+          when Nistp521 => SHA512);
+
+   --  ECDSA uses the leftmost bits of the digest, so a hash wider than the
+   --  order is cut rather than reduced. Every curve here has an order whose
+   --  width in octets is at least that of the digests it is used with, save
+   --  where this cuts.
    function Hash_Data
      (Cv : Curve_Data; Message_Bytes : Stream_Element_Array)
       return Stream_Element_Array
    is
    begin
-      case Cv.Kind is
-         when Nistp384 =>
-            return Digest_Array (CryptoLib.Hashes.SHA384 (Message_Bytes));
-         when Nistp521 =>
-            return Digest_Array (CryptoLib.Hashes.SHA512 (Message_Bytes));
-      end case;
+      return Hash_For (Matching_Digest (Cv), Message_Bytes);
+   end Hash_Data;
+
+   function Hash_Data
+     (Cv            : Curve_Data;
+      Digest        : Digest_Id;
+      Message_Bytes : Stream_Element_Array) return Stream_Element_Array
+   is
+      Full : constant Stream_Element_Array :=
+        Hash_For (Digest, Message_Bytes);
+      Wide : constant Stream_Element_Offset :=
+        Stream_Element_Offset (Cv.Byte_Length);
+   begin
+      if Full'Length <= Wide then
+         return Full;
+      end if;
+      return Full (Full'First .. Full'First + Wide - 1);
    end Hash_Data;
 
    function HMAC_Data
@@ -325,6 +417,9 @@ package body CryptoLib.ECDSA is
    is
    begin
       case Cv.Kind is
+         when Nistp256 =>
+            return Digest_Array
+              (CryptoLib.Macs.HMAC_SHA256 (Key_Data, Message_Data));
          when Nistp384 =>
             return Digest_Array
               (CryptoLib.Macs.HMAC_SHA384 (Key_Data, Message_Data));
@@ -656,13 +751,17 @@ package body CryptoLib.ECDSA is
    --  Verification is public arithmetic: r and s are on the wire and the key is
    --  published, so nothing here is secret and the constant-time discipline the
    --  signer needs does not apply. It reuses the same primitives regardless.
-   function Verify_Nistp384_Raw
-     (Public_Point  : Stream_Element_Array;
+   --  The verification is the same on every curve; only the parameters
+   --  differ. Kept as one body so that a fix to it cannot reach one curve and
+   --  miss another.
+   function Verify_Raw
+     (Cv            : Curve_Data;
+      Digest        : Digest_Id;
+      Public_Point  : Stream_Element_Array;
       Message_Bytes : Stream_Element_Array;
       R_Bytes       : Stream_Element_Array;
       S_Bytes       : Stream_Element_Array) return Status
    is
-      Cv     : constant Curve_Data := P384_Curve;
       Length : constant Stream_Element_Offset :=
         Stream_Element_Offset (Cv.Byte_Length);
       P_Len  : constant Stream_Element_Offset :=
@@ -711,7 +810,7 @@ package body CryptoLib.ECDSA is
 
       declare
          Hash    : constant Stream_Element_Array :=
-           Hash_Data (Cv, Message_Bytes);
+           Hash_Data (Cv, Digest, Message_Bytes);
          H_Value : constant Element :=
            Add (Cv.Order, From_Bytes (Cv.Order, Hash), Zero);
          S_Inv   : constant Element :=
@@ -745,6 +844,60 @@ package body CryptoLib.ECDSA is
          end if;
          return Authentication_Failed;
       end;
+   end Verify_Raw;
+
+   function Verify_Signature
+     (Curve         : Curve_Id;
+      Digest        : Digest_Id;
+      Public_Point  : Stream_Element_Array;
+      Message_Bytes : Stream_Element_Array;
+      R_Bytes       : Stream_Element_Array;
+      S_Bytes       : Stream_Element_Array) return Status
+   is
+      Cv : constant Curve_Data :=
+        (case Curve is
+            when Nistp256 => P256_Curve,
+            when Nistp384 => P384_Curve,
+            when Nistp521 => P521_Curve);
+   begin
+      return Verify_Raw
+        (Cv, Digest, Public_Point, Message_Bytes, R_Bytes, S_Bytes);
+   end Verify_Signature;
+
+   function Verify_Nistp256_Raw
+     (Public_Point  : Stream_Element_Array;
+      Message_Bytes : Stream_Element_Array;
+      R_Bytes       : Stream_Element_Array;
+      S_Bytes       : Stream_Element_Array) return Status
+   is
+   begin
+      return Verify_Raw
+        (P256_Curve, Matching_Digest (P256_Curve),
+         Public_Point, Message_Bytes, R_Bytes, S_Bytes);
+   end Verify_Nistp256_Raw;
+
+   function Verify_Nistp384_Raw
+     (Public_Point  : Stream_Element_Array;
+      Message_Bytes : Stream_Element_Array;
+      R_Bytes       : Stream_Element_Array;
+      S_Bytes       : Stream_Element_Array) return Status
+   is
+   begin
+      return Verify_Raw
+        (P384_Curve, Matching_Digest (P384_Curve),
+         Public_Point, Message_Bytes, R_Bytes, S_Bytes);
    end Verify_Nistp384_Raw;
+
+   function Verify_Nistp521_Raw
+     (Public_Point  : Stream_Element_Array;
+      Message_Bytes : Stream_Element_Array;
+      R_Bytes       : Stream_Element_Array;
+      S_Bytes       : Stream_Element_Array) return Status
+   is
+   begin
+      return Verify_Raw
+        (P521_Curve, Matching_Digest (P521_Curve),
+         Public_Point, Message_Bytes, R_Bytes, S_Bytes);
+   end Verify_Nistp521_Raw;
 
 end CryptoLib.ECDSA;

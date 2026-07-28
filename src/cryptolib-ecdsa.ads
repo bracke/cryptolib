@@ -70,6 +70,70 @@ package CryptoLib.ECDSA is
       Public_Point   : out Ada.Streams.Stream_Element_Array)
       return CryptoLib.Errors.Status;
 
+   --  Which curve a key is on.
+   type Curve_Id is (Nistp256, Nistp384, Nistp521);
+
+   --  Which digest a signature was made with.
+   --
+   --  Separate from the curve on purpose. An ECDSA signature algorithm names
+   --  only the hash -- ecdsa-with-SHA256 says nothing about the curve -- and
+   --  a P-521 key signing with SHA-256 is an ordinary, legal combination that
+   --  a verifier pairing the two would refuse.
+   type Digest_Id is (SHA256, SHA384, SHA512);
+
+   --  Verify an ECDSA signature on any supported curve with any supported
+   --  digest.
+   --
+   --  A digest wider than the curve's order is truncated to its leftmost
+   --  octets, as ECDSA requires.
+   --  @param Curve which curve the public point is on
+   --  @param Digest which hash the signature was made with
+   --  @param Public_Point 16#04#, then X and Y, each the curve's width
+   --  @param Message_Bytes the signed message, hashed here
+   --  @param R_Bytes the signature component r, the curve's width
+   --  @param S_Bytes the signature component s, the curve's width
+   --  @return Ok when the signature is that key's over that message,
+   --          Authentication_Failed when it is not, Handshake_Failed on a
+   --          wrong-length input
+   function Verify_Signature
+     (Curve         : Curve_Id;
+      Digest        : Digest_Id;
+      Public_Point  : Ada.Streams.Stream_Element_Array;
+      Message_Bytes : Ada.Streams.Stream_Element_Array;
+      R_Bytes       : Ada.Streams.Stream_Element_Array;
+      S_Bytes       : Ada.Streams.Stream_Element_Array)
+      return CryptoLib.Errors.Status;
+
+   --  Verify a P-256 signature against a public point.
+   --  @param Public_Point 65 bytes: 16#04#, then X and Y as 32 bytes each
+   --  @param Message_Bytes the signed message (hashed internally with SHA-256)
+   --  @param R_Bytes the signature component r as 32 big-endian bytes
+   --  @param S_Bytes the signature component s as 32 big-endian bytes
+   --  @return Ok when the signature is that key's over that message,
+   --          Authentication_Failed when it is not, Handshake_Failed on a
+   --          wrong-length input
+   function Verify_Nistp256_Raw
+     (Public_Point  : Ada.Streams.Stream_Element_Array;
+      Message_Bytes : Ada.Streams.Stream_Element_Array;
+      R_Bytes       : Ada.Streams.Stream_Element_Array;
+      S_Bytes       : Ada.Streams.Stream_Element_Array)
+      return CryptoLib.Errors.Status;
+
+   --  Verify a P-521 signature against a public point.
+   --  @param Public_Point 133 bytes: 16#04#, then X and Y as 66 bytes each
+   --  @param Message_Bytes the signed message (hashed internally with SHA-512)
+   --  @param R_Bytes the signature component r as 66 big-endian bytes
+   --  @param S_Bytes the signature component s as 66 big-endian bytes
+   --  @return Ok when the signature is that key's over that message,
+   --          Authentication_Failed when it is not, Handshake_Failed on a
+   --          wrong-length input
+   function Verify_Nistp521_Raw
+     (Public_Point  : Ada.Streams.Stream_Element_Array;
+      Message_Bytes : Ada.Streams.Stream_Element_Array;
+      R_Bytes       : Ada.Streams.Stream_Element_Array;
+      S_Bytes       : Ada.Streams.Stream_Element_Array)
+      return CryptoLib.Errors.Status;
+
    --  Verify a P-384 signature against a public point.
    --  @param Public_Point 97 bytes: 16#04#, then X and Y as 48 bytes each
    --  @param Message_Bytes the signed message (hashed internally with SHA-384)

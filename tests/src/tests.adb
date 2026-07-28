@@ -1867,8 +1867,10 @@ procedure Tests is
              and then X509S.Is_Supported (CryptoLib.X509.SHA384_With_RSA)
              and then X509S.Is_Supported (CryptoLib.X509.SHA512_With_RSA),
              "the RSA signature algorithms are verifiable");
-      Check (not X509S.Is_Supported (CryptoLib.X509.ECDSA_With_SHA256),
-             "ECDSA P-256 is still honestly reported as unverifiable");
+      Check (X509S.Is_Supported (CryptoLib.X509.ECDSA_With_SHA256)
+             and then X509S.Is_Supported (CryptoLib.X509.ECDSA_With_SHA384)
+             and then X509S.Is_Supported (CryptoLib.X509.ECDSA_With_SHA512),
+             "every ECDSA digest is verifiable");
       Check (not X509S.Is_Supported (CryptoLib.X509.RSASSA_PSS),
              "RSA-PSS is a different scheme and is not claimed");
       Check (X509S.Is_Supported (CryptoLib.X509.ECDSA_With_SHA384),
@@ -2155,6 +2157,127 @@ procedure Tests is
    end Check_RSA_Verify;
 
 
+   --  ECDSA verification across curves and digests.
+   --
+   --  Two of these three vectors deliberately pair a curve with a digest that
+   --  is not "its own": P-521 with SHA-256 and P-384 with SHA-512. Both are
+   --  ordinary and legal -- an ECDSA algorithm identifier names only the hash
+   --  -- and a verifier that inferred the curve from the algorithm would
+   --  refuse them. It is the mistake this code made before these were added.
+   procedure Check_ECDSA_Curves is
+
+      EC_P256_Point : constant String :=
+        "04ab77f04240ffa7388eef4c158f929ab1748039e79a7720358a3e4780da54162f97382f07d105790ec7fc1128" &
+        "605139bbb33bc7f58df3c20313b08aadee338626";
+      EC_P256_R : constant String :=
+        "ad11b676041c86ccac693504ae97a463e3db02b78624cce40b22ff94859c039a";
+      EC_P256_S : constant String :=
+        "c27b52a3125e0f682180e8fd134366db7c4560b698dcfc5132dbeee2a9fbaa92";
+
+      EC_P521_Point : constant String :=
+        "0401f9b325a0943c5f0b687878f1bd99d81690bfb084695decad2eefd788717cb0bba1d0e8acea11fbaa6ce9f1" &
+        "0ce41c06afda95cd3eec755606ae55928071a49bce99004cfdbeee17dc63a974e917146e6b9a60d0eb97bbe1dc" &
+        "e43bd42c9ea6beb3f3e9b619e28ff17bdee3d6f101e312bab1424ba49fc7f793177724bad175afe65a4572";
+      EC_P521_R : constant String :=
+        "014656dd265508026a55e10a7996d5b60da758210a10a8673f2c832a682e4c3b4b7fb3c78d338e84f600654809" &
+        "fd365b5ced3a57227d974b4bc439943a142185a2f7";
+      EC_P521_S : constant String :=
+        "00743ee773b2d115f9ddb577c034068a367377b9619f4cb71465118632faa1798176303db6df30abda83fb13d7" &
+        "b31b43dd6f1303585d6ca9cb6910ef590eb78626f4";
+
+      EC_P384_Point : constant String :=
+        "04da8a61701c3aeeb1633e25606310587c169425652ebfea93ea3aa44706100a4047baf288d16b076485cb1c96" &
+        "a28d75dd0e6ec2a77a03030402f7d66ee7b126654055ed7389ecbbd050994f41aaa80f9cfdfa873db916c78c38" &
+        "df92e02a89404a";
+      EC_P384_R : constant String :=
+        "2fbdf38aeb6858b4c274830048b5dfd9bfaf39f9e6d4ef4aca8dacf8f54aa0d57309663df01bd4f2fd81610d6f" &
+        "6901f2";
+      EC_P384_S : constant String :=
+        "99f0af5ad1ad517278c89ec6be67b850d1a349e88e47d794394ec49f898c92f1a9398040f1c220d8256cfe5df0" &
+        "de83e3";
+
+
+      Message : constant Ada.Streams.Stream_Element_Array :=
+        Bytes_From_String ("cryptolib ecdsa known answer");
+
+      function From_Hex
+        (Text : String) return Ada.Streams.Stream_Element_Array
+      is
+         Result : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (Text'Length / 2));
+         function Nibble (C : Character) return Natural
+         is (case C is
+                when '0' .. '9' => Character'Pos (C) - Character'Pos ('0'),
+                when others     => Character'Pos (C) - Character'Pos ('a') + 10);
+      begin
+         for I in Result'Range loop
+            Result (I) :=
+              Ada.Streams.Stream_Element
+                (Nibble (Text (Text'First + 2 * Natural (I - 1))) * 16
+                 + Nibble (Text (Text'First + 2 * Natural (I - 1) + 1)));
+         end loop;
+         return Result;
+      end From_Hex;
+
+      procedure Check_Vector
+        (Curve   : CryptoLib.ECDSA.Curve_Id;
+         Digest  : CryptoLib.ECDSA.Digest_Id;
+         Point   : String;
+         R_Hex   : String;
+         S_Hex   : String;
+         Label   : String)
+      is
+         P : constant Ada.Streams.Stream_Element_Array := From_Hex (Point);
+         R : constant Ada.Streams.Stream_Element_Array := From_Hex (R_Hex);
+         S : constant Ada.Streams.Stream_Element_Array := From_Hex (S_Hex);
+      begin
+         Check (CryptoLib.ECDSA.Verify_Signature
+                  (Curve, Digest, P, Message, R, S) = CryptoLib.Errors.Ok,
+                Label & ": an OpenSSL signature verifies");
+
+         declare
+            Bad : Ada.Streams.Stream_Element_Array := S;
+         begin
+            Bad (Bad'Last) := Bad (Bad'Last) xor 1;
+            Check (CryptoLib.ECDSA.Verify_Signature
+                     (Curve, Digest, P, Message, R, Bad)
+                     = CryptoLib.Errors.Authentication_Failed,
+                   Label & ": a tampered s does not verify");
+         end;
+
+         Check (CryptoLib.ECDSA.Verify_Signature
+                  (Curve, Digest, P,
+                   Bytes_From_String ("cryptolib ecdsa known answe"), R, S)
+                  = CryptoLib.Errors.Authentication_Failed,
+                Label & ": the signature does not cover a different message");
+      end Check_Vector;
+   begin
+      Check_Vector (CryptoLib.ECDSA.Nistp256, CryptoLib.ECDSA.SHA256,
+                    EC_P256_Point, EC_P256_R, EC_P256_S, "P-256 with SHA-256");
+
+      --  The pairings that matter: curve and digest chosen independently.
+      Check_Vector (CryptoLib.ECDSA.Nistp521, CryptoLib.ECDSA.SHA256,
+                    EC_P521_Point, EC_P521_R, EC_P521_S, "P-521 with SHA-256");
+      Check_Vector (CryptoLib.ECDSA.Nistp384, CryptoLib.ECDSA.SHA512,
+                    EC_P384_Point, EC_P384_R, EC_P384_S, "P-384 with SHA-512");
+
+      --  Verifying under the wrong curve must fail rather than be refused for
+      --  its length: the point is the right shape for P-256 and wrong for the
+      --  curve it is checked on.
+      declare
+         P : constant Ada.Streams.Stream_Element_Array :=
+           From_Hex (EC_P256_Point);
+         R : constant Ada.Streams.Stream_Element_Array := From_Hex (EC_P256_R);
+         S : constant Ada.Streams.Stream_Element_Array := From_Hex (EC_P256_S);
+      begin
+         Check (CryptoLib.ECDSA.Verify_Signature
+                  (CryptoLib.ECDSA.Nistp384, CryptoLib.ECDSA.SHA256,
+                   P, Message, R, S) /= CryptoLib.Errors.Ok,
+                "a P-256 point does not verify as a P-384 one");
+      end;
+   end Check_ECDSA_Curves;
+
+
 begin
    Check_PBKDF2_SHA1;
    Check_PBKDF2_SHA2;
@@ -2175,6 +2298,7 @@ begin
    Check_X509_Verify;
    Check_X509_Extensions;
    Check_RSA_Verify;
+   Check_ECDSA_Curves;
    Check_Identity_Predicates;
    Check_PKCS12_Mac_Key;
    Check_ECDSA_P384_Verify;

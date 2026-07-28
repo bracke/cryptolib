@@ -18,8 +18,12 @@ package body CryptoLib.X509.Signatures is
    package X509C renames CryptoLib.X509.Certificates;
    package DER_Reader renames CryptoLib.ASN1.DER;
 
+   P256_Component : constant := 32;
+   P256_Point     : constant := 65;
    P384_Component : constant := 48;
    P384_Point     : constant := 97;
+   P521_Component : constant := 66;
+   P521_Point     : constant := 133;
    Ed25519_Key    : constant := 32;
    Ed25519_Sig    : constant := 64;
 
@@ -36,7 +40,8 @@ package body CryptoLib.X509.Signatures is
    end Result_Image;
 
    function Is_Supported (Algorithm : Signature_Algorithm) return Boolean
-   is (Algorithm in ECDSA_With_SHA384 | Ed25519_Signature
+   is (Algorithm in ECDSA_With_SHA256 | ECDSA_With_SHA384 | ECDSA_With_SHA512
+       | Ed25519_Signature
        | SHA256_With_RSA | SHA384_With_RSA | SHA512_With_RSA);
 
    --  Take an RSAPublicKey apart into its modulus and exponent.
@@ -224,42 +229,69 @@ package body CryptoLib.X509.Signatures is
          end if;
 
          case Algorithm is
-            when ECDSA_With_SHA384 =>
-               if Key_Kind /= ECDSA_P384 then
-                  return Algorithm_Mismatch;
-               end if;
-
-               --  Only the uncompressed point form. A compressed point would
-               --  have to be decompressed to be used, and this crate does not
-               --  do that; saying so beats guessing.
-               if Key'Length /= P384_Point
-                 or else Key (Key'First) /= 16#04#
-               then
-                  return Malformed_Signature;
-               end if;
-
+            when ECDSA_With_SHA256 | ECDSA_With_SHA384 | ECDSA_With_SHA512 =>
+               --  The algorithm names the digest; the key names the curve.
+               --  They are independent -- a P-521 key signing with SHA-256 is
+               --  ordinary and legal -- so pairing them would refuse
+               --  certificates that are perfectly valid.
                declare
-                  R  : Ada.Streams.Stream_Element_Array
-                    (1 .. P384_Component);
-                  S  : Ada.Streams.Stream_Element_Array
-                    (1 .. P384_Component);
-                  Ok : Boolean;
+                  Curve : constant CryptoLib.ECDSA.Curve_Id :=
+                    (case Key_Kind is
+                        when ECDSA_P256 => CryptoLib.ECDSA.Nistp256,
+                        when ECDSA_P384 => CryptoLib.ECDSA.Nistp384,
+                        when others     => CryptoLib.ECDSA.Nistp521);
+                  Digest : constant CryptoLib.ECDSA.Digest_Id :=
+                    (case Algorithm is
+                        when ECDSA_With_SHA256 => CryptoLib.ECDSA.SHA256,
+                        when ECDSA_With_SHA384 => CryptoLib.ECDSA.SHA384,
+                        when others            => CryptoLib.ECDSA.SHA512);
+                  Point_Length : constant Natural :=
+                    (case Key_Kind is
+                        when ECDSA_P256 => P256_Point,
+                        when ECDSA_P384 => P384_Point,
+                        when others     => P521_Point);
+                  Width : constant Ada.Streams.Stream_Element_Offset :=
+                    (case Key_Kind is
+                        when ECDSA_P256 => P256_Component,
+                        when ECDSA_P384 => P384_Component,
+                        when others     => P521_Component);
                begin
-                  Split_ECDSA_Signature (Sig, R, S, Ok);
-                  if not Ok then
+                  if Key_Kind not in ECDSA_P256 | ECDSA_P384 | ECDSA_P521 then
+                     return Algorithm_Mismatch;
+                  end if;
+
+                  --  Only the uncompressed point form. A compressed point
+                  --  would have to be decompressed to be used, and this crate
+                  --  does not do that; saying so beats guessing.
+                  if Natural (Key'Length) /= Point_Length
+                    or else Key (Key'First) /= 16#04#
+                  then
                      return Malformed_Signature;
                   end if;
 
-                  if CryptoLib.ECDSA.Verify_Nistp384_Raw
-                       (Public_Point  => Key,
-                        Message_Bytes => Message,
-                        R_Bytes       => R,
-                        S_Bytes       => S) = CryptoLib.Errors.Ok
-                  then
-                     return Valid;
-                  else
-                     return Invalid_Signature;
-                  end if;
+                  declare
+                     R  : Ada.Streams.Stream_Element_Array (1 .. Width);
+                     S  : Ada.Streams.Stream_Element_Array (1 .. Width);
+                     Ok : Boolean;
+                  begin
+                     Split_ECDSA_Signature (Sig, R, S, Ok);
+                     if not Ok then
+                        return Malformed_Signature;
+                     end if;
+
+                     if CryptoLib.ECDSA.Verify_Signature
+                          (Curve         => Curve,
+                           Digest        => Digest,
+                           Public_Point  => Key,
+                           Message_Bytes => Message,
+                           R_Bytes       => R,
+                           S_Bytes       => S) = CryptoLib.Errors.Ok
+                     then
+                        return Valid;
+                     else
+                        return Invalid_Signature;
+                     end if;
+                  end;
                end;
 
             when SHA256_With_RSA | SHA384_With_RSA | SHA512_With_RSA =>

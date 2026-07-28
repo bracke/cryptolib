@@ -23,7 +23,7 @@ The reference sources are:
 | GHASH | GF(2¹²⁸) for AES-GCM | via the GCM KAT |
 | X25519 | Curve25519 ECDH | RFC 7748 §5.2 |
 | Ed25519 | sign / verify | RFC 8032 |
-| ECDSA | P-256 (in `ssh_lib`), P-384 / P-521 sign | **RFC 6979 A.2.5** (P-384, byte-exact) + P-521 (pyca cross-verified) |
+| ECDSA | P-256 (in `ssh_lib`), P-384 / P-521 sign; P-256 / P-384 / P-521 verify | **RFC 6979 A.2.5** (P-384, byte-exact) + P-521 (pyca cross-verified); verification against OpenSSL signatures on all three curves, including curve/digest pairings that differ (P-521 with SHA-256, P-384 with SHA-512) |
 | Finite-field DH | groups 1 / 14 / 16 / 18 | live vs OpenSSH; group16/18 pin the exact RFC 3526 primes |
 | Post-quantum | ML-KEM-768, sntrup761 (+ hybrid x25519 KEX) | NIST / live vs OpenSSH sntrup761x25519 |
 | X.509 (`Certificates`) | local CA, server/client/email issuance, CSR signing, PKCS#12 | PKCS#12 MAC key byte-exact vs OpenSSL; issued Ed25519 and P-384 certificates chain-verified against their CA by OpenSSL in the suite |
@@ -108,9 +108,8 @@ The RNG **fails closed**: if no OS source is available it returns
 - CT holds at the source level only; there is no formal or automated guarantee.
 - **RSA is verification only** — there is no RSA signing, key generation, or
   private-key operation, and no RSA-PSS. `X509.Signatures` reports
-  `Unsupported_Algorithm` for PSS and for ECDSA on P-256 and P-521 rather than
-  failing them, so "we did not check" is never mistaken for "the signature was
-  bad". RSA verification touches only public values, so nothing in it needs to
+  `Unsupported_Algorithm` for RSA-PSS rather than failing it, so "we did not
+  check" is never mistaken for "the signature was bad". RSA verification touches only public values, so nothing in it needs to
   be constant-time.
 - **Certificate path validation does not exist yet.** `X509.Signatures` answers
   only whether one certificate's signature is a given key's. Trust anchors,
