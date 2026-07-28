@@ -8,6 +8,7 @@ with CryptoLib.ASN1;
 with CryptoLib.PEM;
 with CryptoLib.X509;
 with CryptoLib.X509.Certificates;
+with CryptoLib.X509.Signatures;
 with CryptoLib.ASN1.DER;
 with CryptoLib.ASN1.Errors;
 with CryptoLib.ASN1.OIDs;
@@ -1682,6 +1683,195 @@ procedure Tests is
    end Check_X509_Decode;
 
 
+   --  Certificate signature verification, against the one implementation in
+   --  the room that is not ours: the suite already links libcrypto so it can
+   --  ask OpenSSL whether a chain we issued actually chains. Here the two are
+   --  asked about the same certificates and must agree.
+   procedure Check_X509_Verify is
+      use type CryptoLib.ASN1.Errors.Decode_Status;
+      use type CryptoLib.PEM.Decode_Status;
+      use type CryptoLib.X509.Signatures.Verification_Result;
+
+      package X509C renames CryptoLib.X509.Certificates;
+      package X509S renames CryptoLib.X509.Signatures;
+
+      --  Decode the first certificate in a PEM text.
+      function Decoded (Text : String) return X509C.Certificate is
+         Buffer : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset
+                   (CryptoLib.PEM.Maximum_Decoded_Length (Text)));
+         Last   : Ada.Streams.Stream_Element_Offset;
+         From   : Positive := Text'First;
+         P      : CryptoLib.PEM.Decode_Status;
+         D      : CryptoLib.ASN1.Errors.Decode_Status;
+      begin
+         CryptoLib.PEM.Decode_Block
+           (Text, CryptoLib.PEM.Certificate_Label, From, Buffer, Last, P);
+         Check (P = CryptoLib.PEM.Ok, "fixture: the armour must decode");
+         return X509C.Decode_DER
+           (Buffer (Buffer'First .. Last), CryptoLib.ASN1.Default_Limits, D);
+      end Decoded;
+
+      procedure Check_Pair
+        (Algorithm : CryptoLib.Certificates.Key_Algorithm;
+         Label     : String)
+      is
+         CA_PEM   : Unbounded_String;
+         CA_Key   : Unbounded_String;
+         Leaf_PEM : Unbounded_String;
+         Leaf_Key : Unbounded_String;
+         Outcome  : CryptoLib.Certificates.Certificate_Status;
+      begin
+         Outcome :=
+           CryptoLib.Certificates.Create_Local_CA
+             (Common_Name     => Label & "-verify-ca",
+              Certificate_PEM => CA_PEM,
+              Private_Key_PEM => CA_Key,
+              Algorithm       => Algorithm);
+         Check (Outcome = CryptoLib.Certificates.Ok,
+                "fixture: " & Label & " CA must be created");
+
+         Outcome :=
+           CryptoLib.Certificates.Issue_Server_Certificate
+             (CA_Certificate_PEM => To_String (CA_PEM),
+              CA_Private_Key_PEM => To_String (CA_Key),
+              Common_Name        => "leaf.invalid",
+              Names              => [1 => To_Unbounded_String ("leaf.invalid")],
+              Certificate_PEM    => Leaf_PEM,
+              Private_Key_PEM    => Leaf_Key);
+         Check (Outcome = CryptoLib.Certificates.Ok,
+                "fixture: " & Label & " leaf must be issued");
+
+         declare
+            CA   : constant X509C.Certificate := Decoded (To_String (CA_PEM));
+            Leaf : constant X509C.Certificate :=
+              Decoded (To_String (Leaf_PEM));
+            Ours : constant X509S.Verification_Result :=
+              X509S.Verify_Certificate_Signature (Leaf, CA);
+            Theirs : constant Boolean :=
+              OpenSSL_Interop.Chain_Verifies
+                (CA_PEM => To_String (CA_PEM),
+                 Leaf_PEM => To_String (Leaf_PEM));
+         begin
+            Check (X509C.Is_Present (CA) and then X509C.Is_Present (Leaf),
+                   "fixture: " & Label & " certificates must decode");
+
+            Check (Ours = X509S.Valid,
+                   Label & " leaf verifies under its CA, got "
+                   & X509S.Result_Image (Ours));
+            Check (Theirs,
+                   "fixture: OpenSSL must chain the " & Label & " pair");
+            Check ((Ours = X509S.Valid) = Theirs,
+                   Label & ": our verdict and OpenSSL's must agree");
+
+            --  A CA signs itself, and that is a signature like any other.
+            Check (X509S.Verify_Certificate_Signature (CA, CA) = X509S.Valid,
+                   Label & " CA is signed by its own key");
+
+            --  The leaf did not sign itself. This is the case a verifier
+            --  that ignored the issuer key would get wrong.
+            Check (X509S.Verify_Certificate_Signature (Leaf, Leaf)
+                     = X509S.Invalid_Signature,
+                   Label & " leaf is not signed by its own key, got "
+                   & X509S.Result_Image
+                       (X509S.Verify_Certificate_Signature (Leaf, Leaf)));
+         end;
+      end Check_Pair;
+   begin
+      Check_Pair (CryptoLib.Certificates.P384_Key, "p384");
+      Check_Pair (CryptoLib.Certificates.Ed25519_Key, "ed25519");
+
+      --  A certificate altered after signing must not verify. The bytes are
+      --  changed inside the TBS, which is what the signature covers.
+      declare
+         CA_PEM   : Unbounded_String;
+         CA_Key   : Unbounded_String;
+         Leaf_PEM : Unbounded_String;
+         Leaf_Key : Unbounded_String;
+         Outcome  : CryptoLib.Certificates.Certificate_Status;
+      begin
+         Outcome :=
+           CryptoLib.Certificates.Create_Local_CA
+             ("tamper-ca", CA_PEM, CA_Key,
+              CryptoLib.Certificates.P384_Key);
+         Check (Outcome = CryptoLib.Certificates.Ok, "fixture: tamper CA");
+         Outcome :=
+           CryptoLib.Certificates.Issue_Server_Certificate
+             (To_String (CA_PEM), To_String (CA_Key), "tamper.invalid",
+              [1 => To_Unbounded_String ("tamper.invalid")],
+              Leaf_PEM, Leaf_Key);
+         Check (Outcome = CryptoLib.Certificates.Ok, "fixture: tamper leaf");
+
+         declare
+            Text   : constant String := To_String (Leaf_PEM);
+            Buffer : Ada.Streams.Stream_Element_Array
+              (1 .. Ada.Streams.Stream_Element_Offset
+                      (CryptoLib.PEM.Maximum_Decoded_Length (Text)));
+            Last   : Ada.Streams.Stream_Element_Offset;
+            From   : Positive := Text'First;
+            P      : CryptoLib.PEM.Decode_Status;
+            D      : CryptoLib.ASN1.Errors.Decode_Status;
+            CA     : constant X509C.Certificate := Decoded (To_String (CA_PEM));
+         begin
+            CryptoLib.PEM.Decode_Block
+              (Text, CryptoLib.PEM.Certificate_Label, From, Buffer, Last, P);
+            Check (P = CryptoLib.PEM.Ok, "fixture: leaf armour decodes");
+
+            declare
+               Intact : constant X509C.Certificate :=
+                 X509C.Decode_DER (Buffer (Buffer'First .. Last),
+                                   CryptoLib.ASN1.Default_Limits, D);
+               TBS    : constant Ada.Streams.Stream_Element_Array :=
+                 X509C.TBS_Bytes (Intact);
+               --  Where the signed bytes sit within the certificate. The TBS
+               --  begins right after the outer SEQUENCE header, which is four
+               --  octets for a certificate of this size.
+               Target : constant Ada.Streams.Stream_Element_Offset :=
+                 Buffer'First + 4 + Ada.Streams.Stream_Element_Offset
+                                      (TBS'Length) - 8;
+            begin
+               Check (X509S.Verify_Certificate_Signature (Intact, CA)
+                        = X509S.Valid,
+                      "fixture: the intact leaf verifies");
+
+               Buffer (Target) := Buffer (Target) xor 1;
+
+               declare
+                  Altered : constant X509C.Certificate :=
+                    X509C.Decode_DER (Buffer (Buffer'First .. Last),
+                                      CryptoLib.ASN1.Default_Limits, D);
+               begin
+                  --  Flipping a bit inside the TBS may or may not still parse.
+                  --  If it does, the signature must fail; if it does not, the
+                  --  decode must have said so.
+                  --  Asserted rather than guarded: if the flip stops
+                  --  landing inside the TBS this must fail loudly, not skip
+                  --  the check it exists for.
+                  Check (D = CryptoLib.ASN1.Errors.Ok,
+                         "the altered certificate still parses, so the "
+                         & "signature is what has to reject it");
+                  Check (X509S.Verify_Certificate_Signature (Altered, CA)
+                           /= X509S.Valid,
+                         "an altered certificate must not verify");
+               end;
+            end;
+         end;
+      end;
+
+      --  Asking about an algorithm this crate cannot verify must say so
+      --  rather than report a bad signature. Today that is every RSA
+      --  certificate and ECDSA on P-256 and P-521.
+      Check (not X509S.Is_Supported (CryptoLib.X509.SHA256_With_RSA),
+             "RSA is honestly reported as unverifiable here");
+      Check (not X509S.Is_Supported (CryptoLib.X509.ECDSA_With_SHA256),
+             "ECDSA P-256 is honestly reported as unverifiable here");
+      Check (X509S.Is_Supported (CryptoLib.X509.ECDSA_With_SHA384),
+             "ECDSA P-384 is supported");
+      Check (X509S.Is_Supported (CryptoLib.X509.Ed25519_Signature),
+             "Ed25519 is supported");
+   end Check_X509_Verify;
+
+
 begin
    Check_PBKDF2_SHA1;
    Check_PBKDF2_SHA2;
@@ -1699,6 +1889,7 @@ begin
    Check_P384_Local_CA;
    Check_ASN1_DER;
    Check_X509_Decode;
+   Check_X509_Verify;
    Check_Identity_Predicates;
    Check_PKCS12_Mac_Key;
    Check_ECDSA_P384_Verify;
