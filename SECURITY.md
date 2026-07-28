@@ -114,10 +114,10 @@ The RNG **fails closed**: if no OS source is available it returns
   confirms a chain decodes, hangs together by issuer and subject name, and
   that the private key belongs to the leaf. It says nothing about whether the
   chain should be believed, which is `X509.Validation`'s question and needs
-  trust anchors. RSA, ECDSA P-384 and Ed25519 identities are checked; ECDSA on
-  P-256 and P-521 report `Unsupported_Key` rather than `Ok`, because there is
-  no public-key derivation for those curves here and an unchecked identity
-  must never be mistaken for a checked one.
+  trust anchors. RSA, ECDSA on P-256, P-384 and P-521, and Ed25519 identities
+  are all checked. Anything else -- Ed448 today -- reports `Unsupported_Key`
+  rather than `Ok`, so an unchecked identity is never mistaken for a checked
+  one.
 - **RSA is verification only** — there is no RSA signing, key generation, or
   private-key operation, and no RSA-PSS. `X509.Signatures` reports
   `Unsupported_Algorithm` rather than a failure whenever it cannot check a

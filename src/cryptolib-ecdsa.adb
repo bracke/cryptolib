@@ -717,12 +717,19 @@ package body CryptoLib.ECDSA is
       return CryptoLib.Errors.Ok;
    end Affine_Point;
 
-   function Public_Nistp384_Raw
-     (Private_Scalar_Mpint : Stream_Element_Array;
+   --  One body for every curve, so a fix to it cannot reach one and miss
+   --  another.
+   function Public_Key_Raw
+     (Curve                : Curve_Id;
+      Private_Scalar_Mpint : Stream_Element_Array;
       Public_Point         : out Stream_Element_Array)
       return Status
    is
-      Cv : constant Curve_Data := P384_Curve;
+      Cv : constant Curve_Data :=
+        (case Curve is
+            when Nistp256 => P256_Curve,
+            when Nistp384 => P384_Curve,
+            when Nistp521 => P521_Curve);
       D  : Element;
    begin
       Public_Point := [others => 0];
@@ -733,6 +740,15 @@ package body CryptoLib.ECDSA is
          return CryptoLib.Errors.Authentication_Failed;
       end if;
       return Affine_Point (Cv, D, Public_Point);
+   end Public_Key_Raw;
+
+   function Public_Nistp384_Raw
+     (Private_Scalar_Mpint : Stream_Element_Array;
+      Public_Point         : out Stream_Element_Array)
+      return Status
+   is
+   begin
+      return Public_Key_Raw (Nistp384, Private_Scalar_Mpint, Public_Point);
    end Public_Nistp384_Raw;
 
    function Generate_Nistp384_Keypair

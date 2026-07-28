@@ -4235,6 +4235,86 @@ procedure Tests is
                 & "unchecked identity, got " & ID.Status_Image (St));
       end;
 
+      --  The other two curves. Matching these needs the public point
+      --  derived from the scalar, which is the same arithmetic on all three
+      --  and was only ever offered for one of them.
+      declare
+         P256_Leaf : constant String :=
+           "-----BEGIN CERTIFICATE-----" & ASCII.LF &
+           "MIIBKDCBzwIUDNb25fQiF6PjOrD6qfSpFj2KY5EwCgYIKoZIzj0EAwIwEjEQMA4G" & ASCII.LF &
+           "A1UEAwwHcDI1Ni1jYTAeFw0yNjA3MjgxOTExMzFaFw0yNzA3MjgxOTExMzFaMBwx" & ASCII.LF &
+           "GjAYBgNVBAMMEWxlYWYucDI1Ni5leGFtcGxlMFkwEwYHKoZIzj0CAQYIKoZIzj0D" & ASCII.LF &
+           "AQcDQgAEjQ6HgkMnOkYjt9ywJo2fiNj4nvi+jFMmxbbWvAVuYcWfaCXlXIMKEkwz" & ASCII.LF &
+           "LUIDfkxvRTO4aP8CoDpkCpA6Vzc6TDAKBggqhkjOPQQDAgNIADBFAiEAkXYM7UH4" & ASCII.LF &
+           "P7G31aw72aKYI9Phky02Lx1WmDcfIrvz1pICIEtkjpugplNQ62ZgEfUl4k+00f1s" & ASCII.LF &
+           "p71JQPavUV5SbzxV" & ASCII.LF &
+           "-----END CERTIFICATE-----";
+
+         P256_Key : constant String :=
+           "-----BEGIN PRIVATE KEY-----" & ASCII.LF &
+           "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgyfvjdmW+qhTmVjFM" & ASCII.LF &
+           "vLt3ubIrMpcVGK7QvaHIqobtI4ihRANCAASNDoeCQyc6RiO33LAmjZ+I2Pie+L6M" & ASCII.LF &
+           "UybFtta8BW5hxZ9oJeVcgwoSTDMtQgN+TG9FM7ho/wKgOmQKkDpXNzpM" & ASCII.LF &
+           "-----END PRIVATE KEY-----";
+
+         P256_Alt : constant String :=
+           "-----BEGIN PRIVATE KEY-----" & ASCII.LF &
+           "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgZ1wL8wt312RjJ85J" & ASCII.LF &
+           "skUbZx0VurwfmgPMLk32oYqWeu+hRANCAATYB8yQPFjLsmtkyPJTkNw4inikSlxR" & ASCII.LF &
+           "ICjnFj/zr+knrgoWNbHCtEcNHKkl08X0RLqOQ1Jt10iN3XcMlDQhJqjY" & ASCII.LF &
+           "-----END PRIVATE KEY-----";
+
+         P521_Leaf : constant String :=
+           "-----BEGIN CERTIFICATE-----" & ASCII.LF &
+           "MIIBsTCCARICFB0q89Xz7gyESR358e7GIzg9InzhMAoGCCqGSM49BAMCMBIxEDAO" & ASCII.LF &
+           "BgNVBAMMB3A1MjEtY2EwHhcNMjYwNzI4MTkxMTMxWhcNMjcwNzI4MTkxMTMxWjAc" & ASCII.LF &
+           "MRowGAYDVQQDDBFsZWFmLnA1MjEuZXhhbXBsZTCBmzAQBgcqhkjOPQIBBgUrgQQA" & ASCII.LF &
+           "IwOBhgAEAWeV2y073JLStpmKqOgllO86I0HGwH1rufdQgsEpCmnQ96hipf/+jdqi" & ASCII.LF &
+           "DUvSoS6vDKIxrN7+icu/TPKxAIF482OfAAmK76cP29aM0LUHbuX6yC6oya4GfaRg" & ASCII.LF &
+           "m3VmkUszvKW1Hdkf4D+WEde13jgxn2/fWc0dHLMlEC1WLLEpQvSa0g8MMAoGCCqG" & ASCII.LF &
+           "SM49BAMCA4GMADCBiAJCAIowN9YZvYhNDpT1czUiM++cbk8KGHXAvFYnN6C3ErnT" & ASCII.LF &
+           "TrAgX9ZBBhcnPIIhiEc7R+ARydGZrwSHWL1WNEMy0YL6AkIAqL87ZPB5Qk6QUML9" & ASCII.LF &
+           "yj2fVE7rOSzy1WyjlLFCdWlv+97luri69Fc+4XqRFhC2GFz7IwNF9eeMbeEvGeU/" & ASCII.LF &
+           "70Nhi3Y=" & ASCII.LF &
+           "-----END CERTIFICATE-----";
+
+         P521_Key : constant String :=
+           "-----BEGIN PRIVATE KEY-----" & ASCII.LF &
+           "MIHuAgEAMBAGByqGSM49AgEGBSuBBAAjBIHWMIHTAgEBBEIAIgx2sfzzwK3Wolda" & ASCII.LF &
+           "+75K1hINe6fq3ZD6xKeEZCR2kaH9AJ0h8JrV1elkLILJWLBawH1UcvMaUp/rTpSZ" & ASCII.LF &
+           "MRjU2aWhgYkDgYYABAFnldstO9yS0raZiqjoJZTvOiNBxsB9a7n3UILBKQpp0Peo" & ASCII.LF &
+           "YqX//o3aog1L0qEurwyiMaze/onLv0zysQCBePNjnwAJiu+nD9vWjNC1B27l+sgu" & ASCII.LF &
+           "qMmuBn2kYJt1ZpFLM7yltR3ZH+A/lhHXtd44MZ9v31nNHRyzJRAtViyxKUL0mtIP" & ASCII.LF &
+           "DA==" & ASCII.LF &
+           "-----END PRIVATE KEY-----";
+         Item : ID.Local_Identity;
+         St   : ID.Identity_Status;
+      begin
+         ID.Decode (P256_Leaf, P256_Key, Item, St);
+         Check (St = ID.Ok,
+                "a P-256 certificate and its own key check out, got "
+                & ID.Status_Image (St));
+         Check (ID.Key_Algorithm_Of (Item) = CryptoLib.X509.ECDSA_P256,
+                "and the curve is reported");
+
+         ID.Decode (P521_Leaf, P521_Key, Item, St);
+         Check (St = ID.Ok,
+                "a P-521 certificate and its own key check out, got "
+                & ID.Status_Image (St));
+
+         --  A different key on the same curve, which is the case that needs
+         --  the derivation rather than a look at the algorithm.
+         ID.Decode (P256_Leaf, P256_Alt, Item, St);
+         Check (St = ID.Key_Mismatch,
+                "another P-256 key is a mismatch, not an unchecked identity, "
+                & "got " & ID.Status_Image (St));
+
+         --  A key from a different curve fails earlier, on the algorithm.
+         ID.Decode (P256_Leaf, P521_Key, Item, St);
+         Check (St = ID.Key_Mismatch,
+                "a key from another curve does not match either");
+      end;
+
       --  Material that is not there, or not a key.
       declare
          Item : ID.Local_Identity;

@@ -110,6 +110,25 @@ package CryptoLib.ECDSA is
       S_Bytes       : Ada.Streams.Stream_Element_Array)
       return CryptoLib.Errors.Status;
 
+   --  The public point a private scalar implies, on any supported curve.
+   --
+   --  Offered for every curve because deciding whether a private key belongs
+   --  to a certificate means deriving its public key and comparing, and a
+   --  caller that can do that on one curve and not another has to report the
+   --  difference rather than the answer.
+   --  @param Curve which curve the scalar belongs to
+   --  @param Private_Scalar_Mpint the scalar d, as an SSH mpint or as the
+   --  curve's width in big-endian bytes
+   --  @param Public_Point receives 16#04#, then X and Y, each the curve's
+   --  width; 65, 97 or 133 octets
+   --  @return Ok on success, Handshake_Failed on a wrong-length output,
+   --          Authentication_Failed when the scalar is not one
+   function Public_Key_Raw
+     (Curve                : Curve_Id;
+      Private_Scalar_Mpint : Ada.Streams.Stream_Element_Array;
+      Public_Point         : out Ada.Streams.Stream_Element_Array)
+      return CryptoLib.Errors.Status;
+
    --  Verify a P-256 signature against a public point.
    --  @param Public_Point 65 bytes: 16#04#, then X and Y as 32 bytes each
    --  @param Message_Bytes the signed message (hashed internally with SHA-256)

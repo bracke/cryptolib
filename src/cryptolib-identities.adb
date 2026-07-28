@@ -119,16 +119,29 @@ package body CryptoLib.Identities is
       end if;
 
       case Kind is
-         when ECDSA_P384 =>
+         when ECDSA_P256 | ECDSA_P384 | ECDSA_P521 =>
+            --  Derive the public point the scalar implies and compare it with
+            --  what the certificate carries. The curve decides the widths;
+            --  the arithmetic is the same on all three.
             declare
                Scalar : constant Octets :=
                  CryptoLib.PKCS8.Private_Value (Key_Item);
-               Point  : Ada.Streams.Stream_Element_Array (1 .. 97);
+               Curve  : constant CryptoLib.ECDSA.Curve_Id :=
+                 (case Kind is
+                     when ECDSA_P256 => CryptoLib.ECDSA.Nistp256,
+                     when ECDSA_P384 => CryptoLib.ECDSA.Nistp384,
+                     when others     => CryptoLib.ECDSA.Nistp521);
+               Width  : constant Offset :=
+                 (case Kind is
+                     when ECDSA_P256 => 65,
+                     when ECDSA_P384 => 97,
+                     when others     => 133);
+               Point  : Ada.Streams.Stream_Element_Array (1 .. Width);
             begin
                if Scalar'Length = 0 then
                   return False;
                end if;
-               if CryptoLib.ECDSA.Public_Nistp384_Raw (Scalar, Point)
+               if CryptoLib.ECDSA.Public_Key_Raw (Curve, Scalar, Point)
                  /= CryptoLib.Errors.Ok
                then
                   return False;
@@ -211,8 +224,8 @@ package body CryptoLib.Identities is
             end;
 
          when others =>
-            --  The curves with no public-key derivation here. The match
-            --  cannot be decided, which is reported rather than guessed.
+            --  Ed448 and anything unrecognised. The match cannot be decided,
+            --  which is reported rather than guessed.
             return False;
       end case;
    end Key_Matches;
