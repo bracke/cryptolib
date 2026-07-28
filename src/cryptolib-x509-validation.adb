@@ -1,0 +1,196 @@
+with Ada.Streams;
+
+with CryptoLib.X509.Extensions;
+with CryptoLib.X509.Signatures;
+
+package body CryptoLib.X509.Validation is
+
+   use type Ada.Streams.Stream_Element;
+   use type Ada.Streams.Stream_Element_Offset;
+   use type CryptoLib.X509.Signatures.Verification_Result;
+
+   package X509C renames CryptoLib.X509.Certificates;
+   package XE renames CryptoLib.X509.Extensions;
+   package XS renames CryptoLib.X509.Signatures;
+
+   function Failure_Image (Failure : Validation_Failure) return String is
+   begin
+      case Failure is
+         when None                       => return "none";
+         when Malformed_Certificate      => return "malformed certificate";
+         when Empty_Path                 => return "empty path";
+         when Path_Too_Long              => return "path too long";
+         when Invalid_Signature          => return "invalid signature";
+         when Unsupported_Signature_Algorithm =>
+            return "unsupported signature algorithm";
+         when Issuer_Mismatch            => return "issuer mismatch";
+         when Certificate_Expired        => return "certificate expired";
+         when Certificate_Not_Yet_Valid  => return "certificate not yet valid";
+         when Invalid_Basic_Constraints  => return "invalid basic constraints";
+         when Path_Length_Exceeded       => return "path length exceeded";
+         when Invalid_Key_Usage          => return "invalid key usage";
+         when Unknown_Critical_Extension =>
+            return "unknown critical extension";
+         when Duplicate_Certificate      => return "duplicate certificate";
+         when No_Trust_Anchor            => return "no trust anchor";
+      end case;
+   end Failure_Image;
+
+   function Fail
+     (Failure : Validation_Failure; Index : Natural) return Validation_Result
+   is ((Valid => False, Failure => Failure, Index => Index));
+
+   --  Do these two encoded names match?
+   --
+   --  Compared as bytes. RFC 5280 defines a name comparison that folds case
+   --  and whitespace in some string types, which this does not do: a byte
+   --  comparison can only be too strict, never too lax, and being too strict
+   --  costs a chain that could have been built rather than trusting one that
+   --  should not have been.
+   function Same_Name (Left : Octets; Right : Octets) return Boolean is
+   begin
+      if Left'Length /= Right'Length or else Left'Length = 0 then
+         return False;
+      end if;
+
+      for I in 0 .. Left'Length - 1 loop
+         if Left (Left'First + Offset (I)) /= Right (Right'First + Offset (I))
+         then
+            return False;
+         end if;
+      end loop;
+
+      return True;
+   end Same_Name;
+
+   --  Are these the same certificate?
+   function Same_Certificate (Left : Certificate; Right : Certificate)
+     return Boolean
+   is (Same_Name (X509C.DER_Bytes (Left), X509C.DER_Bytes (Right)));
+
+   function Validate_Path
+     (Source          : Path_Source'Class;
+      Validation_Time : Certificate_Time;
+      Policy          : Validation_Policy := Default_Policy)
+      return Validation_Result
+   is
+      Path_Length : constant Positive := Length (Source);
+
+      function Get (Index : Positive) return Certificate
+      is (Certificate_At (Source, Index));
+   begin
+      if Path_Length > Policy.Maximum_Path_Length then
+         --  Refused before any signature is checked, so a long path costs
+         --  nothing to reject.
+         return Fail (Path_Too_Long, 0);
+      end if;
+
+      --  Every certificate must decode, be current, and carry nothing
+      --  critical this crate cannot interpret.
+      for I in 1 .. Path_Length loop
+         declare
+            Item : constant Certificate := Get (I);
+         begin
+            if not X509C.Is_Present (Item) then
+               return Fail (Malformed_Certificate, I);
+            end if;
+
+            if Policy.Reject_Unknown_Critical
+              and then XE.Has_Unsupported_Critical_Extension (Item)
+            then
+               return Fail (Unknown_Critical_Extension, I);
+            end if;
+
+            if not Is_Not_After (X509C.Not_Before (Item), Validation_Time) then
+               return Fail (Certificate_Not_Yet_Valid, I);
+            end if;
+
+            if not Is_Not_After (Validation_Time, X509C.Not_After (Item)) then
+               return Fail (Certificate_Expired, I);
+            end if;
+         end;
+      end loop;
+
+      --  A certificate must not appear twice: that is a loop, and a loop is
+      --  how a path can be made to look longer than it is.
+      for I in 1 .. Path_Length loop
+         for J in I + 1 .. Path_Length loop
+            if Same_Certificate (Get (I), Get (J)) then
+               return Fail (Duplicate_Certificate, J);
+            end if;
+         end loop;
+      end loop;
+
+      --  Each link: the certificate below is issued by the one above.
+      for I in 1 .. Path_Length - 1 loop
+         declare
+            Subject_Cert : constant Certificate := Get (I);
+            Issuer_Cert  : constant Certificate := Get (I + 1);
+         begin
+            if not Same_Name
+                     (X509C.Issuer_Bytes (Subject_Cert),
+                      X509C.Subject_Bytes (Issuer_Cert))
+            then
+               return Fail (Issuer_Mismatch, I);
+            end if;
+
+            --  The issuer must be entitled to have issued it. Checked before
+            --  the signature so that a certificate signed by something that
+            --  was never a CA is reported as what it is.
+            declare
+               Constraints : constant XE.Basic_Constraints :=
+                 XE.Get_Basic_Constraints (Issuer_Cert);
+               Usage       : constant XE.Key_Usage :=
+                 XE.Get_Key_Usage (Issuer_Cert);
+               Below       : constant Natural := I - 1;
+            begin
+               if Policy.Require_Basic_Constraints
+                 and then not (Constraints.Present and then Constraints.Is_CA)
+               then
+                  return Fail (Invalid_Basic_Constraints, I + 1);
+               end if;
+
+               --  pathLenConstraint counts the intermediates between this
+               --  issuer and the leaf, not the whole path.
+               if Constraints.Has_Path_Length
+                 and then Below > Constraints.Path_Length
+               then
+                  return Fail (Path_Length_Exceeded, I + 1);
+               end if;
+
+               --  A key usage that is present and omits keyCertSign forbids
+               --  signing certificates, whatever the basic constraints say.
+               --  An absent key usage does not constrain it.
+               if Policy.Require_Key_Cert_Sign
+                 and then Usage.Present
+                 and then not Usage.Certificate_Sign
+               then
+                  return Fail (Invalid_Key_Usage, I + 1);
+               end if;
+            end;
+
+            if not XS.Is_Supported
+                     (X509C.Signature_Algorithm_Of (Subject_Cert))
+            then
+               return Fail (Unsupported_Signature_Algorithm, I);
+            end if;
+
+            if XS.Verify_Certificate_Signature (Subject_Cert, Issuer_Cert)
+              /= XS.Valid
+            then
+               return Fail (Invalid_Signature, I);
+            end if;
+         end;
+      end loop;
+
+      --  The path must end somewhere the caller trusts. Asked last, so that a
+      --  path which is both untrusted and malformed is reported as malformed:
+      --  that is the more actionable of the two.
+      if not Is_Trust_Anchor (Source, Get (Path_Length)) then
+         return Fail (No_Trust_Anchor, Path_Length);
+      end if;
+
+      return (Valid => True, Failure => None, Index => 0);
+   end Validate_Path;
+
+end CryptoLib.X509.Validation;

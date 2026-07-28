@@ -9,6 +9,7 @@ with CryptoLib.PEM;
 with CryptoLib.X509;
 with CryptoLib.X509.Certificates;
 with CryptoLib.X509.Extensions;
+with CryptoLib.X509.Validation;
 with CryptoLib.X509.Signatures;
 with CryptoLib.ASN1.DER;
 with CryptoLib.ASN1.Errors;
@@ -2278,6 +2279,242 @@ procedure Tests is
    end Check_ECDSA_Curves;
 
 
+   --  Path validation over chains this crate issues.
+   --
+   --  The negative cases are the point. A validator that accepts a good chain
+   --  proves very little; one that says precisely why a bad chain is bad, and
+   --  refuses to be talked out of it, proves rather more.
+   procedure Check_X509_Validation is
+      use type CryptoLib.PEM.Decode_Status;
+      use type CryptoLib.X509.Validation.Validation_Failure;
+
+      package X509C renames CryptoLib.X509.Certificates;
+      package XV renames CryptoLib.X509.Validation;
+
+      CA_PEM    : Unbounded_String;
+      CA_Key    : Unbounded_String;
+      Leaf_PEM  : Unbounded_String;
+      Leaf_Key  : Unbounded_String;
+      Other_PEM : Unbounded_String;
+      Other_Key : Unbounded_String;
+      Twin_PEM  : Unbounded_String;
+      Twin_Key  : Unbounded_String;
+      Outcome   : CryptoLib.Certificates.Certificate_Status;
+
+      function Decoded (Text : String) return X509C.Certificate is
+         Buffer : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset
+                   (CryptoLib.PEM.Maximum_Decoded_Length (Text)));
+         Last   : Ada.Streams.Stream_Element_Offset;
+         From   : Positive := Text'First;
+         P      : CryptoLib.PEM.Decode_Status;
+         D      : CryptoLib.ASN1.Errors.Decode_Status;
+      begin
+         CryptoLib.PEM.Decode_Block
+           (Text, CryptoLib.PEM.Certificate_Label, From, Buffer, Last, P);
+         Check (P = CryptoLib.PEM.Ok, "fixture: armour decodes");
+         return X509C.Decode_DER
+           (Buffer (Buffer'First .. Last), CryptoLib.ASN1.Default_Limits, D);
+      end Decoded;
+
+      --  What the caller has to write: two certificates by position, and a
+      --  rule for what it trusts. Declared inside a procedure, which is where
+      --  a caller would really write it.
+      type Chain_Kind is (Issued, Wrong_CA, Twin_CA, Looping, Leaf_Alone);
+
+      type Test_Path (Kind : Chain_Kind; Trust_CN_Length : Natural) is
+        new XV.Path_Source with record
+         Trust_CN : String (1 .. Trust_CN_Length);
+      end record;
+
+      overriding function Length (Source : Test_Path) return Positive
+      is (if Source.Kind = Leaf_Alone then 1 else 2);
+
+      overriding function Certificate_At
+        (Source : Test_Path; Index : Positive) return X509C.Certificate
+      is (case Source.Kind is
+             when Leaf_Alone => Decoded (To_String (Leaf_PEM)),
+             when Looping    => Decoded (To_String (Leaf_PEM)),
+             when Wrong_CA   =>
+               (if Index = 1 then Decoded (To_String (Leaf_PEM))
+                else Decoded (To_String (Other_PEM))),
+             when Twin_CA    =>
+               (if Index = 1 then Decoded (To_String (Leaf_PEM))
+                else Decoded (To_String (Twin_PEM))),
+             when Issued     =>
+               (if Index = 1 then Decoded (To_String (Leaf_PEM))
+                else Decoded (To_String (CA_PEM))));
+
+      overriding function Is_Trust_Anchor
+        (Source : Test_Path; Item : X509C.Certificate) return Boolean
+      is (Source.Trust_CN'Length > 0
+          and then X509C.Subject_Common_Name (Item) = Source.Trust_CN);
+
+      Now_Time : constant CryptoLib.X509.Certificate_Time :=
+        (Year => 2027, Month => 6, Day => 1,
+         Hour => 12, Minute => 0, Second => 0);
+
+      Result : XV.Validation_Result;
+   begin
+      Outcome :=
+        CryptoLib.Certificates.Create_Local_CA
+          ("validation-ca", CA_PEM, CA_Key,
+           CryptoLib.Certificates.P384_Key);
+      Check (Outcome = CryptoLib.Certificates.Ok, "fixture: CA created");
+
+      Outcome :=
+        CryptoLib.Certificates.Issue_Server_Certificate
+          (To_String (CA_PEM), To_String (CA_Key), "host.example",
+           [1 => To_Unbounded_String ("host.example")],
+           Leaf_PEM, Leaf_Key);
+      Check (Outcome = CryptoLib.Certificates.Ok, "fixture: leaf issued");
+
+      Outcome :=
+        CryptoLib.Certificates.Create_Local_CA
+          ("unrelated-ca", Other_PEM, Other_Key,
+           CryptoLib.Certificates.P384_Key);
+      Check (Outcome = CryptoLib.Certificates.Ok, "fixture: other CA created");
+
+      --  A second CA with the same name as the first. Its subject encodes
+      --  identically, so the leaf's issuer name matches it exactly -- and its
+      --  key does not. This is the only case that reaches the signature check
+      --  with everything else in order, which is what makes it the one that
+      --  proves the signature is checked at all.
+      Outcome :=
+        CryptoLib.Certificates.Create_Local_CA
+          ("validation-ca", Twin_PEM, Twin_Key,
+           CryptoLib.Certificates.P384_Key);
+      Check (Outcome = CryptoLib.Certificates.Ok, "fixture: twin CA created");
+
+      --  The chain as issued, judged at a time inside its window.
+      declare
+         Path : constant Test_Path :=
+           (Kind => Issued, Trust_CN_Length => 13,
+            Trust_CN => "validation-ca");
+      begin
+         Result := XV.Validate_Path (Path, Now_Time);
+         Check (Result.Valid and then Result.Failure = XV.None,
+                "a chain issued here validates against its own CA, got "
+                & XV.Failure_Image (Result.Failure));
+
+         --  Before it was issued, and long after it expires.
+         Result :=
+           XV.Validate_Path
+             (Path, (Year => 2000, Month => 1, Day => 1,
+                     Hour => 0, Minute => 0, Second => 0));
+         Check (not Result.Valid
+                and then Result.Failure = XV.Certificate_Not_Yet_Valid,
+                "a chain judged before its validity begins is refused, got "
+                & XV.Failure_Image (Result.Failure));
+
+         Result :=
+           XV.Validate_Path
+             (Path, (Year => 2099, Month => 1, Day => 1,
+                     Hour => 0, Minute => 0, Second => 0));
+         Check (not Result.Valid
+                and then Result.Failure = XV.Certificate_Expired,
+                "an expired chain is refused, got "
+                & XV.Failure_Image (Result.Failure));
+
+         --  Policy is the caller's: a path longer than it allows is refused
+         --  before anything is verified.
+         Result :=
+           XV.Validate_Path
+             (Path, Now_Time,
+              (Maximum_Path_Length       => 1,
+               Require_Basic_Constraints => True,
+               Require_Key_Cert_Sign     => True,
+               Reject_Unknown_Critical   => True));
+         Check (not Result.Valid and then Result.Failure = XV.Path_Too_Long,
+                "a path longer than policy allows is refused, got "
+                & XV.Failure_Image (Result.Failure));
+      end;
+
+      --  The same chain with nothing trusted. Well formed is not trusted, and
+      --  the two failures must not look alike.
+      declare
+         Path : constant Test_Path :=
+           (Kind => Issued, Trust_CN_Length => 0, Trust_CN => "");
+      begin
+         Result := XV.Validate_Path (Path, Now_Time);
+         Check (not Result.Valid and then Result.Failure = XV.No_Trust_Anchor,
+                "a correct chain ending outside the trust set is untrusted, "
+                & "not invalid, got " & XV.Failure_Image (Result.Failure));
+      end;
+
+      --  A CA that did not issue this leaf: the names do not line up, which
+      --  is caught before any signature is checked.
+      declare
+         Path : constant Test_Path :=
+           (Kind => Wrong_CA, Trust_CN_Length => 12,
+            Trust_CN => "unrelated-ca");
+      begin
+         Result := XV.Validate_Path (Path, Now_Time);
+         Check (not Result.Valid and then Result.Failure = XV.Issuer_Mismatch,
+                "a chain to the wrong CA fails on the names, got "
+                & XV.Failure_Image (Result.Failure));
+      end;
+
+      --  A CA whose name matches but whose key did not sign this leaf.
+      declare
+         Path : constant Test_Path :=
+           (Kind => Twin_CA, Trust_CN_Length => 13,
+            Trust_CN => "validation-ca");
+         Leaf : constant X509C.Certificate := Decoded (To_String (Leaf_PEM));
+         Twin : constant X509C.Certificate := Decoded (To_String (Twin_PEM));
+      begin
+         --  The premise: the names really do line up, so nothing earlier in
+         --  the walk can reject this path.
+         Check (X509C.Issuer_Bytes (Leaf) = X509C.Subject_Bytes (Twin),
+                "fixture: the twin CA's subject matches the leaf's issuer");
+
+         Result := XV.Validate_Path (Path, Now_Time);
+         Check (not Result.Valid
+                and then Result.Failure = XV.Invalid_Signature,
+                "a CA with the right name and the wrong key is refused on "
+                & "the signature, got " & XV.Failure_Image (Result.Failure));
+         Check (Result.Index = 1,
+                "the failure is reported against the certificate that does "
+                & "not verify");
+      end;
+
+      --  The leaf twice: a loop, which is a property of the path rather than
+      --  of any link within it.
+      declare
+         Path : constant Test_Path :=
+           (Kind => Looping, Trust_CN_Length => 12,
+            Trust_CN => "host.example");
+      begin
+         Result := XV.Validate_Path (Path, Now_Time);
+         Check (not Result.Valid
+                and then Result.Failure = XV.Duplicate_Certificate,
+                "a path containing the same certificate twice is refused, got "
+                & XV.Failure_Image (Result.Failure));
+      end;
+
+      --  One certificate the caller trusts is a path: there is no link to
+      --  check and the caller has said it trusts it. Untrusted, the same
+      --  certificate is not a path at all.
+      declare
+         Trusted : constant Test_Path :=
+           (Kind => Leaf_Alone, Trust_CN_Length => 12,
+            Trust_CN => "host.example");
+         Untrusted : constant Test_Path :=
+           (Kind => Leaf_Alone, Trust_CN_Length => 0, Trust_CN => "");
+      begin
+         Result := XV.Validate_Path (Trusted, Now_Time);
+         Check (Result.Valid,
+                "a path of one trusted certificate is valid, got "
+                & XV.Failure_Image (Result.Failure));
+
+         Result := XV.Validate_Path (Untrusted, Now_Time);
+         Check (not Result.Valid
+                and then Result.Failure = XV.No_Trust_Anchor,
+                "the same certificate untrusted is not a path");
+      end;
+   end Check_X509_Validation;
+
+
 begin
    Check_PBKDF2_SHA1;
    Check_PBKDF2_SHA2;
@@ -2299,6 +2536,7 @@ begin
    Check_X509_Extensions;
    Check_RSA_Verify;
    Check_ECDSA_Curves;
+   Check_X509_Validation;
    Check_Identity_Predicates;
    Check_PKCS12_Mac_Key;
    Check_ECDSA_P384_Verify;

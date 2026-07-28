@@ -45,6 +45,7 @@ Do not run plain system `gnat*`, `gnatmake`, `gnatls`, `gnatprove`,
 | `CryptoLib.ASN1`, `CryptoLib.ASN1.DER`, `CryptoLib.ASN1.OIDs` | defensive bounded DER reader, object identifiers |
 | `CryptoLib.PEM` | strict PEM armour decoding, multi-block |
 | `CryptoLib.X509.Certificates` | parsed X.509 certificates: inspection, extensions, signature verification |
+| `CryptoLib.X509.Validation` | path validation against explicit trust anchors (no path building, no revocation) |
 | `CryptoLib.Certificates` | X.509: local CA, server/client/email issuance, CSR signing, PKCS#12, fingerprints |
 | `CryptoLib.Errors`, `CryptoLib.Buffers`, `CryptoLib.Fingerprints` | status codes, packet buffers, key fingerprints |
 

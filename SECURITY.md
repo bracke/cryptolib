@@ -111,11 +111,16 @@ The RNG **fails closed**: if no OS source is available it returns
   `Unsupported_Algorithm` for RSA-PSS rather than failing it, so "we did not
   check" is never mistaken for "the signature was bad". RSA verification touches only public values, so nothing in it needs to
   be constant-time.
-- **Certificate path validation does not exist yet.** `X509.Signatures` answers
-  only whether one certificate's signature is a given key's. Trust anchors,
-  validity windows, basic-constraints and name-constraint enforcement, and
-  chain building are not implemented; a caller must not read a `Valid`
-  signature as a valid certificate.
+- **Path validation checks a supplied path; it does not build one.**
+  `X509.Validation` verifies signatures along a chain, issuer/subject linkage,
+  validity windows against a caller-supplied time, basic constraints and path
+  length, keyCertSign, loops, and unknown critical extensions, and requires the
+  path to end at a certificate the caller declares trusted. **Name
+  constraints, certificate policies, and revocation (CRL/OCSP) are not
+  checked**, and there is no path building: finding a chain through
+  cross-signed roots is a separate problem and is not implemented. Trust is
+  never inferred -- a self-signed certificate is not an anchor unless the
+  caller says so.
 
 ## Test coverage
 
