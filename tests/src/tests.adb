@@ -922,6 +922,31 @@ procedure Tests is
            (not CryptoLib.Certificates.Same_Certificate
               (Text, Ada.Strings.Unbounded.To_String (Key)),
             "a private key is not that certificate");
+
+         --  Readers put things in front of the armour: keytool -rfc names the
+         --  alias and the entry type first, openssl -text prints the whole
+         --  certificate. Every letter of that used to be swept into the base64,
+         --  so a certificate a keystore really held compared as a different one
+         --  -- and devcert refused to remove its own anchor on the strength of
+         --  it.
+         declare
+            Preamble : constant String :=
+              "Alias name: devcert-ca" & ASCII.LF
+              & "Creation date: Jul 28, 2026" & ASCII.LF
+              & "Entry type: trustedCertEntry" & ASCII.LF & ASCII.LF & Text;
+         begin
+            Check
+              (CryptoLib.Certificates.Same_Certificate (Text, Preamble),
+               "a certificate is itself with a reader's preamble in front");
+            Check
+              (CryptoLib.Certificates.Fingerprint (Preamble)
+               = CryptoLib.Certificates.Fingerprint (Text),
+               "and fingerprints the same either way");
+            Check
+              (not CryptoLib.Certificates.Same_Certificate
+                 (Preamble, Ada.Strings.Unbounded.To_String (Other_Cert)),
+               "while a different certificate still differs");
+         end;
          Check
            (CryptoLib.Certificates.Contains_Certificate (Text),
             "a certificate is recognised by its armour");

@@ -463,10 +463,21 @@ package body CryptoLib.Certificates is
       B      : Integer;
       C      : Integer;
       D      : Integer;
-      First  : Natural := Ada.Strings.Fixed.Index (Text, "" & ASCII.LF);
+      Header : constant Natural := Ada.Strings.Fixed.Index (Text, "-----BEGIN");
+      First  : Natural;
       Last   : Natural;
       Footer : Natural;
    begin
+      --  Start at the armour, wherever it is. This used to skip one line and
+      --  begin there, which holds only when the header is the first line: a
+      --  reader that prints something before the certificate -- keytool -rfc
+      --  names the alias and the entry type first, openssl -text prints the
+      --  whole certificate -- had every letter of that preamble swept into the
+      --  base64, and the result decoded to a different certificate or to
+      --  nothing.
+      First := (if Header = 0 then Text'First else Header);
+      First := Ada.Strings.Fixed.Index (Text (First .. Text'Last), "" & ASCII.LF);
+
       if First = 0 then
          First := Text'First;
       else
