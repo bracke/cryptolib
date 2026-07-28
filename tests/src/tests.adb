@@ -10,6 +10,7 @@ with CryptoLib.X509;
 with CryptoLib.X509.Certificates;
 with CryptoLib.X509.Extensions;
 with CryptoLib.X509.Identity;
+with CryptoLib.X509.Purposes;
 with CryptoLib.X509.Validation;
 with CryptoLib.X509.Signatures;
 with CryptoLib.ASN1.DER;
@@ -2668,6 +2669,214 @@ procedure Tests is
    end Check_X509_Identity;
 
 
+   --  Purpose checks over the three profiles this crate issues, plus a CA
+   --  and a certificate carrying no extensions at all.
+   --
+   --  The certificates are real ones with real extensions rather than
+   --  hand-built cases, so what is being pinned is that the rules agree with
+   --  what an issuer actually emits.
+   procedure Check_X509_Purposes is
+      use type CryptoLib.PEM.Decode_Status;
+      use type CryptoLib.X509.Purposes.Purpose_Result;
+
+      package X509C renames CryptoLib.X509.Certificates;
+      package XP renames CryptoLib.X509.Purposes;
+
+      CA_PEM   : Unbounded_String;
+      CA_Key   : Unbounded_String;
+      Outcome  : CryptoLib.Certificates.Certificate_Status;
+
+      --  A v1 certificate made by OpenSSL, with no extensions whatever. This
+      --  crate cannot issue one, and it is the only shape that makes the
+      --  absent-extension rules decisive: everything issued here carries a
+      --  key usage that answers first.
+      Bare_Certificate : constant String :=
+        "308202b43082019c02140a69642915b0555887f43cad736f58c003e69dec300d06092a864886f70d01010b0500" &
+        "30163114301206035504030c0b7273612d746573742d6361301e170d3236303732383139323833315a170d3237" &
+        "303732383139323833315a30173115301306035504030c0c626172652e6578616d706c6530820122300d06092a" &
+        "864886f70d01010105000382010f003082010a0282010100be3f29726771c05e0be942271271bf263e9f2e5f65" &
+        "798adad43a490461a131d74dbec6a12fac4280da922a541026d82b8a55af928ca44779be1c54cd1268af9a906a" &
+        "3652e9b8d89e2d600d8719019cf0d968b22ce2ef22ab3735a1af0be2916ce67c7e777bab2fa52ec49d463696d1" &
+        "ce20a1bc0e59f28363d6d2ba4e9d14cee81d1004cec40ef346206b8c445b896310b00db2a70ca7c03e4b8e131c" &
+        "ee947830c82ba5f818574def5edd2864666869ce260a825d07f27713e61aa8a871817e4b5813f53d2bfc2a4800" &
+        "f7cd2a694e6f1f1f05ca62ba94f9e25fbe55e9956c66dca63892fd2415a629e24d737f62a82ee70633e59cf3f0" &
+        "130edf653f5365dcd3110203010001300d06092a864886f70d01010b050003820101004d1ae2d9f624efddb283" &
+        "9322d7f9c5f3dbaa60299ffcb6f2ea4d736f8cc50553a6dc282b96681dc60f630e738301843066571b651cb29c" &
+        "b050b901f3f3221ce0db5f7a095a48b2bba5b2c28b46dd3228175622992c2b111e25c7e67a885f6fa106ce96da" &
+        "0f3b27667d6420a7264618649297bf642dfb2ca3ee0ac4f01fcdecb775c2a0b83460bef042b1399d485786dd71" &
+        "431dd9085b3000bbafbf3d091f7c137a4f0a916bde37536d3f35f57fabdc5f48f6edd8839c66344a6b4262b0b5" &
+        "2ffa2a40439906edd68d89303c1e01ae540175c4ec5de833d5f5dbf36122273b68808b94152aea8b5d8f3a60c2" &
+        "ba24e622729f9908b84d9280f6d07dcc86ba39dafe";
+
+      function Decoded (Text : String) return X509C.Certificate is
+         Buffer : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset
+                   (CryptoLib.PEM.Maximum_Decoded_Length (Text)));
+         Last   : Ada.Streams.Stream_Element_Offset;
+         From   : Positive := Text'First;
+         P      : CryptoLib.PEM.Decode_Status;
+         D      : CryptoLib.ASN1.Errors.Decode_Status;
+      begin
+         CryptoLib.PEM.Decode_Block
+           (Text, CryptoLib.PEM.Certificate_Label, From, Buffer, Last, P);
+         Check (P = CryptoLib.PEM.Ok, "fixture: armour decodes");
+         return X509C.Decode_DER
+           (Buffer (Buffer'First .. Last), CryptoLib.ASN1.Default_Limits, D);
+      end Decoded;
+
+      function From_Hex
+        (Text : String) return Ada.Streams.Stream_Element_Array
+      is
+         Result : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (Text'Length / 2));
+         function Nibble (C : Character) return Natural
+         is (case C is
+                when '0' .. '9' => Character'Pos (C) - Character'Pos ('0'),
+                when others     => Character'Pos (C) - Character'Pos ('a') + 10);
+      begin
+         for I in Result'Range loop
+            Result (I) :=
+              Ada.Streams.Stream_Element
+                (Nibble (Text (Text'First + 2 * Natural (I - 1))) * 16
+                 + Nibble (Text (Text'First + 2 * Natural (I - 1) + 1)));
+         end loop;
+         return Result;
+      end From_Hex;
+   begin
+      Outcome :=
+        CryptoLib.Certificates.Create_Local_CA
+          ("purpose-ca", CA_PEM, CA_Key,
+           CryptoLib.Certificates.P384_Key);
+      Check (Outcome = CryptoLib.Certificates.Ok, "fixture: CA created");
+
+      --  The CA. It may issue certificates; it is not a TLS server.
+      declare
+         CA : constant X509C.Certificate := Decoded (To_String (CA_PEM));
+      begin
+         Check (XP.Check_Purpose (CA, XP.Certificate_Authority)
+                  = XP.Permitted,
+                "a CA may act as a CA");
+
+         --  Its key usage is keyCertSign and cRLSign, which does not include
+         --  anything a TLS handshake could use.
+         Check (XP.Check_Purpose (CA, XP.TLS_Server) = XP.Key_Usage_Forbids,
+                "a CA is not a TLS server, got "
+                & XP.Result_Image (XP.Check_Purpose (CA, XP.TLS_Server)));
+      end;
+
+      --  A server certificate.
+      declare
+         Leaf_PEM : Unbounded_String;
+         Leaf_Key : Unbounded_String;
+      begin
+         Outcome :=
+           CryptoLib.Certificates.Issue_Server_Certificate
+             (To_String (CA_PEM), To_String (CA_Key), "host.example",
+              [1 => To_Unbounded_String ("host.example")],
+              Leaf_PEM, Leaf_Key);
+         Check (Outcome = CryptoLib.Certificates.Ok, "fixture: server issued");
+
+         declare
+            Leaf : constant X509C.Certificate := Decoded (To_String (Leaf_PEM));
+         begin
+            Check (XP.Check_Purpose (Leaf, XP.TLS_Server) = XP.Permitted,
+                   "a server certificate may serve TLS");
+            Check (XP.Check_Purpose (Leaf, XP.TLS_Client)
+                     = XP.Extended_Key_Usage_Forbids,
+                   "a server certificate is not a client one, got "
+                   & XP.Result_Image
+                       (XP.Check_Purpose (Leaf, XP.TLS_Client)));
+            Check (XP.Check_Purpose (Leaf, XP.Code_Signing)
+                     = XP.Extended_Key_Usage_Forbids,
+                   "a server certificate does not sign code");
+
+            --  The one that matters most: a leaf must not be able to issue.
+            Check (XP.Check_Purpose (Leaf, XP.Certificate_Authority)
+                     = XP.Not_A_CA,
+                   "a leaf may not act as a CA, got "
+                   & XP.Result_Image
+                       (XP.Check_Purpose (Leaf, XP.Certificate_Authority)));
+         end;
+      end;
+
+      --  No extensions at all. Absent does not constrain, so every
+      --  end-entity purpose is permitted -- and reading absent as "permits
+      --  nothing" would reject most of the private PKI in existence. But
+      --  absent basic constraints do not make a CA, which is the one place
+      --  where absence means no.
+      declare
+         Raw  : constant Ada.Streams.Stream_Element_Array :=
+           From_Hex (Bare_Certificate);
+         D    : CryptoLib.ASN1.Errors.Decode_Status;
+         Bare : constant X509C.Certificate :=
+           X509C.Decode_DER (Raw, CryptoLib.ASN1.Default_Limits, D);
+      begin
+         Check (X509C.Is_Present (Bare) and then X509C.Version (Bare) = 1,
+                "fixture: the bare certificate is a v1 with no extensions");
+         Check (X509C.Extension_Count (Bare) = 0,
+                "fixture: it really carries no extensions");
+
+         Check (XP.Check_Purpose (Bare, XP.TLS_Server) = XP.Permitted,
+                "a certificate with no extended key usage may serve TLS, got "
+                & XP.Result_Image (XP.Check_Purpose (Bare, XP.TLS_Server)));
+         Check (XP.Check_Purpose (Bare, XP.Code_Signing) = XP.Permitted,
+                "an absent extended key usage does not constrain any purpose");
+         Check (XP.Check_Purpose (Bare, XP.Certificate_Authority)
+                  = XP.Not_A_CA,
+                "absent basic constraints do not make a CA, got "
+                & XP.Result_Image
+                    (XP.Check_Purpose (Bare, XP.Certificate_Authority)));
+      end;
+
+      --  A client certificate is the mirror image.
+      declare
+         Leaf_PEM : Unbounded_String;
+         Leaf_Key : Unbounded_String;
+      begin
+         Outcome :=
+           CryptoLib.Certificates.Issue_Client_Certificate
+             (To_String (CA_PEM), To_String (CA_Key), "client.example",
+              [1 => To_Unbounded_String ("client.example")],
+              Leaf_PEM, Leaf_Key);
+         Check (Outcome = CryptoLib.Certificates.Ok, "fixture: client issued");
+
+         declare
+            Leaf : constant X509C.Certificate := Decoded (To_String (Leaf_PEM));
+         begin
+            Check (XP.Check_Purpose (Leaf, XP.TLS_Client) = XP.Permitted,
+                   "a client certificate may authenticate a client");
+            Check (XP.Check_Purpose (Leaf, XP.TLS_Server)
+                     = XP.Extended_Key_Usage_Forbids,
+                   "a client certificate is not a server one");
+         end;
+      end;
+
+      --  And an email certificate.
+      declare
+         Leaf_PEM : Unbounded_String;
+         Leaf_Key : Unbounded_String;
+      begin
+         Outcome :=
+           CryptoLib.Certificates.Issue_Email_Certificate
+             (To_String (CA_PEM), To_String (CA_Key), "person@example.com",
+              [1 => To_Unbounded_String ("person@example.com")],
+              Leaf_PEM, Leaf_Key);
+         Check (Outcome = CryptoLib.Certificates.Ok, "fixture: email issued");
+
+         declare
+            Leaf : constant X509C.Certificate := Decoded (To_String (Leaf_PEM));
+         begin
+            Check (XP.Check_Purpose (Leaf, XP.Email_Protection)
+                     = XP.Permitted,
+                   "an email certificate may protect email");
+            Check (XP.Check_Purpose (Leaf, XP.TLS_Server)
+                     = XP.Extended_Key_Usage_Forbids,
+                   "an email certificate is not a TLS server");
+         end;
+      end;
+   end Check_X509_Purposes;
+
+
 begin
    Check_PBKDF2_SHA1;
    Check_PBKDF2_SHA2;
@@ -2691,6 +2900,7 @@ begin
    Check_ECDSA_Curves;
    Check_X509_Validation;
    Check_X509_Identity;
+   Check_X509_Purposes;
    Check_Identity_Predicates;
    Check_PKCS12_Mac_Key;
    Check_ECDSA_P384_Verify;
