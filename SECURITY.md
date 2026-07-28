@@ -142,6 +142,10 @@ The RNG **fails closed**: if no OS source is available it returns
   checks responses, including whether the signer was the issuer or a delegate
   the issuer authorised with the OCSP-signing extended key usage; it makes no
   network requests either, and is likewise not consulted by `Validate_Path`.
+  `X509.Revocation` puts the two behind one question and judges freshness: a
+  statement outside its own `thisUpdate`/`nextUpdate` window answers `Stale`
+  rather than `Not_Revoked`, since reading "not revoked" off a statement made
+  long ago is how a revoked certificate keeps working.
 
 ## Test coverage
 

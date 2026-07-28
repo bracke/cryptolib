@@ -54,6 +54,7 @@ Do not run plain system `gnat*`, `gnatmake`, `gnatls`, `gnatprove`,
 | `CryptoLib.X509.Names` | distinguished names by attribute; RFC 4514 formatting kept separate |
 | `CryptoLib.X509.CRLs` | revocation lists: decode, verify the issuer's signature, look a serial up |
 | `CryptoLib.OCSP` | OCSP requests and responses, including responder authorisation |
+| `CryptoLib.X509.Revocation` | ask a CRL or an OCSP response about a certificate, freshness included |
 | `CryptoLib.X509.Path_Building` | search for a path to a trust anchor; proposes, never concludes |
 | `CryptoLib.Certificates` | X.509: local CA, server/client/email issuance, CSR signing, PKCS#12, fingerprints |
 | `CryptoLib.Errors`, `CryptoLib.Buffers`, `CryptoLib.Fingerprints` | status codes, packet buffers, key fingerprints |
