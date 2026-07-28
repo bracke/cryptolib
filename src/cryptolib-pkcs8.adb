@@ -3,9 +3,7 @@ with System.Storage_Elements;
 
 with CryptoLib.ASN1.DER;
 with CryptoLib.ASN1.OIDs;
-with CryptoLib.Ciphers;
-with CryptoLib.Errors;
-with CryptoLib.Macs;
+with CryptoLib.PBES2;
 with CryptoLib.Secure_Wipe;
 
 package body CryptoLib.PKCS8 is
@@ -14,7 +12,6 @@ package body CryptoLib.PKCS8 is
    use CryptoLib.ASN1.Errors;
    use CryptoLib.X509;
    use type Ada.Streams.Stream_Element;
-   use type CryptoLib.Errors.Status;
    use type Ada.Streams.Stream_Element_Offset;
 
    package DER_Reader renames CryptoLib.ASN1.DER;
@@ -322,8 +319,6 @@ package body CryptoLib.PKCS8 is
       Position := Cursor;
    end Read_Algorithm;
 
-   type PRF_Kind is (HMAC_SHA1, HMAC_SHA256, HMAC_SHA384, HMAC_SHA512);
-
    procedure Decode_Encrypted_DER
      (Data               : Octets;
       Password           : String;
@@ -339,13 +334,6 @@ package body CryptoLib.PKCS8 is
       Param  : Element;
       Has_P  : Boolean;
       Body_S : Element;
-
-      Salt_Span  : Element;
-      IV_Span    : Element;
-      Iterations : Natural := 0;
-      Key_Length : Natural := 0;
-      PRF        : PRF_Kind := HMAC_SHA1;
-      Cipher     : Natural := 0;   --  key octets: 16, 24 or 32
    begin
       Wipe (Item);
       Status := Malformed;
@@ -354,6 +342,8 @@ package body CryptoLib.PKCS8 is
          return;
       end if;
 
+      --  EncryptedPrivateKeyInfo ::= SEQUENCE { encryptionAlgorithm,
+      --      encryptedData OCTET STRING }
       Cursor := Data'First;
       DER_Reader.Read_Sequence
         (Data, Cursor, Data'Last, 0, Limits, Outer, Parse);
@@ -369,9 +359,6 @@ package body CryptoLib.PKCS8 is
       end if;
 
       if not OID_Table.Matches (Data, Alg_ID, OID_Table.PBES2) then
-         --  A plain key has an INTEGER version here rather than an
-         --  algorithm, so it will have failed above; anything that parses and
-         --  is not PBES2 is a scheme this does not implement.
          Status := Unsupported_Scheme;
          return;
       end if;
@@ -386,262 +373,47 @@ package body CryptoLib.PKCS8 is
          return;
       end if;
 
-      --  PBES2-params ::= SEQUENCE { keyDerivationFunc, encryptionScheme }
       declare
-         Inner : Offset := Param.First;
-         KDF   : Element;
-         Enc   : Element;
-         KDF_P : Element;
-         Enc_P : Element;
-         Got_K : Boolean;
-         Got_E : Boolean;
-         Params : Element;
+         Plain : Octets (1 .. Offset (Content_Length (Body_S)));
+         Last  : Offset;
+         Undo  : CryptoLib.PBES2.Unlock_Status;
       begin
-         Cursor := Encoded_First (Param);
-         DER_Reader.Read_Sequence
-           (Data, Cursor, Outer.Last, 2, Limits, Params, Parse);
-         if Parse /= Ok then
-            return;
-         end if;
+         CryptoLib.PBES2.Decrypt
+           (Parameters => Data (Encoded_First (Param) .. Encoded_Last (Param)),
+            Ciphertext => Data (Body_S.First .. Body_S.Last),
+            Password   => Password,
+            Limits     => Limits,
+            Output     => Plain,
+            Last       => Last,
+            Status     => Undo,
+            Maximum_Iterations => Maximum_Iterations);
 
-         Inner := Params.First;
-         Read_Algorithm
-           (Data, Inner, Params.Last, 3, Limits, KDF, KDF_P, Got_K, Parse);
-         if Parse /= Ok then
-            return;
-         end if;
-
-         Read_Algorithm
-           (Data, Inner, Params.Last, 3, Limits, Enc, Enc_P, Got_E, Parse);
-         if Parse /= Ok then
-            return;
-         end if;
-
-         if not OID_Table.Matches (Data, KDF, OID_Table.PBKDF2)
-           or else not Got_K
-         then
-            Status := Unsupported_Scheme;
-            return;
-         end if;
-
-         --  The cipher, and with it the key length the derivation must
-         --  produce.
-         if OID_Table.Matches (Data, Enc, OID_Table.AES256_CBC) then
-            Cipher := 32;
-         elsif OID_Table.Matches (Data, Enc, OID_Table.AES192_CBC) then
-            Cipher := 24;
-         elsif OID_Table.Matches (Data, Enc, OID_Table.AES128_CBC) then
-            Cipher := 16;
-         else
-            Status := Unsupported_Scheme;
-            return;
-         end if;
-
-         if not Got_E or else Content_Length (Enc_P) /= 16 then
-            --  AES-CBC takes its IV here, and a block cipher without one
-            --  cannot be run.
-            return;
-         end if;
-         IV_Span := Enc_P;
-
-         --  PBKDF2-params ::= SEQUENCE { salt, iterationCount,
-         --      keyLength OPTIONAL, prf DEFAULT hmacWithSHA1 }
-         declare
-            Walk : Offset := KDF_P.First;
-            Set  : Element;
-         begin
-            Cursor := Encoded_First (KDF_P);
-            DER_Reader.Read_Sequence
-              (Data, Cursor, Params.Last, 4, Limits, Set, Parse);
-            if Parse /= Ok then
+         case Undo is
+            when CryptoLib.PBES2.Ok =>
+               null;
+            when CryptoLib.PBES2.Unsupported_Scheme =>
+               Status := Unsupported_Scheme;
                return;
-            end if;
-
-            Walk := Set.First;
-            DER_Reader.Read_Octet_String
-              (Data, Walk, Set.Last, 5, Limits, Salt_Span, Parse);
-            if Parse /= Ok then
-               return;
-            end if;
-
-            DER_Reader.Read_Small_Integer
-              (Data, Walk, Set.Last, 5, Limits, Iterations, Parse);
-            if Parse /= Ok then
-               return;
-            end if;
-
-            if Iterations = 0 then
-               return;
-            end if;
-
-            if Iterations > Maximum_Iterations then
+            when CryptoLib.PBES2.Excessive_Iterations =>
                Status := Excessive_Iterations;
                return;
-            end if;
-
-            --  keyLength and prf are both optional and either may be absent.
-            while not DER_Reader.At_End (Walk, Set.Last) loop
-               declare
-                  Look : Offset := Walk;
-                  Peek : Element;
-                  Try  : Decode_Status;
-               begin
-                  DER_Reader.Read
-                    (Data, Look, Set.Last, 5, Limits, Peek, Try);
-                  exit when Try /= Ok;
-
-                  if Peek.Class = Universal
-                    and then Peek.Number = Tag_Integer
-                  then
-                     DER_Reader.Read_Small_Integer
-                       (Data, Walk, Set.Last, 5, Limits, Key_Length, Parse);
-                     exit when Parse /= Ok;
-                  elsif Peek.Class = Universal
-                    and then Peek.Number = Tag_Sequence
-                  then
-                     declare
-                        PRF_OID : Element;
-                        PRF_P   : Element;
-                        Got_P   : Boolean;
-                     begin
-                        Read_Algorithm
-                          (Data, Walk, Set.Last, 5, Limits, PRF_OID, PRF_P,
-                           Got_P, Parse);
-                        exit when Parse /= Ok;
-
-                        if OID_Table.Matches
-                             (Data, PRF_OID, OID_Table.HMAC_With_SHA256)
-                        then
-                           PRF := HMAC_SHA256;
-                        elsif OID_Table.Matches
-                                (Data, PRF_OID, OID_Table.HMAC_With_SHA384)
-                        then
-                           PRF := HMAC_SHA384;
-                        elsif OID_Table.Matches
-                                (Data, PRF_OID, OID_Table.HMAC_With_SHA512)
-                        then
-                           PRF := HMAC_SHA512;
-                        elsif OID_Table.Matches
-                                (Data, PRF_OID, OID_Table.HMAC_With_SHA1)
-                        then
-                           PRF := HMAC_SHA1;
-                        else
-                           Status := Unsupported_Scheme;
-                           return;
-                        end if;
-                     end;
-                  else
-                     Walk := Look;
-                  end if;
-               end;
-            end loop;
-         end;
-      end;
-
-      --  A stated key length that disagrees with the cipher is a file that
-      --  cannot mean what it says.
-      if Key_Length /= 0 and then Key_Length /= Cipher then
-         Status := Unsupported_Scheme;
-         return;
-      end if;
-
-      declare
-         Pass : Ada.Streams.Stream_Element_Array (1 .. Password'Length);
-         Salt : constant Octets :=
-           (if Is_Empty (Salt_Span) then Empty_Octets
-            else Data (Salt_Span.First .. Salt_Span.Last));
-         IV   : constant Octets := Data (IV_Span.First .. IV_Span.Last);
-         Key  : Ada.Streams.Stream_Element_Array (1 .. Offset (Cipher));
-         Text : Ada.Streams.Stream_Element_Array
-           (1 .. Offset (Content_Length (Body_S)));
-      begin
-         for I in Password'Range loop
-            Pass (Offset (I - Password'First) + 1) :=
-              Character'Pos (Password (I));
-         end loop;
-
-         if Text'Length = 0 or else Text'Length mod 16 /= 0 then
-            --  CBC ciphertext is whole blocks.
-            CryptoLib.Secure_Wipe.Wipe (Pass'Address, Pass'Length);
-            return;
-         end if;
-
-         case PRF is
-            when HMAC_SHA1 =>
-               Key := CryptoLib.Macs.PBKDF2_HMAC_SHA1
-                 (Pass, Salt, Iterations, Key'Length);
-            when HMAC_SHA256 =>
-               Key := CryptoLib.Macs.PBKDF2_HMAC_SHA256
-                 (Pass, Salt, Iterations, Key'Length);
-            when HMAC_SHA384 =>
-               Key := CryptoLib.Macs.PBKDF2_HMAC_SHA384
-                 (Pass, Salt, Iterations, Key'Length);
-            when HMAC_SHA512 =>
-               Key := CryptoLib.Macs.PBKDF2_HMAC_SHA512
-                 (Pass, Salt, Iterations, Key'Length);
+            when CryptoLib.PBES2.Wrong_Password_Or_Corrupt =>
+               Status := Wrong_Password_Or_Corrupt;
+               return;
+            when others =>
+               return;
          end case;
 
-         CryptoLib.Secure_Wipe.Wipe (Pass'Address, Pass'Length);
+         --  What came out has to be a key. A wrong password that survived the
+         --  padding check will not survive this.
+         Decode_DER (Plain (Plain'First .. Last), Limits, Item, Parse);
+         CryptoLib.Secure_Wipe.Wipe (Plain'Address, Plain'Length);
 
-         if CryptoLib.Ciphers.Decrypt_CBC_Raw
-              (Algorithm_Name =>
-                 (case Cipher is
-                     when 16     => "aes128-cbc",
-                     when 24     => "aes192-cbc",
-                     when others => "aes256-cbc"),
-               Key_Data   => Key,
-               IV_Data    => IV,
-               Ciphertext => Data (Body_S.First .. Body_S.Last),
-               Plaintext  => Text) /= CryptoLib.Errors.Ok
-         then
-            CryptoLib.Secure_Wipe.Wipe (Key'Address, Key'Length);
-            CryptoLib.Secure_Wipe.Wipe (Text'Address, Text'Length);
+         if Parse /= Ok or else not Is_Present (Item) then
+            Wipe (Item);
             Status := Wrong_Password_Or_Corrupt;
             return;
          end if;
-
-         CryptoLib.Secure_Wipe.Wipe (Key'Address, Key'Length);
-
-         --  PKCS#7 padding. A wrong password yields bytes that are unlikely
-         --  to be padding, and when they are, the key beneath them will not
-         --  parse. Both come back as one answer: telling them apart is an
-         --  oracle and is of no use to the caller.
-         declare
-            Pad  : constant Natural := Natural (Text (Text'Last));
-            Body_Last : Offset;
-         begin
-            if Pad = 0 or else Pad > 16 or else Offset (Pad) > Text'Length
-            then
-               CryptoLib.Secure_Wipe.Wipe (Text'Address, Text'Length);
-               Status := Wrong_Password_Or_Corrupt;
-               return;
-            end if;
-
-            for I in 0 .. Offset (Pad) - 1 loop
-               if Natural (Text (Text'Last - I)) /= Pad then
-                  CryptoLib.Secure_Wipe.Wipe (Text'Address, Text'Length);
-                  Status := Wrong_Password_Or_Corrupt;
-                  return;
-               end if;
-            end loop;
-
-            Body_Last := Text'Last - Offset (Pad);
-            if Body_Last < Text'First then
-               CryptoLib.Secure_Wipe.Wipe (Text'Address, Text'Length);
-               Status := Wrong_Password_Or_Corrupt;
-               return;
-            end if;
-
-            Decode_DER
-              (Text (Text'First .. Body_Last), Limits, Item, Parse);
-            CryptoLib.Secure_Wipe.Wipe (Text'Address, Text'Length);
-
-            if Parse /= Ok or else not Is_Present (Item) then
-               Wipe (Item);
-               Status := Wrong_Password_Or_Corrupt;
-               return;
-            end if;
-         end;
       end;
 
       Status := Ok;

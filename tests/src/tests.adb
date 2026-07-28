@@ -18,6 +18,7 @@ with CryptoLib.X509.Revocation;
 with CryptoLib.OCSP;
 with CryptoLib.PKCS10;
 with CryptoLib.PKCS8;
+with CryptoLib.PKCS12;
 with CryptoLib.Identities;
 with CryptoLib.X509.Validation;
 with CryptoLib.X509.Path_Building;
@@ -4698,6 +4699,223 @@ procedure Tests is
    end Check_PKCS8_Encrypted;
 
 
+   --  Reading a PKCS#12 bundle, which this crate could write and not read --
+   --  the kind of asymmetry that leaves a caller unable to check what it just
+   --  produced.
+   procedure Check_PKCS12 is
+      use type CryptoLib.ASN1.Errors.Decode_Status;
+      use type CryptoLib.PKCS12.Open_Status;
+      use type CryptoLib.X509.Public_Key_Algorithm;
+
+      package X509C renames CryptoLib.X509.Certificates;
+      package P12 renames CryptoLib.PKCS12;
+
+      OpenSSL_Bundle : constant String :=
+        "30820cbf02010330820c8506092a864886f70d010701a0820c7604820c7230820c6e308206e206092a864886f7" &
+        "0d010706a08206d3308206cf020100308206c806092a864886f70d010701305706092a864886f70d01050d304a" &
+        "302906092a864886f70d01050c301c040839469ec75087e37902020800300c06082a864886f70d02090500301d" &
+        "060960864801650304012a0410132fc7eb0141c3dfbdb906a4d869655b8082066057c51abbe81587124880906d" &
+        "d798e12b0fef0e98140c64ad59d75e522cd9888486d43f2dcb0ae36d084726f495dd8f817dd9b21d04cd22c250" &
+        "d64f0a97519736da96e088683cfe740698356b6a548a11a3fc24002fd121883e8c9bc26833b487bcb7ef64a749" &
+        "22c344ae61dff8359bb0ca2285503697cf333e58553819ededb581dbb285514d88f3e246f67b261aabd19af46f" &
+        "b65920c433cf9a76d7d3436cd54a1f0ddda79e90bd296f7269b9e400db185a67bdfcaed8776ee08a94daf1df6e" &
+        "bf654d051a0ff956559d04b6649b2941214e1c00a0bedbf279e9cd1867f013688f8842e13523b0e11560af8648" &
+        "34d99c5fce339d91c9873fc3dd0d4b48c7bc149f58a13e36afb3985cf088edb91c5499c05b3c6a22089071d7e0" &
+        "35fd7943015a9c7e27fea13830549359a285e888eeb1517dfa8e22059606adc4bb4ded95a6b44939cc2aa104cc" &
+        "ac77daebbee2627137511cc110864b1c8ce105006f2174ce303fa0816cf49bfee33d6b9c908b81ef553339f865" &
+        "dff5f007828c7b89bb1425aa6e3a79b2f003b8c43221e7b2d6d8495da987d8a76f1913e18b758507121234d06a" &
+        "f7ad89ac7ff85d75480c590fcb633116e4201325fa29124217c8a54615f47e6b21a7c7b779d8810c90f3a20f56" &
+        "28e0bb6b0af29e96a7e513a0ec354cd8cea9e54855d8c7539aa5dac38af055573043544f94739d062785320597" &
+        "6978009a879ba6895eb566ac974ec84ca7754e5c70e025022017fb2773b5b2ad9ccafd567ef80d95c9d6f8e633" &
+        "81a1281550f09d5b9568411dc8f048db50c857c262ee94b4b97ba31d4dbe32435e4bc288d0df425487d970835c" &
+        "95a425275479d88c33ea7eea47c7ee6b8d2a424152a4982f5e84c18120803c2ee66eff1586cf6092278e94c4a9" &
+        "64740a98b3783ab6be86d7df8d94e3fe76f628a2879a9b5c851c248712605bba34c2c45dc63d1a00df8cde827c" &
+        "2d04c6f263280628c05bbef6d351f852cadc19e25c81afaef51545c884b177769ae46eee02ffc9108a8b9f5233" &
+        "6ffc104a7514f47ae60621ce1f1f8eec4e38c8a698e293aa8a4c70ee988b3a4d29608852d0ebd53f773045fc36" &
+        "cb4c5f54f4b7409acd479714894ad4b774718489c4c60953b621d3516daa7b05eb0d6c7638c06768bab563e78c" &
+        "142d99031be6ac8e8c6a34ede011e7f2fd2fcdfe59f1b6bbd39933c6554dc2c06031ef6404ef526ea7e0370791" &
+        "cf96d25a9f91ac0d0cd7e819d094a3ade7c71222e13954187493f3e25468d5747278b7e4bc1a31e464b58627fd" &
+        "b13dbf86fc770a6dd91f48ba974a54285d8b4a08ca5ae43d83c13bdbba7c0f974565e87b139bd1c16438384169" &
+        "f89e51c93949c36d757c15264dc2a7f0380c7c3001ff42398cb6131bf99d6a05cd4e222ae05b843d43dc6ca444" &
+        "41613f0ea55e96c8506ffd9ddc3de069a560e84667d621082237c569130eb12a6099aaf4820405751a466824a7" &
+        "50fae6301bb274951c09c035301a68e4a81cf5ff86c69a550b39782e7dbf5490dc7c147cd5b71901e12efa740b" &
+        "92ada61c27495cc05ed6a598e00458384b3069d56b8a7f84edb7a2785bf9f1907657172396d78311761334f22e" &
+        "45735f8724693be80017c76bf3612fd24afc1e55283ba84051fc9b20fdcd9542621af55ceb837bf2da5c581b62" &
+        "610f454f7a4f28870ddc26bb4e7a7a7ddbd7ab17437c49191c9c05e1aab948788865369e883d30c747686519ce" &
+        "27f301d060a5192d1a204a6ffcd9f9f157c2f85dd90d00446f94014c9d19b2c6cf11bad958e966ba799cf4cf46" &
+        "91ead8cccb4eab9f28808f5a1230e6efe91357a7333e7d05c3ed5ca3eadf396ba9c08f9b123e8adb1e29193ada" &
+        "be2b18cc46a5eec5dd25f07882eebcd6eb4382110d08ea6d1b862f241a0f8b91e986a79187a6a50a00d45fb200" &
+        "20c17b117c4ccc11a9fac2736157cf13b417a8561aad359fef693ed574c453c3c1f127332b20fab318ea06d74c" &
+        "c4e22674bf3796ed619dd2d0a52aaff9a14ba01e923566fdc338951799b31aaf63182bfde8b9111e6ea2a8a1d0" &
+        "8d6604e328b010bd18dff25164691c8f6ad29066540d648595445a84322f1329918fcdc913b230fde3ab6b5de0" &
+        "2460a8b560d7063fab107ab0b1e281f30a99cbd966f256ef101e81f65ef8b3dbd3c9e5f018f6080a03d9288c42" &
+        "a731553ee47083e35fd1a43aa8ef90b39447766dacdf5792b59c76a16c7a95e9361017f2b72ecc25bef66b9ca6" &
+        "c8d450eaf8520b827742b3912bbf1b552f84101b26ffaf34fe6170e79f803eefefc036867eb285c8c86d746f7d" &
+        "3082058406092a864886f70d010701a0820575048205713082056d30820569060b2a864886f70d010c0a0102a0" &
+        "8205313082052d305706092a864886f70d01050d304a302906092a864886f70d01050c301c04085f6ef3c0caaf" &
+        "fb8e02020800300c06082a864886f70d02090500301d060960864801650304012a04107c38d110d01fb5c9d68c" &
+        "561dee0f4252048204d02570beeac202309e79155bb893405dc3c9877e80684cb5be23815713c58b40e2ac286c" &
+        "b06a7e646a2fe125a73335700dd4d1eed1e5d3cc4839267a9504984d953bcf13f3f9ff373adc11cff7659dd22d" &
+        "5b5e063d676353a121365192b358859c50b299b5f6a0fe893e60dbfe3af81b600e3d69acae1585e56e8008352e" &
+        "ed116a8a7c5ae739860e5f45fce0b22d39809ceb62d9cb88f0d4303cd9005c142ee01690a81dbd0fd10a989d22" &
+        "dd9ba695c66069821eab3c987a5904a6f51fd6493cdc5e3c98f690bbfbcaf83f53b1eef64bebc9f2bda4165066" &
+        "7e5a2d892e1d9ddbab7fe58c39ac40670e97dce8d64c541ad8813cd89aebc37e665a0310b772b4b4e4043c0069" &
+        "c94644c00a05456816e8fcdb10cdd647413dc5c266817b8ed651c477acf36030b45372a50ad125a4e24dc2d326" &
+        "4373c263075ea01bd438921f2798bd504d043c4d52a577caaf5ecb386e83b61616051329b4741a4a82d0e44e54" &
+        "1d7d05a0cb4aab5c29a5405cf7afd668867aedec13c991b238496bc1439a1ff8b559fa7cd26d9387e921ad6b8c" &
+        "77b44e9dad9d3b4e573ffd4f1fce1bd4aca1ae8b4b95f95da8082bc2db0e8f4c53446ca7f59473680cfe43e0e6" &
+        "e21a405e1dbb4f85205c6226535f8c0518013d98e3f623f6da68dbceffed1c19c1a69173baff3c352d3b527654" &
+        "9b02e300bd786ad068453fa0072baafbfa42acd40ba3cdf746740f229e320dd5612eb0af2fcee57944e0be44bb" &
+        "67d0c2356a7a4a57bb9a014cd469f6f1d8a5122478fe835421c111e93b9476028cc55039220aee8f2bdabf4549" &
+        "ead539582145723ba108916f359ba330907d12d725828b1767636f9f71c9a55ddb55263995cbcb09b5d9ade403" &
+        "f2831edced726db547162693cdfba523807c19dc86d2ee12edf55278b14dd5528b6bff297e31913da9e4822977" &
+        "60ceb2e1ceee7f0098e74168ee649f9d978698637c1bdb0f42075ae468682eead73c7661b35c83787dcbb773ed" &
+        "13205d51feda27a55e2834db39c3a181c4a2cb6a8a32176105f3d7792d797f692e75b1492f02fb8bc6102c4add" &
+        "0ddad1f73e09c6019a13ede66ddc70052bad93d0a1ce02a729096abcee9ab477df4d95add82fdda21512b9d296" &
+        "80d24863f5add6c937d5d77abf05c89fa6d45ee43c45d3ae94daacfe14d78edb6d90e12e80f2b395c8de5f5f8a" &
+        "cc620c0a252a92208efb9e52c24985e9e6087587ea486e518c7d84281a9e8bd4b0261b52ecc2ef76000be6ba2b" &
+        "21f843804aab5cd3198668b09e45e99e1bc31392052d2d010b000de1653a1c435604656c66000b3b0ee7e4a82b" &
+        "adc924f2a47aadce070265bde6422ef50ddc111857a7db39f9bc49f30fa0e6ead6028b4e83fb6eb397569d45f2" &
+        "0b1759033a4f75d222b4650d9ce0355ff9e8743a1e6b508c815dbfc3e692680f075f2b6f341bf6d2289fbd7e6c" &
+        "a54fb93f1f6f3870f55c632af30cb7b17ca2ec7ba81c170d46bb173b838ea7be35ac077d577b641e13c7e0dbe5" &
+        "227f4d90e65d04952ba62cbfa6d88cb911e14cf9da2e569fbdc30510ff1277be8c4829b88b86c14cabd327b443" &
+        "7d405cf75efbd44032c1944a42010ad046abedea8f82b67563cd26f0420ea5ac9129a661dc29e115121698dbf7" &
+        "f3105760168aeb4a199438dd58436ce3e008febb3c67b8a1a6278c84ca862ed4ed372a26d2f4dde637cab2b069" &
+        "a70fa82a3277362f7177aa73f73808d1400ad7aac95c00f85aced73125302306092a864886f70d010915311604" &
+        "140f8b7a610f5ad04c532f9f02fc593c808a3a2bdd30313021300906052b0e03021a0500041417b42fdeeddc75" &
+        "cad52c98532b3e92b52a334c4e04088b98cc91beff977802020800";
+
+      function From_Hex
+        (Text : String) return Ada.Streams.Stream_Element_Array
+      is
+         Result : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (Text'Length / 2));
+         function Nibble (C : Character) return Natural
+         is (case C is
+                when '0' .. '9' => Character'Pos (C) - Character'Pos ('0'),
+                when others     => Character'Pos (C) - Character'Pos ('a') + 10);
+      begin
+         for I in Result'Range loop
+            Result (I) :=
+              Ada.Streams.Stream_Element
+                (Nibble (Text (Text'First + 2 * Natural (I - 1))) * 16
+                 + Nibble (Text (Text'First + 2 * Natural (I - 1) + 1)));
+         end loop;
+         return Result;
+      end From_Hex;
+
+      CA_PEM  : Unbounded_String;
+      CA_Key  : Unbounded_String;
+      Bundle  : Unbounded_String;
+      Outcome : CryptoLib.Certificates.Certificate_Status;
+   begin
+      --  A bundle this crate wrote, read back. The round trip is the point:
+      --  generating one nobody can open is a failure that only shows up in
+      --  somebody else's tool.
+      Outcome :=
+        CryptoLib.Certificates.Create_Local_CA
+          ("p12-roundtrip-ca", CA_PEM, CA_Key,
+           CryptoLib.Certificates.P384_Key);
+      Check (Outcome = CryptoLib.Certificates.Ok, "fixture: CA created");
+
+      Outcome :=
+        CryptoLib.Certificates.Generate_PKCS12
+          (To_String (CA_PEM), To_String (CA_Key), "friendly", "secret",
+           Bundle);
+      Check (Outcome = CryptoLib.Certificates.Ok, "fixture: bundle written");
+
+      declare
+         Text : constant String := To_String (Bundle);
+         Raw  : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (Text'Length));
+         Item : P12.Bundle;
+         St   : P12.Open_Status;
+      begin
+         for I in Text'Range loop
+            Raw (Ada.Streams.Stream_Element_Offset (I - Text'First + 1)) :=
+              Character'Pos (Text (I));
+         end loop;
+
+         P12.Open (Raw, "secret", CryptoLib.ASN1.Default_Limits, Item, St);
+         Check (St = P12.Ok,
+                "a bundle this crate wrote opens here, got "
+                & P12.Status_Image (St));
+         Check (P12.Certificate_Count (Item) = 1,
+                "it carries its one certificate");
+         Check (P12.Has_Private_Key (Item)
+                and then P12.Key_Algorithm_Of (Item)
+                           = CryptoLib.X509.ECDSA_P384
+                and then P12.Private_Value (Item)'Length = 48,
+                "and the P-384 key that goes with it");
+
+         --  The certificate really is the CA's, not merely certificate-shaped.
+         declare
+            Parsed : CryptoLib.ASN1.Errors.Decode_Status;
+            Cert   : constant X509C.Certificate :=
+              X509C.Decode_DER
+                (P12.Certificate_Bytes (Item, 1),
+                 CryptoLib.ASN1.Default_Limits, Parsed);
+         begin
+            Check (Parsed = CryptoLib.ASN1.Errors.Ok
+                   and then X509C.Subject_Common_Name (Cert)
+                              = "p12-roundtrip-ca",
+                   "the certificate inside is the one that went in");
+         end;
+
+         --  Nothing is believed before the MAC is checked, so a wrong
+         --  password yields nothing rather than a hopeful parse.
+         P12.Open (Raw, "wrong", CryptoLib.ASN1.Default_Limits, Item, St);
+         Check (St = P12.Wrong_Password_Or_Corrupt,
+                "a wrong password is refused, got " & P12.Status_Image (St));
+         Check (not P12.Is_Present (Item)
+                and then P12.Certificate_Count (Item) = 0,
+                "and nothing is left readable behind it");
+      end;
+
+      --  A bundle OpenSSL wrote with its own defaults, where the certificates
+      --  sit in PKCS#7 encrypted content rather than in the clear. This is
+      --  the common shape; a reader that skipped it would report a bundle
+      --  full of certificates as having none.
+      declare
+         Item : P12.Bundle;
+         St   : P12.Open_Status;
+      begin
+         P12.Open (From_Hex (OpenSSL_Bundle), "secret",
+                   CryptoLib.ASN1.Default_Limits, Item, St);
+         Check (St = P12.Ok,
+                "an OpenSSL bundle opens, got " & P12.Status_Image (St));
+         Check (P12.Certificate_Count (Item) = 2,
+                "both its certificates are found, got"
+                & Natural'Image (P12.Certificate_Count (Item)));
+         Check (P12.Has_Private_Key (Item)
+                and then P12.Key_Algorithm_Of (Item) = CryptoLib.X509.RSA,
+                "and its RSA key");
+
+         declare
+            Leaf_Parsed   : CryptoLib.ASN1.Errors.Decode_Status;
+            Issuer_Parsed : CryptoLib.ASN1.Errors.Decode_Status;
+            Leaf   : constant X509C.Certificate :=
+              X509C.Decode_DER
+                (P12.Certificate_Bytes (Item, 1),
+                 CryptoLib.ASN1.Default_Limits, Leaf_Parsed);
+            Issuer : constant X509C.Certificate :=
+              X509C.Decode_DER
+                (P12.Certificate_Bytes (Item, 2),
+                 CryptoLib.ASN1.Default_Limits, Issuer_Parsed);
+         begin
+            Check (Leaf_Parsed = CryptoLib.ASN1.Errors.Ok
+                   and then Issuer_Parsed = CryptoLib.ASN1.Errors.Ok,
+                   "both extracted certificates decode");
+            Check (X509C.Subject_Common_Name (Leaf) = "leaf.rsa.example",
+                   "the leaf comes out of the encrypted bag intact, got "
+                   & X509C.Subject_Common_Name (Leaf));
+            Check (X509C.Subject_Common_Name (Issuer) = "rsa-test-ca",
+                   "and so does its issuer");
+         end;
+      end;
+   end Check_PKCS12;
+
+
 begin
    Check_PBKDF2_SHA1;
    Check_PBKDF2_SHA2;
@@ -4734,6 +4952,7 @@ begin
    Check_RSA_PSS;
    Check_Revocation;
    Check_PKCS8_Encrypted;
+   Check_PKCS12;
    Check_Identity_Predicates;
    Check_PKCS12_Mac_Key;
    Check_ECDSA_P384_Verify;

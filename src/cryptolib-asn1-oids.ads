@@ -142,6 +142,20 @@ package CryptoLib.ASN1.OIDs is
    AES256_CBC : constant Octets :=
      [16#60#, 16#86#, 16#48#, 16#01#, 16#65#, 16#03#, 16#04#, 16#01#, 16#2A#];
 
+   --  PKCS#7 content types and PKCS#12 bag types, for reading a bundle.
+   PKCS7_Data : constant Octets :=
+     [16#2A#, 16#86#, 16#48#, 16#86#, 16#F7#, 16#0D#, 16#01#, 16#07#, 16#01#];
+   PKCS7_Encrypted_Data : constant Octets :=
+     [16#2A#, 16#86#, 16#48#, 16#86#, 16#F7#, 16#0D#, 16#01#, 16#07#, 16#06#];
+   Key_Bag : constant Octets :=
+     [16#2A#, 16#86#, 16#48#, 16#86#, 16#F7#, 16#0D#, 16#01#, 16#0C#, 16#0A#, 16#01#, 16#01#];
+   Shrouded_Key_Bag : constant Octets :=
+     [16#2A#, 16#86#, 16#48#, 16#86#, 16#F7#, 16#0D#, 16#01#, 16#0C#, 16#0A#, 16#01#, 16#02#];
+   Cert_Bag : constant Octets :=
+     [16#2A#, 16#86#, 16#48#, 16#86#, 16#F7#, 16#0D#, 16#01#, 16#0C#, 16#0A#, 16#01#, 16#03#];
+   X509_Certificate_Bag : constant Octets :=
+     [16#2A#, 16#86#, 16#48#, 16#86#, 16#F7#, 16#0D#, 16#01#, 16#09#, 16#16#, 16#01#];
+
    --  Is the identifier at Item within Data this one?
    --
    --  Takes the element rather than a slice so that a caller cannot
