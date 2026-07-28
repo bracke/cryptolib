@@ -8,6 +8,7 @@ with CryptoLib.ASN1;
 with CryptoLib.PEM;
 with CryptoLib.X509;
 with CryptoLib.X509.Certificates;
+with CryptoLib.X509.Extensions;
 with CryptoLib.X509.Signatures;
 with CryptoLib.ASN1.DER;
 with CryptoLib.ASN1.Errors;
@@ -1872,6 +1873,142 @@ procedure Tests is
    end Check_X509_Verify;
 
 
+   --  The extensions that decide what a certificate is for. Every expected
+   --  value here was read off "openssl x509 -text" for the same certificate
+   --  before being written down.
+   procedure Check_X509_Extensions is
+      use type CryptoLib.ASN1.Errors.Decode_Status;
+      use type CryptoLib.PEM.Decode_Status;
+      use type CryptoLib.X509.Extensions.General_Name_Kind;
+
+      package X509C renames CryptoLib.X509.Certificates;
+      package XE renames CryptoLib.X509.Extensions;
+
+      function Decoded (Text : String) return X509C.Certificate is
+         Buffer : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset
+                   (CryptoLib.PEM.Maximum_Decoded_Length (Text)));
+         Last   : Ada.Streams.Stream_Element_Offset;
+         From   : Positive := Text'First;
+         P      : CryptoLib.PEM.Decode_Status;
+         D      : CryptoLib.ASN1.Errors.Decode_Status;
+      begin
+         CryptoLib.PEM.Decode_Block
+           (Text, CryptoLib.PEM.Certificate_Label, From, Buffer, Last, P);
+         Check (P = CryptoLib.PEM.Ok, "fixture: armour decodes");
+         return X509C.Decode_DER
+           (Buffer (Buffer'First .. Last), CryptoLib.ASN1.Default_Limits, D);
+      end Decoded;
+
+      CA_PEM   : Unbounded_String;
+      CA_Key   : Unbounded_String;
+      Leaf_PEM : Unbounded_String;
+      Leaf_Key : Unbounded_String;
+      Outcome  : CryptoLib.Certificates.Certificate_Status;
+   begin
+      Outcome :=
+        CryptoLib.Certificates.Create_Local_CA
+          ("extensions-ca", CA_PEM, CA_Key,
+           CryptoLib.Certificates.P384_Key);
+      Check (Outcome = CryptoLib.Certificates.Ok, "fixture: CA created");
+
+      Outcome :=
+        CryptoLib.Certificates.Issue_Server_Certificate
+          (To_String (CA_PEM), To_String (CA_Key), "host.example",
+           [1 => To_Unbounded_String ("host.example"),
+            2 => To_Unbounded_String ("alt.example"),
+            3 => To_Unbounded_String ("127.0.0.1")],
+           Leaf_PEM, Leaf_Key);
+      Check (Outcome = CryptoLib.Certificates.Ok, "fixture: leaf issued");
+
+      declare
+         CA : constant X509C.Certificate := Decoded (To_String (CA_PEM));
+         BC : constant XE.Basic_Constraints := XE.Get_Basic_Constraints (CA);
+         KU : constant XE.Key_Usage := XE.Get_Key_Usage (CA);
+         EK : constant XE.Extended_Key_Usage := XE.Get_Extended_Key_Usage (CA);
+      begin
+         Check (BC.Present and then BC.Well_Formed and then BC.Is_CA,
+                "the CA's basic constraints say CA:TRUE");
+         Check (not BC.Has_Path_Length,
+                "the CA states no path length constraint");
+         Check (KU.Present and then KU.Well_Formed,
+                "the CA carries a well-formed key usage");
+         Check (KU.Certificate_Sign and then KU.CRL_Sign,
+                "the CA may sign certificates and CRLs");
+         Check (not KU.Digital_Signature,
+                "the CA's key usage is only what it needs");
+
+         --  Absent is not the same as empty, and the type says which.
+         Check (not EK.Present,
+                "the CA has no extended key usage, which is not an empty one");
+         Check (not XE.Has_Unsupported_Critical_Extension (CA),
+                "every critical extension on the CA is one we understand");
+      end;
+
+      declare
+         Leaf : constant X509C.Certificate := Decoded (To_String (Leaf_PEM));
+         BC   : constant XE.Basic_Constraints :=
+           XE.Get_Basic_Constraints (Leaf);
+         KU   : constant XE.Key_Usage := XE.Get_Key_Usage (Leaf);
+         EK   : constant XE.Extended_Key_Usage :=
+           XE.Get_Extended_Key_Usage (Leaf);
+      begin
+         Check (BC.Present and then not BC.Is_CA,
+                "the leaf's basic constraints say CA:FALSE");
+         Check (KU.Present and then KU.Digital_Signature
+                and then not KU.Certificate_Sign,
+                "the leaf may sign but may not issue certificates");
+         Check (EK.Present and then EK.Well_Formed and then EK.Server_Auth,
+                "the leaf is issued for TLS server authentication");
+         Check (not EK.Client_Auth,
+                "a server certificate is not also a client one");
+         Check (not EK.Any_Purpose and then not EK.Has_Unrecognised,
+                "the leaf's purposes are exactly the ones recognised");
+
+         --  Subject alternative names, in the order they were asked for.
+         Check (XE.Subject_Alternative_Name_Count (Leaf) = 3,
+                "the leaf carries three alternative names");
+         Check (XE.Subject_Alternative_Name_Kind (Leaf, 1) = XE.DNS_Name
+                and then XE.Subject_Alternative_Name_Text (Leaf, 1)
+                           = "host.example",
+                "the first alternative name is the DNS name asked for");
+         Check (XE.Subject_Alternative_Name_Kind (Leaf, 2) = XE.DNS_Name
+                and then XE.Subject_Alternative_Name_Text (Leaf, 2)
+                           = "alt.example",
+                "the second alternative name is the other DNS name");
+
+         --  An address is bytes. Rendering it would invite comparing
+         --  addresses as text, where 10.0.0.1 and 10.000.000.001 differ and
+         --  the addresses do not.
+         Check (XE.Subject_Alternative_Name_Kind (Leaf, 3) = XE.IP_Address,
+                "the third alternative name is an address");
+         Check (XE.Subject_Alternative_Name_Text (Leaf, 3) = "",
+                "an address is not offered as text");
+         declare
+            Address : constant Ada.Streams.Stream_Element_Array :=
+              XE.Subject_Alternative_Name_Bytes (Leaf, 3);
+         begin
+            Check (Address'Length = 4,
+                   "an IPv4 address is four octets");
+            Check (Address (Address'First) = 127
+                   and then Address (Address'First + 1) = 0
+                   and then Address (Address'First + 2) = 0
+                   and then Address (Address'First + 3) = 1,
+                   "the address octets are 127.0.0.1");
+         end;
+
+         Check (not XE.Has_Unsupported_Critical_Extension (Leaf),
+                "every critical extension on the leaf is one we understand");
+
+         --  Asking past the end must not invent a name.
+         Check (XE.Subject_Alternative_Name_Text (Leaf, 9) = "",
+                "a name past the end is empty");
+         Check (XE.Subject_Alternative_Name_Bytes (Leaf, 9)'Length = 0,
+                "a name past the end has no octets");
+      end;
+   end Check_X509_Extensions;
+
+
 begin
    Check_PBKDF2_SHA1;
    Check_PBKDF2_SHA2;
@@ -1890,6 +2027,7 @@ begin
    Check_ASN1_DER;
    Check_X509_Decode;
    Check_X509_Verify;
+   Check_X509_Extensions;
    Check_Identity_Predicates;
    Check_PKCS12_Mac_Key;
    Check_ECDSA_P384_Verify;
