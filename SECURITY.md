@@ -31,7 +31,7 @@ The reference sources are:
 | PKCS#12 (`PKCS12`) | reading a bundle, MAC verified before its contents are parsed | bundles written by this crate and by `openssl pkcs12 -export` both open, including OpenSSL's default layout with the certificates in encrypted content; the extracted certificates hash identically to the originals |
 | RSA | PKCS#1 v1.5 and PSS verification, SHA-256/384/512 | signatures produced by OpenSSL at 2048 and 3072 bits; a cube-root forgery against a low exponent is refused; PSS checked at both salt lengths OpenSSL emits, and a signature does not verify under a salt length or hash other than the one its parameters state |
 | X.509 parsing (`ASN1`, `PEM`, `X509.*`) | DER reader, PEM armour, certificate decode, extensions, signature verification | field-by-field against `openssl x509 -text` on the same certificates; an OpenSSL-issued RSA chain verifies here and under `openssl verify` |
-| Revocation (`X509.CRLs`, `OCSP`) | CRL and OCSP parsing and signature checking | against a CRL and OCSP responses OpenSSL produced through `openssl ca -revoke`; the request builder is byte-identical to `openssl ocsp -reqout`, with and without a nonce; a delegate without OCSP-signing authority is refused; revocation times and reasons match `openssl crl -text`, and the CRL and OCSP paths agree with each other on the same certificate; a CRL scoped by a critical `issuingDistributionPoint` is refused rather than read as a complete list |
+| Revocation (`X509.CRLs`, `OCSP`) | CRL and OCSP parsing and signature checking | against a CRL and OCSP responses OpenSSL produced through `openssl ca -revoke`; the request builder is byte-identical to `openssl ocsp -reqout`, with and without a nonce; a delegate without OCSP-signing authority is refused; revocation times and reasons match `openssl crl -text`, and the CRL and OCSP paths agree with each other on the same certificate; a CRL scoped by a critical `issuingDistributionPoint` is refused rather than read as a complete list; a validly signed OCSP response carrying an unrecognised critical extension is refused, in its own extensions or in the entry about the certificate |
 | Service identity (`X509.Identity`) | RFC 9525 DNS and IP matching | negative cases pinned: a wildcard matches neither the bare domain nor across two labels, an address is never matched as text, and the common name is consulted only when a caller asks for it |
 
 ## Constant-time properties
@@ -187,6 +187,16 @@ The RNG **fails closed**: if no OS source is available it returns
   responders. The nonce must be unpredictable (`CryptoLib.Random`, not a
   counter); without one, a captured "good" response replays until its
   `nextUpdate`.
+- **A critical extension is honoured or the statement is refused.** This
+  applies to certificates (`Validate_Path`), to CRLs, and now to OCSP
+  responses: an unrecognised critical extension in a response's own
+  extensions, or in the entry about the certificate asked after, makes
+  `Verify` answer `Unsupported_Extension`. Marking an extension critical is
+  the issuer or responder saying that ignoring it changes what the statement
+  means, so reading past it is reading a different statement than the one
+  that was signed. The per-entry extensions sit behind an optional
+  `nextUpdate`, and were previously unreachable rather than merely
+  unchecked.
 - **A CRL that covers only part of what its issuer signed answers nothing.**
   `issuingDistributionPoint` and `deltaCRLIndicator` must be critical when
   present, and both change what an *absent* serial means: a CRL scoped to CA

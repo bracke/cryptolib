@@ -3988,6 +3988,70 @@ procedure Tests is
         "ff2eefcf1384d136c45b1c062f731fc3414a237cf1b971994cced2b6852b3f4314e9335fc96ba21fd8949c58f5" &
         "c5";
 
+      OCSP_Critical_Response : constant String :=
+        "308205280a0100a08205213082051d06092b06010505073001010482050e3082050a3081daa118301631143012" &
+        "06035504030c0b63726c2d746573742d6361180f32303236303732383232343130395a30763074303b30090605" &
+        "2b0e03021a05000414c62b1a2f4dac7a6728a9d9bcec42380ae44dbd360414a1f6d41f7e7b24380aa8a0cd3392" &
+        "6e4452de852f02021000a111180f32303236303732383230313534375a180f3230323630373238323234313039" &
+        "5aa011180f32303236303832373232343130395aa1353033301f06092b0601050507300102041204107fd82867" &
+        "87dd2b097e24bc1c0437e57b301006092b06010505073001630101ff0400300d06092a864886f70d01010b0500" &
+        "03820101003829713f5834725861c9a813a729eb5d4f91bf175b0f9b9611c4638e749525a353a9d0827a5c8333" &
+        "09b7bb9cf75266a4a780b7d714d278705e1ff85014ae083a8bdf55064d0951684cbc3362473663c3c01d8d70d4" &
+        "6ede6b058933f8d112baa790cf4c2ebe41636538e07edeec0ea0895b65de3dcbbe5204ec0baef590fb2a2a70be" &
+        "4c914261d40f3db0df8d05a3d3c841cf4e47d77acd4d724c0c73a0e3486454b7253ef2239a57337c3f1bdab14f" &
+        "3e6a4fc7d5182b9b17ef6946302e9ecca58c3fa2a37aff28d87d1948762ad60f0bc94f1e3fb09573250f7c7895" &
+        "3eded381b7f7d81c968e32255a2809580349421faf29cbe3eb26ce784e5e9e3a62d469ada08203153082031130" &
+        "82030d308201f5a0030201020214695a2eb222fd6509af65d97b7099306d68b399eb300d06092a864886f70d01" &
+        "010b050030163114301206035504030c0b63726c2d746573742d6361301e170d3236303732383230313534375a" &
+        "170d3336303732353230313534375a30163114301206035504030c0b63726c2d746573742d636130820122300d" &
+        "06092a864886f70d01010105000382010f003082010a0282010100b5e60ee7058f7f9e991a038feeac5eb95d99" &
+        "b6b52f543a4cf379d9b84ab68125a82424b27f07a1f6a39f6f6e5ac4df194a06d3683fafc31123427f768f6024" &
+        "aa6b2d5f759d0629a578497370038d70020ea20e261a913c332504d70327b2cd747a2ae0f415764976ae21d8c3" &
+        "4874405cfabefd83ffc5b03de5c6521a611c333189ead8755a0bf56113ad088deb953cf1febb465a377d256bad" &
+        "055bf627727ccfffa616cfe8edc009a49f318a6c1e935dc42b69ab1d2aa9ee2173defdf45fbb595b99aced529f" &
+        "ca129587fac967025980f7617070edde4748fa62cd395a608475ba22bd65c29f1fabdefe5e8aeed28baa170388" &
+        "bca8bb6490db6bacea3473ed8f0203010001a3533051301d0603551d0e04160414a1f6d41f7e7b24380aa8a0cd" &
+        "33926e4452de852f301f0603551d23041830168014a1f6d41f7e7b24380aa8a0cd33926e4452de852f300f0603" &
+        "551d130101ff040530030101ff300d06092a864886f70d01010b050003820101005f484fd12f7d522aa3787c0e" &
+        "e05c3e06067d91b3f51a3747e1ffcd7d57e839f17a9bfcf878faa9c4af435426aa06ed4907dfb9c29ca36c6b53" &
+        "af27ce22516b5bd4cb19e9d912893e3800a1f7acc3abefbc18a6c899793b6ff9d378f2a77e0feb03659f8a2409" &
+        "bee7a4804773be1f8428608fb9041ac74581b1943d0d90dd2939be1b74015bcd676cf483167988523fba452b25" &
+        "5b49146d3c5be21408d8c9848f6794a4fa588ab2d6d326bc7d92920c3547d3f4d9270c01ec4d368c98e11a611f" &
+        "40cd6672de148b3bf435f812eda7e9e5d383ff2eefcf1384d136c45b1c062f731fc3414a237cf1b971994cced2" &
+        "b6852b3f4314e9335fc96ba21fd8949c58f5c5";
+
+      OCSP_Critical_Single : constant String :=
+        "3082052e0a0100a08205273082052306092b060105050730010104820514308205103081e0a118301631143012" &
+        "06035504030c0b63726c2d746573742d6361180f32303236303732383232343130395a30818d30818a303b3009" &
+        "06052b0e03021a05000414c62b1a2f4dac7a6728a9d9bcec42380ae44dbd360414a1f6d41f7e7b24380aa8a0cd" &
+        "33926e4452de852f02021000a111180f32303236303732383230313534375a180f323032363037323832323431" &
+        "30395aa011180f32303236303832373232343130395aa1143012301006092b06010505073001630101ff0400a1" &
+        "233021301f06092b0601050507300102041204107fd8286787dd2b097e24bc1c0437e57b300d06092a864886f7" &
+        "0d01010b050003820101006a2c78c204cb36d61eac84655d9d60c9276097853ed6298d3eb8c2850703fc5365de" &
+        "acc2dbfaa02fa9b31ab5e868c6456d59e243a9ab558e6adeaabc7ac53c92ce56b249b89fd6a6ff6e7bb4ad23e2" &
+        "f4332605251d744da2efc49a06abb62b91ae75acd78f1a597ada5c62988b9871de7d995787a5212e32a75221ed" &
+        "08dbb8b4723db228d2df8d85700acb7cca6019d43c4f0230f9081ae2c1771c455e7eaa4fdc846e9a5b7a668ba3" &
+        "0bf6944c643aa854d239419b1c917cbc874f7b9f4aed7e670fece44acde038281f0150bf981519062f1e2ddcbd" &
+        "a0187d55c26e4fbe8ed5950f46597969b82d6f85d39de60074f19fb262e424d728db7a3bf76d6053f17ca08203" &
+        "15308203113082030d308201f5a0030201020214695a2eb222fd6509af65d97b7099306d68b399eb300d06092a" &
+        "864886f70d01010b050030163114301206035504030c0b63726c2d746573742d6361301e170d32363037323832" &
+        "30313534375a170d3336303732353230313534375a30163114301206035504030c0b63726c2d746573742d6361" &
+        "30820122300d06092a864886f70d01010105000382010f003082010a0282010100b5e60ee7058f7f9e991a038f" &
+        "eeac5eb95d99b6b52f543a4cf379d9b84ab68125a82424b27f07a1f6a39f6f6e5ac4df194a06d3683fafc31123" &
+        "427f768f6024aa6b2d5f759d0629a578497370038d70020ea20e261a913c332504d70327b2cd747a2ae0f41576" &
+        "4976ae21d8c34874405cfabefd83ffc5b03de5c6521a611c333189ead8755a0bf56113ad088deb953cf1febb46" &
+        "5a377d256bad055bf627727ccfffa616cfe8edc009a49f318a6c1e935dc42b69ab1d2aa9ee2173defdf45fbb59" &
+        "5b99aced529fca129587fac967025980f7617070edde4748fa62cd395a608475ba22bd65c29f1fabdefe5e8aee" &
+        "d28baa170388bca8bb6490db6bacea3473ed8f0203010001a3533051301d0603551d0e04160414a1f6d41f7e7b" &
+        "24380aa8a0cd33926e4452de852f301f0603551d23041830168014a1f6d41f7e7b24380aa8a0cd33926e4452de" &
+        "852f300f0603551d130101ff040530030101ff300d06092a864886f70d01010b050003820101005f484fd12f7d" &
+        "522aa3787c0ee05c3e06067d91b3f51a3747e1ffcd7d57e839f17a9bfcf878faa9c4af435426aa06ed4907dfb9" &
+        "c29ca36c6b53af27ce22516b5bd4cb19e9d912893e3800a1f7acc3abefbc18a6c899793b6ff9d378f2a77e0feb" &
+        "03659f8a2409bee7a4804773be1f8428608fb9041ac74581b1943d0d90dd2939be1b74015bcd676cf483167988" &
+        "523fba452b255b49146d3c5be21408d8c9848f6794a4fa588ab2d6d326bc7d92920c3547d3f4d9270c01ec4d36" &
+        "8c98e11a611f40cd6672de148b3bf435f812eda7e9e5d383ff2eefcf1384d136c45b1c062f731fc3414a237cf1" &
+        "b971994cced2b6852b3f4314e9335fc96ba21fd8949c58f5c5";
+
       Status : CryptoLib.ASN1.Errors.Decode_Status;
 
       --  The same CA and revoked certificate the CRL fixtures come from.
@@ -4197,6 +4261,53 @@ procedure Tests is
             Check (CO.Verify (Plain, Leaf, CA) = CO.Accepted,
                    "and one that has none");
          end;
+      end;
+
+      --  A critical extension is the responder saying that ignoring it
+      --  changes what the response means. Both fixtures are genuinely
+      --  signed -- OpenSSL reports "Response verify OK" on each -- and
+      --  differ from the accepted response above only by carrying one
+      --  unrecognised critical extension, so nothing but this check stands
+      --  between them and being read as ordinary answers.
+      declare
+         In_Response : CO.Response :=
+           CO.Decode_Response
+             (From_Hex (OCSP_Critical_Response),
+              CryptoLib.ASN1.Default_Limits, Status);
+         In_Entry : CO.Response :=
+           CO.Decode_Response
+             (From_Hex (OCSP_Critical_Single),
+              CryptoLib.ASN1.Default_Limits, Status);
+         Clean : CO.Response :=
+           CO.Decode_Response
+             (From_Hex (OCSP_Nonce_Response), CryptoLib.ASN1.Default_Limits,
+              Status);
+      begin
+         Check (Status = CryptoLib.ASN1.Errors.Ok,
+                "fixtures carrying critical extensions still decode");
+
+         --  In the response's own extensions.
+         Check (CO.Has_Unsupported_Critical_Extension (In_Response),
+                "a critical extension on the response is noticed");
+         Check (CO.Verify (In_Response, Leaf, CA) = CO.Unsupported_Extension,
+                "and the response is refused, got "
+                & CO.Result_Image (CO.Verify (In_Response, Leaf, CA)));
+
+         --  And in the entry about this certificate. These sit behind an
+         --  optional nextUpdate, so a reader that peeks at nextUpdate
+         --  without stepping over it never reaches them at all.
+         Check (CO.Has_Unsupported_Critical_Extension (In_Entry),
+                "a critical extension on the entry is noticed too");
+         Check (CO.Verify (In_Entry, Leaf, CA) = CO.Unsupported_Extension,
+                "and that response is refused as well, got "
+                & CO.Result_Image (CO.Verify (In_Entry, Leaf, CA)));
+
+         --  This must refuse those responses, not responses.
+         Check (not CO.Has_Unsupported_Critical_Extension (Clean),
+                "an ordinary response carries nothing critical this cannot "
+                & "read");
+         Check (CO.Verify (Clean, Leaf, CA) = CO.Accepted,
+                "and is still accepted");
       end;
    end Check_OCSP;
 

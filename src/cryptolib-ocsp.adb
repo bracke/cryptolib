@@ -36,6 +36,7 @@ package body CryptoLib.OCSP is
          when Not_Successful          => return "not successful";
          when Malformed_Response      => return "malformed response";
          when Wrong_Certificate       => return "wrong certificate";
+         when Unsupported_Extension   => return "unsupported extension";
          when Nonce_Missing           => return "nonce missing";
          when Nonce_Mismatch          => return "nonce mismatch";
          when Unknown_Responder       => return "unknown responder";
@@ -307,12 +308,19 @@ package body CryptoLib.OCSP is
 
    --  Read one SingleResponse: which certificate it is about, what it says,
    --  and for how long. One reader, used to validate the list at decode and
-   --  Find the nonce inside a [Number] EXPLICIT Extensions wrapper.
+   --  Walk a [Number] EXPLICIT Extensions wrapper, reporting the nonce and
+   --  whether anything critical in it is unrecognised.
    --
-   --  Absent is not an error: responseExtensions is optional, and most
-   --  responses carry none. Whether that matters is Verify's question, and it
-   --  depends on whether the caller sent one.
-   procedure Find_Nonce
+   --  Both answers come from one walk. Asking them separately would mean two
+   --  passes that could disagree about which extension is which -- and the
+   --  one that decides whether the response may be read at all is the one
+   --  that must not be wrong.
+   --
+   --  Absent is not an error: these blocks are optional and most responses
+   --  carry none. A critical extension this cannot interpret is a different
+   --  matter, because marking it critical is the responder saying that
+   --  ignoring it changes what the response means.
+   procedure Scan_Extensions
      (Data     : Octets;
       Position : Offset;
       Last     : Offset;
@@ -320,7 +328,8 @@ package body CryptoLib.OCSP is
       Number   : Tag_Number;
       Limits   : Decode_Limits;
       Where    : out Span;
-      Found    : out Boolean)
+      Found    : out Boolean;
+      Unknown  : out Boolean)
    is
       Cursor : Offset := Position;
       Wrap   : Element;
@@ -329,6 +338,7 @@ package body CryptoLib.OCSP is
    begin
       Where := (First => 1, Last => 0);
       Found := False;
+      Unknown := False;
 
       if DER_Reader.At_End (Cursor, Last) then
          return;
@@ -347,6 +357,9 @@ package body CryptoLib.OCSP is
       DER_Reader.Read_Sequence
         (Data, Cursor, Wrap.Last, Depth + 1, Limits, Seq, Status);
       if Status /= Ok then
+         --  A block that will not parse is not evidence that nothing
+         --  critical is in it.
+         Unknown := True;
          return;
       end if;
 
@@ -360,7 +373,7 @@ package body CryptoLib.OCSP is
             Inner : Element;
             Look  : Offset;
             Peek  : Element;
-            Flag  : Boolean;
+            Flag  : Boolean := False;
             Try   : Decode_Status;
          begin
             DER_Reader.Read_Sequence
@@ -388,6 +401,15 @@ package body CryptoLib.OCSP is
               (Data, Part, Ext.Last, Depth + 3, Limits, Value, Status);
             exit when Status /= Ok;
 
+            --  The nonce is the only extension this acts on, so it is the
+            --  only one whose criticality it can honour.
+            if Flag
+              and then not OID_Table.Matches
+                             (Data, OID, OID_Table.OCSP_Nonce)
+            then
+               Unknown := True;
+            end if;
+
             if OID_Table.Matches (Data, OID, OID_Table.OCSP_Nonce) then
                --  extnValue wraps a DER OCTET STRING; the nonce is its
                --  content, not the wrapper's.
@@ -398,11 +420,16 @@ package body CryptoLib.OCSP is
                   Where := (First => Inner.First, Last => Inner.Last);
                   Found := True;
                end if;
-               return;
+               Status := Ok;
             end if;
          end;
       end loop;
-   end Find_Nonce;
+
+      --  Fell out of the loop on a parse failure rather than the end.
+      if Status /= Ok then
+         Unknown := True;
+      end if;
+   end Scan_Extensions;
 
    --  to pick from it at verify, so the two cannot disagree about what an
    --  entry means.
@@ -422,6 +449,7 @@ package body CryptoLib.OCSP is
       Revoked_Given : out Boolean;
       Reason        : out CryptoLib.X509.Revocation_Reason;
       Reason_Given  : out Boolean;
+      Unknown_Critical : out Boolean;
       Status    : out Decode_Status)
    is
       Single  : Element;
@@ -441,6 +469,7 @@ package body CryptoLib.OCSP is
       Revoked_Given := False;
       Reason := CryptoLib.X509.Unspecified;
       Reason_Given := False;
+      Unknown_Critical := False;
 
       DER_Reader.Read_Sequence
         (Data, Position, Last, 7, Limits, Single, Status);
@@ -567,32 +596,56 @@ package body CryptoLib.OCSP is
          return;
       end if;
 
-      if not DER_Reader.At_End (Inner, Single.Last) then
+      --  What is left is nextUpdate [0] and singleExtensions [1], both
+      --  optional. The cursor has to advance past whichever is present:
+      --  peeking at the first without stepping over it leaves the second
+      --  unreachable, which is how the per-entry extensions went unread.
+      while not DER_Reader.At_End (Inner, Single.Last) loop
          declare
             Look : Offset := Inner;
             Tag  : Element;
             Try  : Decode_Status;
          begin
             DER_Reader.Read (Data, Look, Single.Last, 8, Limits, Tag, Try);
-            if Try = Ok
-              and then Tag.Class = Context_Specific
-              and then Tag.Number = 0
-              and then Tag.Constructed
-            then
-               declare
-                  Within : Offset := Tag.First;
-               begin
-                  CryptoLib.X509.Times.Read
-                    (Data, Within, Tag.Last, 9, Limits, Due, Status);
-                  if Status = Ok then
-                     Due_Given := True;
-                  else
-                     Status := Ok;
-                  end if;
-               end;
-            end if;
+            exit when Try /= Ok
+              or else Tag.Class /= Context_Specific
+              or else not Tag.Constructed;
+
+            case Tag.Number is
+               when 0 =>
+                  declare
+                     Within : Offset := Tag.First;
+                  begin
+                     CryptoLib.X509.Times.Read
+                       (Data, Within, Tag.Last, 9, Limits, Due, Status);
+                     if Status = Ok then
+                        Due_Given := True;
+                     else
+                        Status := Ok;
+                     end if;
+                  end;
+
+               when 1 =>
+                  --  singleExtensions. The nonce does not belong here, so
+                  --  only the criticality answer is taken.
+                  declare
+                     At_Nonce : Span;
+                     Carried  : Boolean;
+                     Odd      : Boolean;
+                  begin
+                     Scan_Extensions
+                       (Data, Inner, Single.Last, 8, 1, Limits,
+                        At_Nonce, Carried, Odd);
+                     Unknown_Critical := Unknown_Critical or else Odd;
+                  end;
+
+               when others =>
+                  null;
+            end case;
+
+            Inner := Look;
          end;
-      end if;
+      end loop;
    end Read_Single_Response;
 
    function Decode_Response
@@ -839,6 +892,7 @@ package body CryptoLib.OCSP is
                   Row_Rev_Given : Boolean;
                   Row_Reason    : CryptoLib.X509.Revocation_Reason;
                   Row_Reason_Given : Boolean;
+                  Row_Odd   : Boolean;
                   Name_H, Key_H, Serial_S : Span;
                   Seen  : Natural := 0;
                begin
@@ -847,8 +901,10 @@ package body CryptoLib.OCSP is
                        (Work, Row, Skip.Last, Limits, Name_H, Key_H,
                         Serial_S, Row_State, Row_From, Row_To, Row_Due,
                         Row_Rev, Row_Rev_Given, Row_Reason, Row_Reason_Given,
-                        Status);
+                        Row_Odd, Status);
                      exit when Status /= Ok;
+                     Result.Odd_Critical :=
+                       Result.Odd_Critical or else Row_Odd;
                      Seen := Seen + 1;
                   end loop;
 
@@ -866,11 +922,14 @@ package body CryptoLib.OCSP is
                declare
                   At_Nonce : Span;
                   Carried  : Boolean;
+                  Odd      : Boolean;
                begin
-                  Find_Nonce
-                    (Work, Part, TBS.Last, 6, 1, Limits, At_Nonce, Carried);
+                  Scan_Extensions
+                    (Work, Part, TBS.Last, 6, 1, Limits, At_Nonce, Carried,
+                     Odd);
                   Result.Nonce_At := At_Nonce;
                   Result.Has_Nonce_Ext := Carried;
+                  Result.Odd_Critical := Result.Odd_Critical or else Odd;
                end;
             end;
          end;
@@ -897,6 +956,10 @@ package body CryptoLib.OCSP is
 
    function Next_Update (Item : Response) return Certificate_Time
    is (Item.Due);
+
+   function Has_Unsupported_Critical_Extension
+     (Item : Response) return Boolean
+   is (Item.Odd_Critical);
 
    function Has_Nonce (Item : Response) return Boolean
    is (Item.Has_Nonce_Ext);
@@ -968,6 +1031,7 @@ package body CryptoLib.OCSP is
          Row_Rev_Given : Boolean;
          Row_Reason    : CryptoLib.X509.Revocation_Reason;
          Row_Reason_Given : Boolean;
+         Row_Odd   : Boolean;
       begin
          if Item.Responses.Last < Item.Responses.First then
             return Malformed_Response;
@@ -978,7 +1042,7 @@ package body CryptoLib.OCSP is
               (Item.DER, Row, Item.Responses.Last, Default_Limits,
                Row_Name, Row_Key, Row_Serial, Row_State, Row_From, Row_To,
                Row_Due, Row_Rev, Row_Rev_Given, Row_Reason, Row_Reason_Given,
-               Parse);
+               Row_Odd, Parse);
             exit when Parse /= Ok;
 
             if Same_Bytes (Slice (Item, Row_Name), Name_Hash)
@@ -1008,6 +1072,13 @@ package body CryptoLib.OCSP is
             return Wrong_Certificate;
          end if;
       end;
+
+      --  Before anything is read out of the response. A critical extension
+      --  this cannot interpret means the response does not say what this
+      --  reads it as saying, whoever signed it.
+      if Item.Odd_Critical then
+         return Unsupported_Extension;
+      end if;
 
       --  Checked before the signature, because a nonce that does not match
       --  means this is not the answer to the question asked, however well

@@ -59,6 +59,11 @@ package CryptoLib.OCSP is
       Wrong_Certificate,
       --  The response is about a different certificate than the one asked
       --  about. A response can be perfectly valid and about somebody else.
+      Unsupported_Extension,
+      --  A critical extension this crate cannot interpret, in the response
+      --  or in the entry about this certificate. Marking it critical is the
+      --  responder saying that ignoring it changes what the response means,
+      --  so the response is refused rather than read past it.
       Nonce_Missing,
       --  A nonce was sent and the response carries none, so nothing ties it
       --  to the request. Separate from Nonce_Mismatch because it is the
@@ -179,6 +184,16 @@ package CryptoLib.OCSP is
    --  @return what the response says about the revocation
    function Revocation_Of (Item : Response) return Revocation_Details;
 
+   --  Does this response carry a critical extension this crate cannot
+   --  interpret?
+   --
+   --  Covers the response's own extensions and those of every entry in it,
+   --  because either can change what the answer means.
+   --  @param Item the response to inspect
+   --  @return True when an unrecognised critical extension is present
+   function Has_Unsupported_Critical_Extension
+     (Item : Response) return Boolean;
+
    --  Does the response carry a nonce?
    --  @param Item the response to inspect
    --  @return True when a nonce extension is present
@@ -238,6 +253,7 @@ private
       Responses    : Span;
       Nonce_At     : Span;
       Has_Nonce_Ext : Boolean := False;
+      Odd_Critical  : Boolean := False;
       Revocation   : CryptoLib.X509.Revocation_Details;
       Name_Hash    : Span;
       Key_Hash     : Span;
