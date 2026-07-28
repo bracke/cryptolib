@@ -1,3 +1,4 @@
+with Ada.Characters.Handling;
 with Ada.Streams;
 with Ada.Strings.Fixed;
 
@@ -1823,6 +1824,19 @@ package body CryptoLib.Certificates is
          return To_String (Result);
       end;
    end Fingerprint;
+
+   function SHA1_Fingerprint (Certificate_PEM : String) return String is
+      DER : constant String := Base64_Decode (Certificate_PEM);
+   begin
+      if DER = "" then
+         return "";
+      end if;
+
+      return Ada.Characters.Handling.To_Lower
+        (Hex_Image
+           (Ada.Streams.Stream_Element_Array
+              (CryptoLib.Hashes.SHA1 (To_Bytes (DER)))));
+   end SHA1_Fingerprint;
 
    function Same_Certificate (Left : String; Right : String) return Boolean is
       Left_DER  : constant String := Base64_Decode (Left);

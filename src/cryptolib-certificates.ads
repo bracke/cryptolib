@@ -133,6 +133,18 @@ package CryptoLib.Certificates is
    --  @return "" when the text carries no certificate
    function Fingerprint (Certificate_PEM : String) return String;
 
+   --  The same certificate's SHA-1 fingerprint, as plain lowercase hex.
+   --
+   --  Not an identity to prefer -- SHA-1 is not one to rely on for that -- but
+   --  the one some stores index by, and a store that will only be told which
+   --  certificate to remove in the hash it keeps has to be told in that hash.
+   --  Windows is the case in hand: certutil matches "Cert Hash(sha1)", and
+   --  handed a SHA-256 it exits zero having deleted nothing.
+   --
+   --  @param Certificate_PEM the certificate in PEM form
+   --  @return "" when the text carries no certificate
+   function SHA1_Fingerprint (Certificate_PEM : String) return String;
+
    --  Do these two PEM texts carry the same certificate?
    --
    --  Comparing the text does not answer it: the same certificate may be
