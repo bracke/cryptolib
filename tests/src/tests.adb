@@ -33,6 +33,7 @@ with CryptoLib.Buffers;
 with CryptoLib.Diffie_Hellman;
 with CryptoLib.Modexp;
 with CryptoLib.Random;
+with CryptoLib.RSA;
 
 procedure Tests is
    use type Ada.Streams.Stream_Element;
@@ -1862,10 +1863,14 @@ procedure Tests is
       --  Asking about an algorithm this crate cannot verify must say so
       --  rather than report a bad signature. Today that is every RSA
       --  certificate and ECDSA on P-256 and P-521.
-      Check (not X509S.Is_Supported (CryptoLib.X509.SHA256_With_RSA),
-             "RSA is honestly reported as unverifiable here");
+      Check (X509S.Is_Supported (CryptoLib.X509.SHA256_With_RSA)
+             and then X509S.Is_Supported (CryptoLib.X509.SHA384_With_RSA)
+             and then X509S.Is_Supported (CryptoLib.X509.SHA512_With_RSA),
+             "the RSA signature algorithms are verifiable");
       Check (not X509S.Is_Supported (CryptoLib.X509.ECDSA_With_SHA256),
-             "ECDSA P-256 is honestly reported as unverifiable here");
+             "ECDSA P-256 is still honestly reported as unverifiable");
+      Check (not X509S.Is_Supported (CryptoLib.X509.RSASSA_PSS),
+             "RSA-PSS is a different scheme and is not claimed");
       Check (X509S.Is_Supported (CryptoLib.X509.ECDSA_With_SHA384),
              "ECDSA P-384 is supported");
       Check (X509S.Is_Supported (CryptoLib.X509.Ed25519_Signature),
@@ -2009,6 +2014,147 @@ procedure Tests is
    end Check_X509_Extensions;
 
 
+   --  RSA PKCS#1 v1.5 verification, against signatures OpenSSL produced and
+   --  against a forgery it would take a careless verifier to accept.
+   procedure Check_RSA_Verify is
+
+   RSA_KAT_Modulus : constant String :=
+     "eda66e8e74fd6e04e99282f52f13153b856a59cf6be7b5bddd5473b54eacac4c43e60b2d5bd98e0aa8559439fe" &
+     "a7d24389e4cb59a782909127d5661b4ceca2b51ee802688ad9bbaf77871706c55ec8b09343768f6eb6240db647" &
+     "4e6dcf4f639559455b94010ed58244a5eccc9066ef4daaac62cbcf3af938a20e8da458a18e8d78edf75ff4d65f" &
+     "3eb3bade68f4a0e80848ac60edec51199ecb3490b662e04e692dac129919af92e83bd88f658bd7e48c610845ae" &
+     "d7c86b68827de33e31be15cc13ccdda683c64d015919d47da0e552860295101086c547e2a6aaeaba65d844ddaf" &
+     "5658dc61b0a97187fb0fa2b1a7176d1028f70739d67a5ae9ae410c4b60befb";
+
+   RSA_KAT_Signature : constant String :=
+     "530c2f01750f7144cebf71adc28e85fd4a260df4ae04010cd02a6564ed6fe91ba0b079ecb8d71338d74de969a3" &
+     "2a8e24a8d5136f091aef96928e1c1e1305b0bee914287828841735c370700a634dbab47a879b3c83e8006e699d" &
+     "66d392739dd74d2bad567215dfae6b3ba4b9abd1590b3be5f55de3296e52a1895beffa7f98a8a06f2164ca2d0c" &
+     "35a85635c5c01636431a8207815f1389bf99980f55c3941c26af9bd3a8bf50c7cd0612bdd897f7fefd4ad97db9" &
+     "a1209301672004aad1533160cb4ce7c16af6bf721b6d3defe03d874a872a3da330eec797786b3f156565391bd6" &
+     "f3ed70db44b77a171527c94ef57ce79a3ec518e9c78e4bcfe69293dfe30225";
+
+   RSA_E3_Modulus : constant String :=
+     "c7622357e8a021f789d17baaf52775a78c959252e3692adce05c4461c90892b7f59b95d2a074ce2d3d89c6dbe4" &
+     "9abe665cb0349b2f6d44b51366cf770902e5638c254b9425ebd5d6b4d8683274f7f883a77f271084ae75fe9c5c" &
+     "bbe4564df5eca7fc6b4bd3920eeaef9c42d4fe8169856df20532a98a0040638c4a9915e7f23cf75f69c6b061df" &
+     "679b707b7610db8000ebf84dd94efe2e1ebc5b199cf7a6d900bb5c858bb68c93be728b76477c1108de6d252a65" &
+     "ed71e99294bbe6f5b8feb423b2b8a80abad46a71ae8eddfa51ade3335fac5dedecb551928750dd77c2e10be73e" &
+     "1fea9e8683eab0a5c67fb02826dc4cd10f6ff507fc4320ecbedf835b0f6937";
+
+   RSA_E3_Forged_Signature : constant String :=
+     "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" &
+     "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" &
+     "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" &
+     "00000000000000000000000000000000000000000000000000000000000000000000000032cbfd4a7adc790558" &
+     "3d767520f51640759176d37826f2ef63ae3dc7ac54f8f7785a2f2b27eb80ed15f3e4067a188e0274f45efeecbd" &
+     "de6b69cddc76507c062d672d288ee2769c329c82aa34096594dd9184bdf260";
+
+      Message : constant Ada.Streams.Stream_Element_Array :=
+        Bytes_From_String ("cryptolib rsa pkcs1 v1.5 known answer");
+
+      Exponent_65537 : constant Ada.Streams.Stream_Element_Array :=
+        [16#01#, 16#00#, 16#01#];
+      Exponent_3 : constant Ada.Streams.Stream_Element_Array := [16#03#];
+
+      function From_Hex
+        (Text : String) return Ada.Streams.Stream_Element_Array
+      is
+         Result : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (Text'Length / 2));
+         function Nibble (C : Character) return Natural
+         is (case C is
+                when '0' .. '9' => Character'Pos (C) - Character'Pos ('0'),
+                when others     => Character'Pos (C) - Character'Pos ('a') + 10);
+      begin
+         for I in Result'Range loop
+            Result (I) :=
+              Ada.Streams.Stream_Element
+                (Nibble (Text (Text'First + 2 * Natural (I - 1))) * 16
+                 + Nibble (Text (Text'First + 2 * Natural (I - 1) + 1)));
+         end loop;
+         return Result;
+      end From_Hex;
+
+      Modulus   : constant Ada.Streams.Stream_Element_Array :=
+        From_Hex (RSA_KAT_Modulus);
+      Signature : constant Ada.Streams.Stream_Element_Array :=
+        From_Hex (RSA_KAT_Signature);
+   begin
+      Check (CryptoLib.RSA.Modulus_Bits (Modulus) = 2048,
+             "the known-answer modulus is 2048 bits");
+
+      Check (CryptoLib.RSA.Verify_PKCS1_V1_5
+               (Modulus, Exponent_65537, CryptoLib.RSA.SHA256,
+                Message, Signature) = CryptoLib.Errors.Ok,
+             "an OpenSSL SHA-256 signature verifies");
+
+      --  Wrong message, right signature.
+      Check (CryptoLib.RSA.Verify_PKCS1_V1_5
+               (Modulus, Exponent_65537, CryptoLib.RSA.SHA256,
+                Bytes_From_String ("cryptolib rsa pkcs1 v1.5 known answe"),
+                Signature) = CryptoLib.Errors.Authentication_Failed,
+             "the signature does not verify over a different message");
+
+      --  Right message, right key, wrong digest algorithm. The DigestInfo
+      --  names the hash, so this must fail rather than quietly succeed.
+      Check (CryptoLib.RSA.Verify_PKCS1_V1_5
+               (Modulus, Exponent_65537, CryptoLib.RSA.SHA384,
+                Message, Signature) = CryptoLib.Errors.Authentication_Failed,
+             "a SHA-256 signature does not verify as SHA-384");
+
+      declare
+         Tampered : Ada.Streams.Stream_Element_Array := Signature;
+      begin
+         Tampered (Tampered'Last) := Tampered (Tampered'Last) xor 1;
+         Check (CryptoLib.RSA.Verify_PKCS1_V1_5
+                  (Modulus, Exponent_65537, CryptoLib.RSA.SHA256,
+                   Message, Tampered) = CryptoLib.Errors.Authentication_Failed,
+                "a signature with a bit flipped does not verify");
+      end;
+
+      --  Arguments that cannot be used are told apart from signatures that
+      --  do not verify. A caller retrying with a different key needs to know
+      --  which it got.
+      Check (CryptoLib.RSA.Verify_PKCS1_V1_5
+               (Modulus, Exponent_65537, CryptoLib.RSA.SHA256,
+                Message, Signature (Signature'First .. Signature'Last - 1))
+               = CryptoLib.Errors.Handshake_Failed,
+             "a signature shorter than the modulus is refused, not failed");
+
+      declare
+         Even : Ada.Streams.Stream_Element_Array := Modulus;
+      begin
+         Even (Even'Last) := Even (Even'Last) and 16#FE#;
+         Check (CryptoLib.RSA.Verify_PKCS1_V1_5
+                  (Even, Exponent_65537, CryptoLib.RSA.SHA256,
+                   Message, Signature) = CryptoLib.Errors.Handshake_Failed,
+                "an even modulus is refused rather than exponentiated");
+      end;
+
+      --  The forgery this package's shape exists to refuse.
+      --
+      --  Against a low public exponent, a cube root can be found whose cube
+      --  begins 16#00# 16#01# 16#FF#..16#FF# 16#00# followed by a correct
+      --  DigestInfo for the message, with arbitrary bytes after it. A
+      --  verifier that scans for the separator and parses what follows
+      --  accepts it as a valid signature without the private key. Comparing
+      --  against a fully determined expected block cannot: the garbage tail
+      --  has nowhere to hide.
+      declare
+         E3_Modulus : constant Ada.Streams.Stream_Element_Array :=
+           From_Hex (RSA_E3_Modulus);
+         Forged     : constant Ada.Streams.Stream_Element_Array :=
+           From_Hex (RSA_E3_Forged_Signature);
+      begin
+         Check (CryptoLib.RSA.Verify_PKCS1_V1_5
+                  (E3_Modulus, Exponent_3, CryptoLib.RSA.SHA256,
+                   Message, Forged) = CryptoLib.Errors.Authentication_Failed,
+                "a cube-root forgery with a well-formed prefix is refused");
+      end;
+   end Check_RSA_Verify;
+
+
 begin
    Check_PBKDF2_SHA1;
    Check_PBKDF2_SHA2;
@@ -2028,6 +2174,7 @@ begin
    Check_X509_Decode;
    Check_X509_Verify;
    Check_X509_Extensions;
+   Check_RSA_Verify;
    Check_Identity_Predicates;
    Check_PKCS12_Mac_Key;
    Check_ECDSA_P384_Verify;

@@ -27,6 +27,8 @@ The reference sources are:
 | Finite-field DH | groups 1 / 14 / 16 / 18 | live vs OpenSSH; group16/18 pin the exact RFC 3526 primes |
 | Post-quantum | ML-KEM-768, sntrup761 (+ hybrid x25519 KEX) | NIST / live vs OpenSSH sntrup761x25519 |
 | X.509 (`Certificates`) | local CA, server/client/email issuance, CSR signing, PKCS#12 | PKCS#12 MAC key byte-exact vs OpenSSL; issued Ed25519 and P-384 certificates chain-verified against their CA by OpenSSL in the suite |
+| RSA | PKCS#1 v1.5 verification, SHA-256/384/512 | signatures produced by OpenSSL at 2048 and 3072 bits; a cube-root forgery against a low exponent is refused |
+| X.509 parsing (`ASN1`, `PEM`, `X509.*`) | DER reader, PEM armour, certificate decode, extensions, signature verification | field-by-field against `openssl x509 -text` on the same certificates; an OpenSSL-issued RSA chain verifies here and under `openssl verify` |
 
 ## Constant-time properties
 
@@ -104,6 +106,17 @@ The RNG **fails closed**: if no OS source is available it returns
 - GNAT `Ada.Numerics.Big_Numbers.Big_Integers` caps at ~6400 bits, which is why
   DH group16/18 use `Modexp` (fixed-width Montgomery) rather than `Big_Integers`.
 - CT holds at the source level only; there is no formal or automated guarantee.
+- **RSA is verification only** — there is no RSA signing, key generation, or
+  private-key operation, and no RSA-PSS. `X509.Signatures` reports
+  `Unsupported_Algorithm` for PSS and for ECDSA on P-256 and P-521 rather than
+  failing them, so "we did not check" is never mistaken for "the signature was
+  bad". RSA verification touches only public values, so nothing in it needs to
+  be constant-time.
+- **Certificate path validation does not exist yet.** `X509.Signatures` answers
+  only whether one certificate's signature is a given key's. Trust anchors,
+  validity windows, basic-constraints and name-constraint enforcement, and
+  chain building are not implemented; a caller must not read a `Valid`
+  signature as a valid certificate.
 
 ## Test coverage
 

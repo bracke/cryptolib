@@ -6,6 +6,7 @@ with CryptoLib.ASN1.Errors;
 with CryptoLib.ECDSA;
 with CryptoLib.Ed25519;
 with CryptoLib.Errors;
+with CryptoLib.RSA;
 
 package body CryptoLib.X509.Signatures is
 
@@ -35,7 +36,67 @@ package body CryptoLib.X509.Signatures is
    end Result_Image;
 
    function Is_Supported (Algorithm : Signature_Algorithm) return Boolean
-   is (Algorithm in ECDSA_With_SHA384 | Ed25519_Signature);
+   is (Algorithm in ECDSA_With_SHA384 | Ed25519_Signature
+       | SHA256_With_RSA | SHA384_With_RSA | SHA512_With_RSA);
+
+   --  Take an RSAPublicKey apart into its modulus and exponent.
+   --
+   --  The key sits inside the SubjectPublicKeyInfo BIT STRING as its own
+   --  SEQUENCE of two integers, so this is a second decode within the first.
+   procedure Split_RSA_Key
+     (Key      : Ada.Streams.Stream_Element_Array;
+      Mod_First : out Ada.Streams.Stream_Element_Offset;
+      Mod_Last  : out Ada.Streams.Stream_Element_Offset;
+      Exp_First : out Ada.Streams.Stream_Element_Offset;
+      Exp_Last  : out Ada.Streams.Stream_Element_Offset;
+      Ok        : out Boolean)
+   is
+      Limits : constant CryptoLib.ASN1.Decode_Limits :=
+        CryptoLib.ASN1.Default_Limits;
+      Cursor : Ada.Streams.Stream_Element_Offset;
+      Outer  : CryptoLib.ASN1.Element;
+      Item   : CryptoLib.ASN1.Element;
+      Status : CryptoLib.ASN1.Errors.Decode_Status;
+      Signed : Boolean;
+   begin
+      Mod_First := 1;
+      Mod_Last  := 0;
+      Exp_First := 1;
+      Exp_Last  := 0;
+      Ok := False;
+
+      if Key'Length = 0 then
+         return;
+      end if;
+
+      Cursor := Key'First;
+      DER_Reader.Read_Sequence
+        (Key, Cursor, Key'Last, 0, Limits, Outer, Status);
+      if Status /= CryptoLib.ASN1.Errors.Ok
+        or else not DER_Reader.At_End (Cursor, Key'Last)
+      then
+         return;
+      end if;
+
+      Cursor := Outer.First;
+      DER_Reader.Read_Integer
+        (Key, Cursor, Outer.Last, 1, Limits, Item, Signed, Status);
+      if Status /= CryptoLib.ASN1.Errors.Ok or else Signed then
+         return;
+      end if;
+      Mod_First := Item.First;
+      Mod_Last  := Item.Last;
+
+      DER_Reader.Read_Integer
+        (Key, Cursor, Outer.Last, 1, Limits, Item, Signed, Status);
+      if Status /= CryptoLib.ASN1.Errors.Ok or else Signed then
+         return;
+      end if;
+      Exp_First := Item.First;
+      Exp_Last  := Item.Last;
+
+      Ok := DER_Reader.At_End (Cursor, Outer.Last);
+   end Split_RSA_Key;
 
    --  Copy an ECDSA signature component into a fixed-width field.
    --
@@ -199,6 +260,51 @@ package body CryptoLib.X509.Signatures is
                   else
                      return Invalid_Signature;
                   end if;
+               end;
+
+            when SHA256_With_RSA | SHA384_With_RSA | SHA512_With_RSA =>
+               if Key_Kind /= RSA then
+                  return Algorithm_Mismatch;
+               end if;
+
+               declare
+                  Mod_First : Ada.Streams.Stream_Element_Offset;
+                  Mod_Last  : Ada.Streams.Stream_Element_Offset;
+                  Exp_First : Ada.Streams.Stream_Element_Offset;
+                  Exp_Last  : Ada.Streams.Stream_Element_Offset;
+                  Ok        : Boolean;
+               begin
+                  Split_RSA_Key
+                    (Key, Mod_First, Mod_Last, Exp_First, Exp_Last, Ok);
+                  if not Ok then
+                     return Malformed_Signature;
+                  end if;
+
+                  declare
+                     Digest : constant CryptoLib.RSA.Hash_Algorithm :=
+                       (case Algorithm is
+                           when SHA256_With_RSA => CryptoLib.RSA.SHA256,
+                           when SHA384_With_RSA => CryptoLib.RSA.SHA384,
+                           when others          => CryptoLib.RSA.SHA512);
+                     Outcome : constant CryptoLib.Errors.Status :=
+                       CryptoLib.RSA.Verify_PKCS1_V1_5
+                         (Modulus   => Key (Mod_First .. Mod_Last),
+                          Exponent  => Key (Exp_First .. Exp_Last),
+                          Hash      => Digest,
+                          Message   => Message,
+                          Signature => Sig);
+                  begin
+                     if Outcome = CryptoLib.Errors.Ok then
+                        return Valid;
+                     elsif Outcome = CryptoLib.Errors.Authentication_Failed
+                     then
+                        return Invalid_Signature;
+                     else
+                        --  A key or signature that cannot be used at all:
+                        --  wrong-length signature, unusable modulus.
+                        return Malformed_Signature;
+                     end if;
+                  end;
                end;
 
             when Ed25519_Signature =>
