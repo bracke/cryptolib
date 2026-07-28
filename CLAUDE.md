@@ -8,8 +8,9 @@ other tools read the sibling `AGENTS.md`, which points here).
 `cryptolib` is a pure Ada 2022 (Alire/GNAT) cryptographic primitive library —
 hashes, MACs/KDFs, ciphers/AEAD, elliptic-curve and finite-field key agreement,
 signatures, and post-quantum KEMs. Every package is `CryptoLib.*`. It has **no
-Alire dependencies** and no runtime OpenSSL dependency; the test harness links
-OpenSSL only for cross-checks. It is consumed by `ssh_lib` (and transitively by
+Alire dependencies** and no runtime OpenSSL dependency. The test harness links
+libcrypto, and only the harness: it is how the suite asks an independent
+implementation whether a certificate this crate issued actually chains. It is consumed by `ssh_lib` (and transitively by
 `versionlib` / the `version` CLI).
 
 `README.md` documents usage; `SECURITY.md` documents the security properties,
@@ -28,8 +29,8 @@ claims are meant to be checkable against the code.
   Alire compiler.
 - Build: `alr build`.
 - Tests (KATs + negative/fail-closed tests): `(cd tests && alr build) && ./tests/bin/tests`
-  — prints `cryptolib tests passed`. No OpenSSL: the cross-check vectors are
-  embedded, so the suite links nothing beyond the Ada runtime.
+  — prints `cryptolib tests passed`. The suite links libcrypto for the
+  certificate chain cross-check; the library does not.
 - Release/verification tooling lives in the `cryptolib_tools` crate: `(cd tools && alr build)`
   (depends on the shared `project_tools` at `../../project_tools`). Run
   `tools/bin/check_release_ready` from the crate root for the full preflight

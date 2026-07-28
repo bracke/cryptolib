@@ -6,6 +6,7 @@ with System;
 
 with CryptoLib.ChaCha20_Poly1305;
 with CryptoLib.Certificates;
+with OpenSSL_Interop;
 with CryptoLib.Checksums;
 with CryptoLib.Secure_Wipe;
 with CryptoLib.Hashes;
@@ -279,6 +280,49 @@ procedure Tests is
                "not a csr", Orphan_Cert)
             = CryptoLib.Certificates.Invalid_Input,
             "signing a CSR without a CA certificate is refused");
+      end;
+
+      --  Ask OpenSSL whether anybody else would accept what we issued. The CA
+      --  names here are deliberately not the string the issuer field once
+      --  carried: a leaf naming the wrong issuer parses perfectly and fails
+      --  only when a verifier tries to build the chain.
+      declare
+         use type CryptoLib.Certificates.Key_Algorithm;
+
+         procedure Check_Chain (Algorithm : CryptoLib.Certificates.Key_Algorithm)
+         is
+            Label   : constant String :=
+              (if Algorithm = CryptoLib.Certificates.P384_Key
+               then "p384" else "ed25519");
+            Root    : Ada.Strings.Unbounded.Unbounded_String;
+            Root_Key : Ada.Strings.Unbounded.Unbounded_String;
+            Leaf    : Ada.Strings.Unbounded.Unbounded_String;
+            Leaf_K  : Ada.Strings.Unbounded.Unbounded_String;
+         begin
+            Check
+              (CryptoLib.Certificates.Create_Local_CA
+                 ("cryptolib-chain-check-" & Label, Root, Root_Key, Algorithm)
+               = CryptoLib.Certificates.Ok,
+               Label & " chain-check CA creation succeeds");
+            Check
+              (CryptoLib.Certificates.Issue_Server_Certificate
+                 (Ada.Strings.Unbounded.To_String (Root),
+                  Ada.Strings.Unbounded.To_String (Root_Key),
+                  "chain.example",
+                  [1 => Ada.Strings.Unbounded.To_Unbounded_String
+                          ("chain.example")],
+                  Leaf, Leaf_K)
+               = CryptoLib.Certificates.Ok,
+               Label & " chain-check leaf issuance succeeds");
+            Check
+              (OpenSSL_Interop.Chain_Verifies
+                 (Ada.Strings.Unbounded.To_String (Root),
+                  Ada.Strings.Unbounded.To_String (Leaf)),
+               Label & " issued certificate verifies against its CA in OpenSSL");
+         end Check_Chain;
+      begin
+         Check_Chain (CryptoLib.Certificates.Ed25519_Key);
+         Check_Chain (CryptoLib.Certificates.P384_Key);
       end;
       Check
         (Ada.Strings.Unbounded.Index

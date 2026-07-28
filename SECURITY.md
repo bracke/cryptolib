@@ -1,8 +1,10 @@
 # CryptoLib Security
 
 `cryptolib` is the cryptographic primitive library used by `versionlib`/`ssh_lib`.
-It is pure Ada 2022 (Alire/GNAT) with no OpenSSL dependency; the test harness's
-cross-check vectors were generated offline and are embedded, not linked at
+It is pure Ada 2022 (Alire/GNAT) with no OpenSSL dependency. Most cross-check
+vectors were generated offline and are embedded; the test harness additionally
+links libcrypto to verify that certificates this crate issues chain in an
+independent implementation. The library itself links nothing beyond the Ada
 runtime. This document records the security
 properties the code actually provides, how they are verified, and the known
 limitations. It describes the code as implemented — not aspirational goals.
@@ -24,7 +26,7 @@ The reference sources are:
 | ECDSA | P-256 (in `ssh_lib`), P-384 / P-521 sign | **RFC 6979 A.2.5** (P-384, byte-exact) + P-521 (pyca cross-verified) |
 | Finite-field DH | groups 1 / 14 / 16 / 18 | live vs OpenSSH; group16/18 pin the exact RFC 3526 primes |
 | Post-quantum | ML-KEM-768, sntrup761 (+ hybrid x25519 KEX) | NIST / live vs OpenSSH sntrup761x25519 |
-| X.509 (`Certificates`) | local CA, server/client/email issuance, CSR signing, PKCS#12 | PKCS#12 MAC key byte-exact vs OpenSSL; issued certificates parsed and verified with OpenSSL |
+| X.509 (`Certificates`) | local CA, server/client/email issuance, CSR signing, PKCS#12 | PKCS#12 MAC key byte-exact vs OpenSSL; issued Ed25519 and P-384 certificates chain-verified against their CA by OpenSSL in the suite |
 
 ## Constant-time properties
 

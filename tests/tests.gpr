@@ -16,6 +16,13 @@ project Tests is
       for Switches ("Ada") use ("-Es"); --  Symbolic traceback
    end Binder;
 
+   --  The library links nothing beyond the Ada runtime; the harness links
+   --  OpenSSL so the suite can cross-check what this crate produces against an
+   --  independent implementation.
+   package Linker is
+      for Default_Switches ("Ada") use ("-lcrypto");
+   end Linker;
+
    package Install is
       for Artifacts (".") use ("share");
    end Install;
