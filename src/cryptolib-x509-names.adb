@@ -1,6 +1,5 @@
 with Ada.Streams;
 
-with CryptoLib.ASN1;
 with CryptoLib.ASN1.DER;
 with CryptoLib.ASN1.Errors;
 with CryptoLib.ASN1.OIDs;
@@ -144,6 +143,34 @@ package body CryptoLib.X509.Names is
          return Unknown_Attribute;
       end if;
    end Kind_For;
+
+   function Common_Name_Of (Name_DER : Octets) return String is
+      Total : Natural;
+      Found : Boolean;
+      OID   : Element;
+      Value : Element;
+   begin
+      for I in 1 .. Natural'Last loop
+         Locate (Name_DER, I, Total, Found, OID, Value);
+         exit when not Found;
+
+         if Kind_For (Name_DER, OID) = Common_Name then
+            declare
+               Text : String (1 .. Content_Length (Value));
+            begin
+               for J in Text'Range loop
+                  Text (J) :=
+                    Character'Val (Name_DER (Value.First + Offset (J - 1)));
+               end loop;
+               return Text;
+            end;
+         end if;
+
+         exit when I >= Total;
+      end loop;
+
+      return "";
+   end Common_Name_Of;
 
    function Attribute_Kind_At
      (Item  : Certificate;

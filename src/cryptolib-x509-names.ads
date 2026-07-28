@@ -1,3 +1,4 @@
+with CryptoLib.ASN1;
 with CryptoLib.X509.Certificates;
 
 --  @summary Taking a distinguished name apart.
@@ -110,6 +111,14 @@ package CryptoLib.X509.Names is
      (Item  : Certificate;
       Which : Name_Selector;
       Kind  : Attribute_Kind) return Natural;
+
+   --  The first common name in an encoded Name.
+   --
+   --  Takes the encoding rather than a certificate, because a certification
+   --  request carries a subject too and there is no certificate to ask.
+   --  @param Name_DER the Name's DER encoding, header included
+   --  @return the common name, "" when there is none
+   function Common_Name_Of (Name_DER : Octets) return String;
 
    --  Render the name for a person to read, in RFC 4514 order and escaping.
    --

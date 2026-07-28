@@ -196,20 +196,14 @@ package body CryptoLib.X509.Signatures is
       Ok := DER_Reader.At_End (Cursor, Outer.Last);
    end Split_ECDSA_Signature;
 
-   function Verify_Signed_Data
-     (Signed    : CryptoLib.ASN1.Octets;
-      Signature : CryptoLib.ASN1.Octets;
-      Algorithm : Signature_Algorithm;
-      Issuer    : CryptoLib.X509.Certificates.Certificate)
-      return Verification_Result
+   function Verify_With_Key
+     (Signed     : CryptoLib.ASN1.Octets;
+      Signature  : CryptoLib.ASN1.Octets;
+      Algorithm  : Signature_Algorithm;
+      Key_Kind   : Public_Key_Algorithm;
+      Public_Key : CryptoLib.ASN1.Octets) return Verification_Result
    is
-      Key_Kind : constant Public_Key_Algorithm :=
-        X509C.Public_Key_Algorithm_Of (Issuer);
    begin
-      if not X509C.Is_Present (Issuer) then
-         return Missing_Input;
-      end if;
-
       if not Is_Supported (Algorithm) then
          return Unsupported_Algorithm;
       end if;
@@ -217,8 +211,7 @@ package body CryptoLib.X509.Signatures is
       declare
          Message : Ada.Streams.Stream_Element_Array renames Signed;
          Sig     : Ada.Streams.Stream_Element_Array renames Signature;
-         Key     : constant Ada.Streams.Stream_Element_Array :=
-           X509C.Public_Key (Issuer);
+         Key     : Ada.Streams.Stream_Element_Array renames Public_Key;
       begin
          if Message'Length = 0 or else Sig'Length = 0 or else Key'Length = 0
          then
@@ -363,6 +356,26 @@ package body CryptoLib.X509.Signatures is
                return Unsupported_Algorithm;
          end case;
       end;
+   end Verify_With_Key;
+
+   function Verify_Signed_Data
+     (Signed    : CryptoLib.ASN1.Octets;
+      Signature : CryptoLib.ASN1.Octets;
+      Algorithm : Signature_Algorithm;
+      Issuer    : CryptoLib.X509.Certificates.Certificate)
+      return Verification_Result
+   is
+   begin
+      if not X509C.Is_Present (Issuer) then
+         return Missing_Input;
+      end if;
+
+      return Verify_With_Key
+        (Signed     => Signed,
+         Signature  => Signature,
+         Algorithm  => Algorithm,
+         Key_Kind   => X509C.Public_Key_Algorithm_Of (Issuer),
+         Public_Key => X509C.Public_Key (Issuer));
    end Verify_Signed_Data;
 
    function Verify_Certificate_Signature

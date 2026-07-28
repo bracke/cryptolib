@@ -11,6 +11,8 @@ with CryptoLib.Macs;
 with CryptoLib.ASN1;
 with CryptoLib.ASN1.Errors;
 with CryptoLib.PEM;
+with CryptoLib.PKCS10;
+with CryptoLib.X509.Signatures;
 with CryptoLib.X509.Certificates;
 with CryptoLib.Random;
 
@@ -966,112 +968,13 @@ package body CryptoLib.Certificates is
       end case;
    end Sign_Certificate;
 
-   function Read_Length
-     (DER : String;
-      Pos : in out Natural;
-      Len : out Natural) return Boolean
-   is
-      Octet : Natural;
-      Count : Natural;
-   begin
-      if Pos > DER'Last then
-         return False;
-      end if;
 
-      Octet := Character'Pos (DER (Pos));
-      Pos := Pos + 1;
-      if Octet < 128 then
-         Len := Octet;
-         return True;
-      end if;
-
-      Count := Octet mod 128;
-      if Count = 0 or else Count > 2 or else Pos + Count - 1 > DER'Last then
-         return False;
-      end if;
-
-      Len := 0;
-      for I in 1 .. Count loop
-         Len := Len * 256 + Character'Pos (DER (Pos));
-         Pos := Pos + 1;
-      end loop;
-      return True;
-   end Read_Length;
-
-   function Read_TLV
-     (DER     : String;
-      Pos     : in out Natural;
-      Tag     : Natural;
-      Content : out Unbounded_String) return Boolean
-   is
-      Len   : Natural;
-      First : Natural;
-   begin
-      Content := Null_Unbounded_String;
-      if Pos > DER'Last or else Character'Pos (DER (Pos)) /= Tag then
-         return False;
-      end if;
-      Pos := Pos + 1;
-      if not Read_Length (DER, Pos, Len) then
-         return False;
-      end if;
-      First := Pos;
-      if Len = 0 then
-         Content := Null_Unbounded_String;
-         return True;
-      elsif First + Len - 1 > DER'Last then
-         return False;
-      end if;
-      Content := To_Unbounded_String (DER (First .. First + Len - 1));
-      Pos := First + Len;
-      return True;
-   end Read_TLV;
 
    function Contains (Data : String; Needle : String) return Boolean is
    begin
       return Ada.Strings.Fixed.Index (Data, Needle) /= 0;
    end Contains;
 
-   function Extract_Common_Name
-     (Name_DER : String;
-      Common_Name : out Unbounded_String) return Boolean
-   is
-      CN_OID : constant String :=
-        Byte (16#06#) & Byte (16#03#) & Byte (16#55#) & Byte (16#04#)
-        & Byte (16#03#);
-      Start : constant Natural := Ada.Strings.Fixed.Index (Name_DER, CN_OID);
-      Pos   : Natural;
-      Value : Unbounded_String;
-   begin
-      Common_Name := Null_Unbounded_String;
-      if Start = 0 then
-         return False;
-      end if;
-
-      Pos := Start + CN_OID'Length;
-      if Pos > Name_DER'Last then
-         return False;
-      end if;
-
-      if Character'Pos (Name_DER (Pos)) = 16#0C#
-        or else Character'Pos (Name_DER (Pos)) = 16#13#
-        or else Character'Pos (Name_DER (Pos)) = 16#16#
-      then
-         declare
-            Tag : constant Natural := Character'Pos (Name_DER (Pos));
-         begin
-            if not Read_TLV (Name_DER, Pos, Tag, Value) then
-               return False;
-            elsif not Valid_Name (To_String (Value)) then
-               return False;
-            else
-               Common_Name := Value;
-               return True;
-            end if;
-         end;
-      end if;
-      return False;
-   end Extract_Common_Name;
 
    --  A DER INTEGER carries no leading zeros and may have gained a sign byte;
    --  the verifier wants a fixed-width big-endian value.
@@ -1104,206 +1007,82 @@ package body CryptoLib.Certificates is
       return True;
    end Fixed_Width;
 
+   --  Read a certification request and check the asker holds the key.
+   --
+   --  Two hundred lines of hand-written DER walking until there was a parsed
+   --  request to ask instead. The contract is unchanged: True only when the
+   --  request carries a key of exactly the size the caller is prepared for
+   --  and its own signature verifies under that key.
+   --
+   --  What is new is what the parse itself refuses -- non-canonical lengths
+   --  and integers, trailing data, unbounded nesting -- and that the
+   --  signature check now covers every algorithm the crate can verify rather
+   --  than the two this walked by hand.
    function Extract_CSR
      (CSR_PEM    : String;
       Subject_CN : out Unbounded_String;
       Public_Key : out Ada.Streams.Stream_Element_Array) return Boolean
    is
-      DER      : constant String := Base64_Decode (CSR_PEM);
-      Pos      : Natural := DER'First;
-      Outer    : Unbounded_String;
-      CRI      : Unbounded_String;
-      Version  : Unbounded_String;
-      Name     : Unbounded_String;
-      SPKI     : Unbounded_String;
-      Alg      : Unbounded_String;
-      Bits_U   : Unbounded_String;
-      CSR_Alg  : Unbounded_String;
-      CSR_Sig  : Unbounded_String;
-      OID_Ed    : constant String :=
-        Byte (16#06#) & Byte (16#03#) & Byte (16#2B#) & Byte (16#65#)
-        & Byte (16#70#);
-      OID_P384  : constant String :=
-        Byte (16#06#) & Byte (16#05#) & Byte (16#2B#) & Byte (16#81#)
-        & Byte (16#04#) & Byte (16#00#) & Byte (16#22#);
-      OID_ECDSA_SHA384 : constant String :=
-        Byte (16#06#) & Byte (16#08#) & Byte (16#2A#) & Byte (16#86#)
-        & Byte (16#48#) & Byte (16#CE#) & Byte (16#3D#) & Byte (16#04#)
-        & Byte (16#03#) & Byte (16#03#);
-      Is_EC     : Boolean := False;
+      use type CryptoLib.ASN1.Errors.Decode_Status;
+      use type CryptoLib.X509.Signatures.Verification_Result;
+
+      DER : constant String := Base64_Decode (CSR_PEM);
    begin
       Subject_CN := Null_Unbounded_String;
       Public_Key := [others => 0];
 
-      --  The caller decides which shape it can take: a 32-byte buffer asks for
-      --  an Ed25519 request, a 97-byte one for P-384.
-      if DER = ""
-        or else (Public_Key'Length /= 32 and then Public_Key'Length /= 97)
-      then
-         return False;
-      end if;
-      Is_EC := Public_Key'Length = 97;
-
-      if not Read_TLV (DER, Pos, 16#30#, Outer) then
+      if DER'Length = 0 then
          return False;
       end if;
 
       declare
-         Outer_Text : constant String := To_String (Outer);
-         Outer_Pos  : Natural := Outer_Text'First;
+         Raw : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (DER'Length));
       begin
-         if not Read_TLV (Outer_Text, Outer_Pos, 16#30#, CRI) then
-            return False;
-         end if;
-         if not Read_TLV (Outer_Text, Outer_Pos, 16#30#, CSR_Alg) then
-            return False;
-         end if;
-         --  The request's own signature algorithm, which is not the algorithm
-         --  of the key it carries -- though for these two shapes they agree.
-         if Is_EC then
-            if not Contains (To_String (CSR_Alg), OID_ECDSA_SHA384) then
-               return False;
-            end if;
-         elsif not Contains (To_String (CSR_Alg), OID_Ed) then
-            return False;
-         end if;
-         if not Read_TLV (Outer_Text, Outer_Pos, 16#03#, CSR_Sig) then
-            return False;
-         end if;
-      end;
-
-      declare
-         CRI_Text : constant String := To_String (CRI);
-         CRI_Pos  : Natural := CRI_Text'First;
-      begin
-         if not Read_TLV (CRI_Text, CRI_Pos, 16#02#, Version) then
-            return False;
-         end if;
-         if not Read_TLV (CRI_Text, CRI_Pos, 16#30#, Name) then
-            return False;
-         end if;
-         if not Extract_Common_Name (To_String (Name), Subject_CN) then
-            return False;
-         end if;
-         if not Read_TLV (CRI_Text, CRI_Pos, 16#30#, SPKI) then
-            return False;
-         end if;
-      end;
-
-      declare
-         SPKI_Text : constant String := To_String (SPKI);
-         SPKI_Pos  : Natural := SPKI_Text'First;
-      begin
-         if not Read_TLV (SPKI_Text, SPKI_Pos, 16#30#, Alg) then
-            return False;
-         end if;
-         if Is_EC then
-            if not Contains (To_String (Alg), OID_P384) then
-               return False;
-            end if;
-         elsif not Contains (To_String (Alg), OID_Ed) then
-            return False;
-         end if;
-         if not Read_TLV (SPKI_Text, SPKI_Pos, 16#03#, Bits_U) then
-            return False;
-         end if;
-      end;
-
-      declare
-         Bits_Text : constant String := To_String (Bits_U);
-      begin
-         if Bits_Text'Length /= Natural (Public_Key'Length) + 1
-           or else Character'Pos (Bits_Text (Bits_Text'First)) /= 0
-         then
-            return False;
-         end if;
-
-         for I in Public_Key'Range loop
-            Public_Key (I) :=
-              Ada.Streams.Stream_Element
-                (Character'Pos
-                   (Bits_Text
-                      (Bits_Text'First + Natural (I - Public_Key'First) + 1)));
+         for I in DER'Range loop
+            Raw (Ada.Streams.Stream_Element_Offset (I - DER'First + 1)) :=
+              Character'Pos (DER (I));
          end loop;
-      end;
 
-      declare
-         Signature_Text : constant String := To_String (CSR_Sig);
-      begin
-         if Signature_Text'Length < 2
-           or else Character'Pos (Signature_Text (Signature_Text'First)) /= 0
-         then
-            return False;
-         end if;
+         declare
+            Status : CryptoLib.ASN1.Errors.Decode_Status;
+            Item   : constant CryptoLib.PKCS10.Request :=
+              CryptoLib.PKCS10.Decode_DER
+                (Raw, CryptoLib.ASN1.Default_Limits, Status);
+         begin
+            if Status /= CryptoLib.ASN1.Errors.Ok
+              or else not CryptoLib.PKCS10.Is_Present (Item)
+            then
+               return False;
+            end if;
 
-         if Is_EC then
-            --  ECDSA signs as two integers of their own lengths, so they are
-            --  read back and re-padded to the fixed width the verifier wants.
+            --  Proof of possession. A request whose signature does not check
+            --  is an assertion that somebody holds a key, made by somebody
+            --  who has not shown that they do.
+            if CryptoLib.PKCS10.Verify_Signature (Item)
+              /= CryptoLib.X509.Signatures.Valid
+            then
+               return False;
+            end if;
+
             declare
-               Body_Text : constant String :=
-                 Signature_Text (Signature_Text'First + 1 .. Signature_Text'Last);
-               Pos    : Natural := Body_Text'First;
-               Pair   : Unbounded_String;
-               R_Int  : Unbounded_String;
-               S_Int  : Unbounded_String;
-               R      : Ada.Streams.Stream_Element_Array (1 .. 48);
-               S2     : Ada.Streams.Stream_Element_Array (1 .. 48);
+               Key : constant Ada.Streams.Stream_Element_Array :=
+                 CryptoLib.PKCS10.Public_Key (Item);
             begin
-               if not Read_TLV (Body_Text, Pos, 16#30#, Pair) then
+               if Key'Length /= Public_Key'Length then
+                  --  Not the shape this caller is prepared for; it will try
+                  --  another.
                   return False;
                end if;
-               declare
-                  Pair_Text : constant String := To_String (Pair);
-                  Pair_Pos  : Natural := Pair_Text'First;
-               begin
-                  if not Read_TLV (Pair_Text, Pair_Pos, 16#02#, R_Int)
-                    or else not Read_TLV (Pair_Text, Pair_Pos, 16#02#, S_Int)
-                  then
-                     return False;
-                  end if;
-               end;
-               if not Fixed_Width (To_String (R_Int), R)
-                 or else not Fixed_Width (To_String (S_Int), S2)
-               then
-                  return False;
-               end if;
-               if CryptoLib.ECDSA.Verify_Nistp384_Raw
-                 (Public_Key, To_Bytes (Seq (To_String (CRI))), R, S2)
-                 /= CryptoLib.Errors.Ok
-               then
-                  return False;
-               end if;
+
+               Public_Key := Key;
+               Subject_CN :=
+                 To_Unbounded_String
+                   (CryptoLib.PKCS10.Subject_Common_Name (Item));
+               return Length (Subject_CN) > 0;
             end;
-         else
-            declare
-               Signature : Ada.Streams.Stream_Element_Array (1 .. 64);
-            begin
-               if Signature_Text'Length /= 65 then
-                  return False;
-               end if;
-               for I in Signature'Range loop
-                  Signature (I) :=
-                    Ada.Streams.Stream_Element
-                      (Character'Pos
-                         (Signature_Text
-                            (Signature_Text'First
-                             + Natural (I - Signature'First) + 1)));
-               end loop;
-               if CryptoLib.Ed25519.Verify
-                 (Public_Key, Signature, To_Bytes (Seq (To_String (CRI))))
-                 /= CryptoLib.Errors.Ok
-               then
-                  return False;
-               end if;
-            end;
-         end if;
+         end;
       end;
-      return True;
-   exception
-      when others =>
-         Subject_CN := Null_Unbounded_String;
-         Public_Key := [others => 0];
-         return False;
    end Extract_CSR;
 
    function Create_Local_CA

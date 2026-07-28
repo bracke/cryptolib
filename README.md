@@ -44,6 +44,7 @@ Do not run plain system `gnat*`, `gnatmake`, `gnatls`, `gnatprove`,
 | `CryptoLib.RSA` | RSA PKCS#1 v1.5 signature verification (SHA-256/384/512) |
 | `CryptoLib.ASN1`, `CryptoLib.ASN1.DER`, `CryptoLib.ASN1.OIDs` | defensive bounded DER reader, object identifiers |
 | `CryptoLib.PEM` | strict PEM armour decoding, multi-block |
+| `CryptoLib.PKCS10` | certification requests: decode, read the subject and key, check proof of possession |
 | `CryptoLib.X509.Certificates` | parsed X.509 certificates: inspection, extensions, signature verification |
 | `CryptoLib.X509.Validation` | path validation against explicit trust anchors (no path building, no revocation) |
 | `CryptoLib.X509.Identity` | RFC 9525 service identity matching: DNS names, wildcards, IP addresses |

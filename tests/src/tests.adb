@@ -15,6 +15,7 @@ with CryptoLib.X509.Purposes;
 with CryptoLib.X509.Names;
 with CryptoLib.X509.CRLs;
 with CryptoLib.OCSP;
+with CryptoLib.PKCS10;
 with CryptoLib.X509.Validation;
 with CryptoLib.X509.Path_Building;
 with CryptoLib.X509.Signatures;
@@ -3694,6 +3695,154 @@ procedure Tests is
    end Check_X509_Path_Building;
 
 
+   --  Certification requests, against ones OpenSSL made and calls
+   --  "self-signature verify OK".
+   --
+   --  The RSA request is the interesting one: the hand-written reader this
+   --  replaced knew two algorithms, so an RSA request was simply unreadable.
+   procedure Check_PKCS10 is
+      use type CryptoLib.ASN1.Errors.Decode_Status;
+      use type CryptoLib.X509.Public_Key_Algorithm;
+      use type CryptoLib.X509.Signature_Algorithm;
+      use type CryptoLib.X509.Signatures.Verification_Result;
+
+      package P10 renames CryptoLib.PKCS10;
+
+      CSR_RSA : constant String :=
+        "308202633082014b020100301e311c301a06035504030c137273612e726571756573742e6578616d706c653082" &
+        "0122300d06092a864886f70d01010105000382010f003082010a0282010100c1c24293d3566de90f477d154854" &
+        "281159fab3eabb92eeb1b4e0f9e00753a8f89b7caa8de4dd45f2ddc013cb0ecb1370507b9b6eabdeff51889bc4" &
+        "6e98270250359fc2faef13fc95f25e08ea82b060f8015744f96594b546a43aee73bb11b16c8cb5ff163a43ae0a" &
+        "1526ee976813de79a73c1b71102a62e38415bebe127c086674d7bc53acef027b80f03f28a05b0863f953eed88a" &
+        "1e7bad9299ca7ccfb60ae1d1def70ac7f28c504758e6c7a0738e02af6f818ef532144198be1ead781a1c70e30c" &
+        "b6be02fb0be6a6ccb44eccd90ec9782f5efad9759cbdf50aa846049b7be9720ad60ce347fa4284e13ff088914b" &
+        "ecfb5a7d15a91af2f9fcce5d093695c0510203010001a000300d06092a864886f70d01010b050003820101004f" &
+        "c18037940cb48d2e21a943e7473e3190c84fc1eaf42d46927c4bcea5b8eaba59997c30544247c8165bdefc9a91" &
+        "20d0855021fc80c47cfdc15c2f478e84a22e6b1f39b42ef99609cf67ee5b6ff24ddfdbbe25f4d1e68b8ac1dfb0" &
+        "f58167b252ebe9ad17f4e56edc876cd5bcd9d79c3e137d27fe8cbd6091c1de738f3b666e7594b1862f7e63b8c7" &
+        "4871ca326027cdf4a10be9bdd3d72e2426368754fd003e1df004e08701ae757cf666b07e69c23f1b0d45764c65" &
+        "c7417958bbdb43591fa35caa562427d8b0a1b01e4f9abd265564519e8b9555337c931fb12f0122229b27f02719" &
+        "dcc8a98acdd5a49ebcd124326d15595c7b93b3c487eda992d820943dcf1f";
+
+      CSR_EC : constant String :=
+        "3081d6307f020100301d311b301906035504030c1265632e726571756573742e6578616d706c65305930130607" &
+        "2a8648ce3d020106082a8648ce3d030107034200048065edef6450ae2dd122ee3be6dd3e788e005e20718fd4ca" &
+        "9ddcb1932f0abb8de8342e09ed93f3843807090c731e5aa1956f658349545f742a53e0008d0e970aa000300a06" &
+        "082a8648ce3d0403020347003044022032a17de60ae9eeaca6e34dc95d4a28a7d6d4546a3fa85051460d510f84" &
+        "fc122902204cfa118746d6f0419d522722f0a1a5d6ab34fe24109e33714197275afce901c7";
+
+      function From_Hex
+        (Text : String) return Ada.Streams.Stream_Element_Array
+      is
+         Result : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (Text'Length / 2));
+         function Nibble (C : Character) return Natural
+         is (case C is
+                when '0' .. '9' => Character'Pos (C) - Character'Pos ('0'),
+                when others     => Character'Pos (C) - Character'Pos ('a') + 10);
+      begin
+         for I in Result'Range loop
+            Result (I) :=
+              Ada.Streams.Stream_Element
+                (Nibble (Text (Text'First + 2 * Natural (I - 1))) * 16
+                 + Nibble (Text (Text'First + 2 * Natural (I - 1) + 1)));
+         end loop;
+         return Result;
+      end From_Hex;
+
+      Status : CryptoLib.ASN1.Errors.Decode_Status;
+   begin
+      declare
+         Item : constant P10.Request :=
+           P10.Decode_DER
+             (From_Hex (CSR_RSA), CryptoLib.ASN1.Default_Limits, Status);
+      begin
+         Check (Status = CryptoLib.ASN1.Errors.Ok and then P10.Is_Present (Item),
+                "an RSA request decodes: "
+                & CryptoLib.ASN1.Errors.Status_Image (Status));
+         Check (P10.Subject_Common_Name (Item) = "rsa.request.example",
+                "its subject is read, got " & P10.Subject_Common_Name (Item));
+         Check (P10.Public_Key_Algorithm_Of (Item) = CryptoLib.X509.RSA,
+                "its key is recognised as RSA");
+         Check (P10.Signature_Algorithm_Of (Item)
+                  = CryptoLib.X509.SHA256_With_RSA,
+                "its signature algorithm is read");
+         Check (P10.Verify_Signature (Item)
+                  = CryptoLib.X509.Signatures.Valid,
+                "the requester proves possession of the key, got "
+                & CryptoLib.X509.Signatures.Result_Image
+                    (P10.Verify_Signature (Item)));
+      end;
+
+      declare
+         Item : constant P10.Request :=
+           P10.Decode_DER
+             (From_Hex (CSR_EC), CryptoLib.ASN1.Default_Limits, Status);
+      begin
+         Check (Status = CryptoLib.ASN1.Errors.Ok, "an EC request decodes");
+         Check (P10.Public_Key_Algorithm_Of (Item)
+                  = CryptoLib.X509.ECDSA_P256,
+                "its key is recognised as P-256");
+         Check (P10.Verify_Signature (Item)
+                  = CryptoLib.X509.Signatures.Valid,
+                "and it too proves possession");
+      end;
+
+      --  A request altered after signing. The signature covers the name and
+      --  the key, so changing either has to break it -- otherwise a request
+      --  could be edited in flight to ask for a different name, which is the
+      --  attack a CA reads this signature to prevent.
+      declare
+         Damaged : Ada.Streams.Stream_Element_Array := From_Hex (CSR_EC);
+         Broken  : CryptoLib.ASN1.Errors.Decode_Status;
+         Where   : Ada.Streams.Stream_Element_Offset := 0;
+      begin
+         --  Inside the subject's text rather than at an arbitrary offset: a
+         --  character changes and every tag and length stays as it was, so
+         --  the encoding still parses and only the signature can object.
+         for I in Damaged'Range loop
+            if I + 2 <= Damaged'Last
+              and then Damaged (I) = Character'Pos ('r')
+              and then Damaged (I + 1) = Character'Pos ('e')
+              and then Damaged (I + 2) = Character'Pos ('q')
+            then
+               Where := I;
+               exit;
+            end if;
+         end loop;
+         Check (Where /= 0, "fixture: the subject text was found");
+         Damaged (Where) := Character'Pos ('R');
+         declare
+            Item : constant P10.Request :=
+              P10.Decode_DER
+                (Damaged, CryptoLib.ASN1.Default_Limits, Broken);
+         begin
+            --  Asserted rather than guarded: a tamper that stopped being a
+            --  tamper would otherwise skip the check it exists for.
+            Check (Broken = CryptoLib.ASN1.Errors.Ok,
+                   "the altered request still parses, so the signature is "
+                   & "what has to reject it");
+            Check (P10.Verify_Signature (Item)
+                     /= CryptoLib.X509.Signatures.Valid,
+                   "an altered request does not verify");
+         end;
+      end;
+
+      --  Trailing bytes are refused, as on a certificate.
+      declare
+         Padded : constant Ada.Streams.Stream_Element_Array :=
+           From_Hex (CSR_EC) & [0];
+         Item   : constant P10.Request :=
+           P10.Decode_DER (Padded, CryptoLib.ASN1.Default_Limits, Status);
+         pragma Unreferenced (Item);
+      begin
+         Check (Status = CryptoLib.ASN1.Errors.Trailing_Data,
+                "a byte after the request is refused, got "
+                & CryptoLib.ASN1.Errors.Status_Image (Status));
+      end;
+   end Check_PKCS10;
+
+
 begin
    Check_PBKDF2_SHA1;
    Check_PBKDF2_SHA2;
@@ -3723,6 +3872,7 @@ begin
    Check_X509_CRL;
    Check_OCSP;
    Check_X509_Path_Building;
+   Check_PKCS10;
    Check_Identity_Predicates;
    Check_PKCS12_Mac_Key;
    Check_ECDSA_P384_Verify;

@@ -77,6 +77,25 @@ package CryptoLib.X509.Signatures is
       Issuer    : CryptoLib.X509.Certificates.Certificate)
       return Verification_Result;
 
+   --  Is this signature over these bytes that public key's?
+   --
+   --  Below Verify_Signed_Data, which finds the key in a certificate. A
+   --  certification request is signed by the key inside it rather than by an
+   --  issuer's, so there is no certificate to take the key from and this is
+   --  what such a check needs.
+   --  @param Signed the exact bytes that were signed
+   --  @param Signature the signature value, without its BIT STRING wrapper
+   --  @param Algorithm the algorithm the signature claims to be
+   --  @param Key_Kind what kind of key Public_Key is
+   --  @param Public_Key the key itself, as a SubjectPublicKeyInfo carries it
+   --  @return Valid only when the signature verifies
+   function Verify_With_Key
+     (Signed     : CryptoLib.ASN1.Octets;
+      Signature  : CryptoLib.ASN1.Octets;
+      Algorithm  : Signature_Algorithm;
+      Key_Kind   : Public_Key_Algorithm;
+      Public_Key : CryptoLib.ASN1.Octets) return Verification_Result;
+
    --  Can this crate verify signatures of this algorithm at all?
    --
    --  Offered so that a caller can tell "we did not check" from "we checked
