@@ -1882,8 +1882,8 @@ procedure Tests is
              and then X509S.Is_Supported (CryptoLib.X509.ECDSA_With_SHA384)
              and then X509S.Is_Supported (CryptoLib.X509.ECDSA_With_SHA512),
              "every ECDSA digest is verifiable");
-      Check (not X509S.Is_Supported (CryptoLib.X509.RSASSA_PSS),
-             "RSA-PSS is a different scheme and is not claimed");
+      Check (X509S.Is_Supported (CryptoLib.X509.RSASSA_PSS),
+             "RSA-PSS is claimed now that its parameters can be read");
       Check (X509S.Is_Supported (CryptoLib.X509.ECDSA_With_SHA384),
              "ECDSA P-384 is supported");
       Check (X509S.Is_Supported (CryptoLib.X509.Ed25519_Signature),
@@ -4150,6 +4150,171 @@ procedure Tests is
    end Check_Identities;
 
 
+   --  RSASSA-PSS, which states its hash and salt length in its parameters
+   --  rather than in its name -- so a verifier that cannot read the
+   --  parameters cannot check it at all.
+   procedure Check_RSA_PSS is
+      use type CryptoLib.X509.Signature_Algorithm;
+      use type CryptoLib.X509.Signatures.Verification_Result;
+      use type CryptoLib.ASN1.Errors.Decode_Status;
+
+      package X509C renames CryptoLib.X509.Certificates;
+      package XS renames CryptoLib.X509.Signatures;
+
+      PSS_Modulus : constant String :=
+        "eda66e8e74fd6e04e99282f52f13153b856a59cf6be7b5bddd5473b54eacac4c43e60b2d5bd98e0aa8559439fe" &
+        "a7d24389e4cb59a782909127d5661b4ceca2b51ee802688ad9bbaf77871706c55ec8b09343768f6eb6240db647" &
+        "4e6dcf4f639559455b94010ed58244a5eccc9066ef4daaac62cbcf3af938a20e8da458a18e8d78edf75ff4d65f" &
+        "3eb3bade68f4a0e80848ac60edec51199ecb3490b662e04e692dac129919af92e83bd88f658bd7e48c610845ae" &
+        "d7c86b68827de33e31be15cc13ccdda683c64d015919d47da0e552860295101086c547e2a6aaeaba65d844ddaf" &
+        "5658dc61b0a97187fb0fa2b1a7176d1028f70739d67a5ae9ae410c4b60befb";
+
+      PSS_Signature : constant String :=
+        "604e628b09500e7271e6c38a37959ff5f868a4854d199ee9f7479b2933673a744b08cfd01364701899b36cad8c" &
+        "414d568c31a2b8ec2259c8a5b83c29d69153ee52435becb74352ee6e6fb36ac352ca6eef9ebe07888901f02293" &
+        "cf536a12f8ba2398417c9d3ea1d418c51444b602758559e9f064db94a9ebb21fb49eee88a8071a77ce3625b32c" &
+        "1c6c516ae590b51f71c6a81d40836362c5c9249462d6ec6b907e51c27f3a3edf52b42b42fb3b6c01f99976d739" &
+        "bd5ba56a09fc7ad3835961ac9439d8cd678c2b0b5245c493fef468b5c926163000f6df15cd35c17fc2e290e2d3" &
+        "377f7ff6f7cf875423e5ea74d7dc9e448ee5fea36d0507ac93e4ea4dc6c8f9";
+
+      PSS_CA_DER : constant String :=
+        "3082037530820229a00302010202145d794958f07d3b709cb0cc15cdbbb2c61a346f84304106092a864886f70d" &
+        "01010a3034a00f300d06096086480165030402010500a11c301a06092a864886f70d010108300d060960864801" &
+        "65030402010500a20302012030163114301206035504030c0b7073732d746573742d6361301e170d3236303732" &
+        "383231303733375a170d3336303732353231303733375a30163114301206035504030c0b7073732d746573742d" &
+        "636130820122300d06092a864886f70d01010105000382010f003082010a0282010100b2add9660ccbe5aefc7e" &
+        "414bb23729467cb2420ab007af7c854c68814ec9a74b1f8f79ca3cf5e4e2463b718f0d3f214c8c4e2fd7f56273" &
+        "823c098b50c91cc946e5f7c697181913f203b7d365858b68621ad65c60c18173aed321248f082aa88dbc1811d0" &
+        "5349a3cf2d3586ef110eba19945851eb9bc854a1ef40443d3e02d0c7a3d42b80767a333c0c8988c5259ac69a18" &
+        "ea13dad1da10be872dbbd1b05c3cfe1a6f4db2472efa8c32aa5738007ef8850f5563f52dcea492a026985ccbe0" &
+        "fc2c26fe4c9a4a6b68175da28ca90138ff71e12df36a2190e7990a97b659ac2b9554cd86db2aa9518f25b0b9bc" &
+        "7f923f7ea91c8d76e39578dfdc91a2a4ab7294c3b30203010001a3533051301d0603551d0e04160414a5225ecd" &
+        "549c29086a28891c4a7f05174fbf3efd301f0603551d23041830168014a5225ecd549c29086a28891c4a7f0517" &
+        "4fbf3efd300f0603551d130101ff040530030101ff304106092a864886f70d01010a3034a00f300d0609608648" &
+        "0165030402010500a11c301a06092a864886f70d010108300d06096086480165030402010500a2030201200382" &
+        "0101004b675897eb67b837796ae813228fa313623e1760bdf18e03228a3ab9d9e51e350dbda13814380350edd2" &
+        "9c872a17e0e5da1e638729afb0297e46b5722f2d48b22a511e997835f6f06f40cd074613801dbcf17b8b550700" &
+        "c0fb6165458484e0d75b172bb3e6412da6482b63d7f6bd52f615019406ebb2c27d8707dd8b76c91ba93d15882f" &
+        "1f0d86ad4b1f78c694859e7572b192aac722ca6549bf896a4925f914320ca166cdf2db06bd613a3c59428c739c" &
+        "ec06bff0731e13868719dadaa4d4c47b702b3a0e16be1aa2caa3006d57624727caf698f81713d4143db3de18e8" &
+        "d77dca9126a42366ef8c32b17ec3c1d583db529c87c9aa2f0e2446778859a162e66d";
+
+      PSS_Leaf_DER : constant String :=
+        "30820320308201d402147b1e0382ff4548786567e183e4cb80a05746a51b304106092a864886f70d01010a3034" &
+        "a00f300d06096086480165030402020500a11c301a06092a864886f70d010108300d0609608648016503040202" &
+        "0500a20302013030163114301206035504030c0b7073732d746573742d6361301e170d32363037323832313037" &
+        "33375a170d3237303732383231303733375a301b3119301706035504030c106c6561662e7073732e6578616d70" &
+        "6c6530820122300d06092a864886f70d01010105000382010f003082010a0282010100c2595197dd4fa8f39583" &
+        "0f476d4fdd4b7e6c5b1197fe40c2de95ec19b67db230d371b70cc22da4a3c064000466838cb12b5b4a213aed52" &
+        "9e2e7e6c9429d8c988a04f80ecda5f88f662858599f0ae70bf3ecd39c85cbac0bb19cf89f24dcd3f2826f89bbc" &
+        "01c6e4002a7510e17cb005c4ae7544dfb032522294c986159a42feb100e4577ab99f09364e86e51e7505114b30" &
+        "da291e13a21b8b59827f6830e8bf1758dac0d6fbbcb0de2ec94ebe3ab69f2fc6ef6fd94fa7a3ef6f2b4f4ce1f9" &
+        "0656d9e7a738d10c9fff35b3023e484be147f857a2fbac6c27e22c114a05836938be804212e915b8462a7e37be" &
+        "df4e21590cadadf274210609db48f603490484c26f0203010001304106092a864886f70d01010a3034a00f300d" &
+        "06096086480165030402020500a11c301a06092a864886f70d010108300d06096086480165030402020500a203" &
+        "020130038201010095480a4c24178b4da8dc41eee3a2e96eeeb038cf3c55d5eef9058be3f3aa898edef7b213be" &
+        "01a14349e5be88c9413055cb5dee0b09a64d8f680af9f24d4b1c705952cbc4aeb5f5c8d6278cd6603fa85419a5" &
+        "b16e47f60ea9b9df5d862fa8cde41b816abe749f4a832bfa403b5b7c2ef501a2379b7d253bbfb2ca881ec6bd12" &
+        "7bb81d458703e34cc1b8fafe8599adb248772b1fe94a3d26fcdac3594ed136571de7628856388df990409356ef" &
+        "4527f083f8f1d210db78a648e5d7abb84ea55a5622ae3a212fcf83e3be46e0b2387814613e4fdb93d7b67307c6" &
+        "2009ede9e1ed3a6ef11558f8c9c7e7347171ec8679f98d37795738e109db934750188668e98e8e";
+
+      Message : constant Ada.Streams.Stream_Element_Array :=
+        Bytes_From_String ("cryptolib pss known answer");
+      Exponent : constant Ada.Streams.Stream_Element_Array :=
+        [16#01#, 16#00#, 16#01#];
+
+      function From_Hex
+        (Text : String) return Ada.Streams.Stream_Element_Array
+      is
+         Result : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (Text'Length / 2));
+         function Nibble (C : Character) return Natural
+         is (case C is
+                when '0' .. '9' => Character'Pos (C) - Character'Pos ('0'),
+                when others     => Character'Pos (C) - Character'Pos ('a') + 10);
+      begin
+         for I in Result'Range loop
+            Result (I) :=
+              Ada.Streams.Stream_Element
+                (Nibble (Text (Text'First + 2 * Natural (I - 1))) * 16
+                 + Nibble (Text (Text'First + 2 * Natural (I - 1) + 1)));
+         end loop;
+         return Result;
+      end From_Hex;
+
+      Modulus   : constant Ada.Streams.Stream_Element_Array :=
+        From_Hex (PSS_Modulus);
+      Signature : constant Ada.Streams.Stream_Element_Array :=
+        From_Hex (PSS_Signature);
+      Status    : CryptoLib.ASN1.Errors.Decode_Status;
+   begin
+      Check (CryptoLib.RSA.Verify_PSS
+               (Modulus, Exponent, CryptoLib.RSA.SHA256, 32,
+                Message, Signature) = CryptoLib.Errors.Ok,
+             "an OpenSSL PSS signature verifies");
+
+      --  The salt length is part of what was signed, not a hint. Accepting
+      --  whatever length turns up would let a signature be reinterpreted
+      --  under a salt its issuer did not choose.
+      Check (CryptoLib.RSA.Verify_PSS
+               (Modulus, Exponent, CryptoLib.RSA.SHA256, 20,
+                Message, Signature)
+               = CryptoLib.Errors.Authentication_Failed,
+             "the same signature does not verify under a different salt "
+             & "length");
+
+      Check (CryptoLib.RSA.Verify_PSS
+               (Modulus, Exponent, CryptoLib.RSA.SHA384, 32,
+                Message, Signature)
+               = CryptoLib.Errors.Authentication_Failed,
+             "nor under a different hash");
+
+      declare
+         Tampered : Ada.Streams.Stream_Element_Array := Signature;
+      begin
+         Tampered (Tampered'Last) := Tampered (Tampered'Last) xor 1;
+         Check (CryptoLib.RSA.Verify_PSS
+                  (Modulus, Exponent, CryptoLib.RSA.SHA256, 32,
+                   Message, Tampered)
+                  = CryptoLib.Errors.Authentication_Failed,
+                "a tampered PSS signature does not verify");
+      end;
+
+      --  End to end: a chain OpenSSL signed with PSS, whose two certificates
+      --  use different hashes and salt lengths, so the parameters have to be
+      --  read per certificate rather than assumed once.
+      declare
+         CA : constant X509C.Certificate :=
+           X509C.Decode_DER
+             (From_Hex (PSS_CA_DER), CryptoLib.ASN1.Default_Limits, Status);
+         Leaf : constant X509C.Certificate :=
+           X509C.Decode_DER
+             (From_Hex (PSS_Leaf_DER), CryptoLib.ASN1.Default_Limits, Status);
+      begin
+         Check (X509C.Is_Present (CA) and then X509C.Is_Present (Leaf),
+                "the PSS certificates decode");
+         Check (X509C.Signature_Algorithm_Of (Leaf)
+                  = CryptoLib.X509.RSASSA_PSS,
+                "the leaf is signed with PSS");
+         Check (X509C.Signature_Parameters (Leaf)'Length > 0,
+                "and its parameters are kept, since the name does not say "
+                & "which hash it used");
+
+         Check (XS.Is_Supported (CryptoLib.X509.RSASSA_PSS),
+                "PSS is now a signature this crate can check");
+         Check (XS.Verify_Certificate_Signature (Leaf, CA) = XS.Valid,
+                "a PSS leaf verifies under its PSS CA, got "
+                & XS.Result_Image (XS.Verify_Certificate_Signature (Leaf, CA)));
+         Check (XS.Verify_Certificate_Signature (CA, CA) = XS.Valid,
+                "and the CA under its own key");
+         Check (XS.Verify_Certificate_Signature (Leaf, Leaf)
+                  = XS.Invalid_Signature,
+                "while the leaf is not signed by itself");
+      end;
+   end Check_RSA_PSS;
+
+
 begin
    Check_PBKDF2_SHA1;
    Check_PBKDF2_SHA2;
@@ -4183,6 +4348,7 @@ begin
    Check_PKCS8;
    Check_ECDSA_Scalar_Encodings;
    Check_Identities;
+   Check_RSA_PSS;
    Check_Identity_Predicates;
    Check_PKCS12_Mac_Key;
    Check_ECDSA_P384_Verify;

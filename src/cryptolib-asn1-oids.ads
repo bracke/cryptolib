@@ -110,6 +110,15 @@ package CryptoLib.ASN1.OIDs is
    SHA1_Digest_Algorithm : constant Octets :=
      [16#2B#, 16#0E#, 16#03#, 16#02#, 16#1A#];
 
+   --  The SHA-2 digests, named where an algorithm carries its hash in its
+   --  parameters rather than in its own identifier -- which RSASSA-PSS does.
+   SHA256_Digest_Algorithm : constant Octets :=
+     [16#60#, 16#86#, 16#48#, 16#01#, 16#65#, 16#03#, 16#04#, 16#02#, 16#01#];
+   SHA384_Digest_Algorithm : constant Octets :=
+     [16#60#, 16#86#, 16#48#, 16#01#, 16#65#, 16#03#, 16#04#, 16#02#, 16#02#];
+   SHA512_Digest_Algorithm : constant Octets :=
+     [16#60#, 16#86#, 16#48#, 16#01#, 16#65#, 16#03#, 16#04#, 16#02#, 16#03#];
+
    --  Is the identifier at Item within Data this one?
    --
    --  Takes the element rather than a slice so that a caller cannot

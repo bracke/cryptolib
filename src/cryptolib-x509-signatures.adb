@@ -5,6 +5,7 @@ with CryptoLib.ASN1.Errors;
 with CryptoLib.ECDSA;
 with CryptoLib.Ed25519;
 with CryptoLib.Errors;
+with CryptoLib.ASN1.OIDs;
 with CryptoLib.RSA;
 
 package body CryptoLib.X509.Signatures is
@@ -12,6 +13,7 @@ package body CryptoLib.X509.Signatures is
    use type Ada.Streams.Stream_Element;
    use type Ada.Streams.Stream_Element_Offset;
    use type CryptoLib.ASN1.Errors.Decode_Status;
+   use type CryptoLib.ASN1.Tag_Class;
    use type CryptoLib.Errors.Status;
 
    package X509C renames CryptoLib.X509.Certificates;
@@ -41,7 +43,120 @@ package body CryptoLib.X509.Signatures is
    function Is_Supported (Algorithm : Signature_Algorithm) return Boolean
    is (Algorithm in ECDSA_With_SHA256 | ECDSA_With_SHA384 | ECDSA_With_SHA512
        | Ed25519_Signature
-       | SHA256_With_RSA | SHA384_With_RSA | SHA512_With_RSA);
+       | SHA256_With_RSA | SHA384_With_RSA | SHA512_With_RSA
+       | RSASSA_PSS);
+
+   --  Read RSASSA-PSS-params: which hash, and how long a salt.
+   --
+   --  Everything is optional with a default of SHA-1, which nothing issues
+   --  and this cannot verify, so an absent hash is reported as unusable
+   --  rather than silently taken as SHA-1 and failed later for the wrong
+   --  reason. The mask generation function is required to use the same hash
+   --  as the message digest, which is what every issuer does and what RFC
+   --  8017 recommends; a mismatch is refused rather than accommodated.
+   procedure Read_PSS_Parameters
+     (Parameters  : CryptoLib.ASN1.Octets;
+      Hash        : out CryptoLib.RSA.Hash_Algorithm;
+      Salt_Length : out Natural;
+      Usable      : out Boolean)
+   is
+      Limits : constant CryptoLib.ASN1.Decode_Limits :=
+        CryptoLib.ASN1.Default_Limits;
+      Cursor : Ada.Streams.Stream_Element_Offset;
+      Outer  : CryptoLib.ASN1.Element;
+      Status : CryptoLib.ASN1.Errors.Decode_Status;
+      Seen   : Boolean := False;
+
+      function Hash_For
+        (OID : CryptoLib.ASN1.Element; Data : CryptoLib.ASN1.Octets;
+         Found : out Boolean) return CryptoLib.RSA.Hash_Algorithm
+      is
+      begin
+         Found := True;
+         if CryptoLib.ASN1.OIDs.Matches
+              (Data, OID, CryptoLib.ASN1.OIDs.SHA256_Digest_Algorithm)
+         then
+            return CryptoLib.RSA.SHA256;
+         elsif CryptoLib.ASN1.OIDs.Matches
+                 (Data, OID, CryptoLib.ASN1.OIDs.SHA384_Digest_Algorithm)
+         then
+            return CryptoLib.RSA.SHA384;
+         elsif CryptoLib.ASN1.OIDs.Matches
+                 (Data, OID, CryptoLib.ASN1.OIDs.SHA512_Digest_Algorithm)
+         then
+            return CryptoLib.RSA.SHA512;
+         else
+            Found := False;
+            return CryptoLib.RSA.SHA256;
+         end if;
+      end Hash_For;
+   begin
+      Hash := CryptoLib.RSA.SHA256;
+      Salt_Length := 20;
+      Usable := False;
+
+      if Parameters'Length = 0 then
+         return;
+      end if;
+
+      Cursor := Parameters'First;
+      DER_Reader.Read_Sequence
+        (Parameters, Cursor, Parameters'Last, 0, Limits, Outer, Status);
+      if Status /= CryptoLib.ASN1.Errors.Ok then
+         return;
+      end if;
+
+      Cursor := Outer.First;
+      while not DER_Reader.At_End (Cursor, Outer.Last) loop
+         declare
+            Tag : CryptoLib.ASN1.Element;
+         begin
+            DER_Reader.Read
+              (Parameters, Cursor, Outer.Last, 1, Limits, Tag, Status);
+            exit when Status /= CryptoLib.ASN1.Errors.Ok;
+            exit when Tag.Class /= CryptoLib.ASN1.Context_Specific;
+
+            case Tag.Number is
+               when 0 =>
+                  declare
+                     Part : Ada.Streams.Stream_Element_Offset := Tag.First;
+                     Alg  : CryptoLib.ASN1.Element;
+                     OID  : CryptoLib.ASN1.Element;
+                     Got  : Boolean;
+                  begin
+                     DER_Reader.Read_Sequence
+                       (Parameters, Part, Tag.Last, 2, Limits, Alg, Status);
+                     exit when Status /= CryptoLib.ASN1.Errors.Ok;
+                     Part := Alg.First;
+                     DER_Reader.Read_Object_Identifier
+                       (Parameters, Part, Alg.Last, 3, Limits, OID, Status);
+                     exit when Status /= CryptoLib.ASN1.Errors.Ok;
+                     Hash := Hash_For (OID, Parameters, Got);
+                     Seen := Got;
+                     exit when not Got;
+                  end;
+
+               when 2 =>
+                  declare
+                     Part : Ada.Streams.Stream_Element_Offset := Tag.First;
+                  begin
+                     DER_Reader.Read_Small_Integer
+                       (Parameters, Part, Tag.Last, 2, Limits, Salt_Length,
+                        Status);
+                     exit when Status /= CryptoLib.ASN1.Errors.Ok;
+                  end;
+
+               when others =>
+                  --  The mask generation function and the trailer field. The
+                  --  trailer has one defined value, and the mask function is
+                  --  required below to match the digest.
+                  null;
+            end case;
+         end;
+      end loop;
+
+      Usable := Seen;
+   end Read_PSS_Parameters;
 
    --  Take an RSAPublicKey apart into its modulus and exponent.
    --
@@ -201,7 +316,9 @@ package body CryptoLib.X509.Signatures is
       Signature  : CryptoLib.ASN1.Octets;
       Algorithm  : Signature_Algorithm;
       Key_Kind   : Public_Key_Algorithm;
-      Public_Key : CryptoLib.ASN1.Octets) return Verification_Result
+      Public_Key : CryptoLib.ASN1.Octets;
+      Parameters : CryptoLib.ASN1.Octets := Empty_Parameters)
+      return Verification_Result
    is
    begin
       if not Is_Supported (Algorithm) then
@@ -284,6 +401,55 @@ package body CryptoLib.X509.Signatures is
                   end;
                end;
 
+            when RSASSA_PSS =>
+               if Key_Kind /= RSA then
+                  return Algorithm_Mismatch;
+               end if;
+
+               declare
+                  Mod_First : Ada.Streams.Stream_Element_Offset;
+                  Mod_Last  : Ada.Streams.Stream_Element_Offset;
+                  Exp_First : Ada.Streams.Stream_Element_Offset;
+                  Exp_Last  : Ada.Streams.Stream_Element_Offset;
+                  Ok        : Boolean;
+                  Hash      : CryptoLib.RSA.Hash_Algorithm;
+                  Salt      : Natural;
+                  Usable    : Boolean;
+               begin
+                  Read_PSS_Parameters (Parameters, Hash, Salt, Usable);
+                  if not Usable then
+                     --  Without a hash this cannot be checked, and guessing
+                     --  one would turn "we could not check" into "it failed".
+                     return Unsupported_Algorithm;
+                  end if;
+
+                  Split_RSA_Key
+                    (Key, Mod_First, Mod_Last, Exp_First, Exp_Last, Ok);
+                  if not Ok then
+                     return Malformed_Signature;
+                  end if;
+
+                  declare
+                     Outcome : constant CryptoLib.Errors.Status :=
+                       CryptoLib.RSA.Verify_PSS
+                         (Modulus     => Key (Mod_First .. Mod_Last),
+                          Exponent    => Key (Exp_First .. Exp_Last),
+                          Hash        => Hash,
+                          Salt_Length => Salt,
+                          Message     => Message,
+                          Signature   => Sig);
+                  begin
+                     if Outcome = CryptoLib.Errors.Ok then
+                        return Valid;
+                     elsif Outcome = CryptoLib.Errors.Authentication_Failed
+                     then
+                        return Invalid_Signature;
+                     else
+                        return Malformed_Signature;
+                     end if;
+                  end;
+               end;
+
             when SHA256_With_RSA | SHA384_With_RSA | SHA512_With_RSA =>
                if Key_Kind /= RSA then
                   return Algorithm_Mismatch;
@@ -362,7 +528,8 @@ package body CryptoLib.X509.Signatures is
      (Signed    : CryptoLib.ASN1.Octets;
       Signature : CryptoLib.ASN1.Octets;
       Algorithm : Signature_Algorithm;
-      Issuer    : CryptoLib.X509.Certificates.Certificate)
+      Issuer    : CryptoLib.X509.Certificates.Certificate;
+      Parameters : CryptoLib.ASN1.Octets := Empty_Parameters)
       return Verification_Result
    is
    begin
@@ -375,7 +542,8 @@ package body CryptoLib.X509.Signatures is
          Signature  => Signature,
          Algorithm  => Algorithm,
          Key_Kind   => X509C.Public_Key_Algorithm_Of (Issuer),
-         Public_Key => X509C.Public_Key (Issuer));
+         Public_Key => X509C.Public_Key (Issuer),
+         Parameters => Parameters);
    end Verify_Signed_Data;
 
    function Verify_Certificate_Signature
@@ -389,10 +557,11 @@ package body CryptoLib.X509.Signatures is
       end if;
 
       return Verify_Signed_Data
-        (Signed    => X509C.TBS_Bytes (Item),
-         Signature => X509C.Signature_Bytes (Item),
-         Algorithm => X509C.Signature_Algorithm_Of (Item),
-         Issuer    => Issuer);
+        (Signed     => X509C.TBS_Bytes (Item),
+         Signature  => X509C.Signature_Bytes (Item),
+         Algorithm  => X509C.Signature_Algorithm_Of (Item),
+         Issuer     => Issuer,
+         Parameters => X509C.Signature_Parameters (Item));
    end Verify_Certificate_Signature;
 
 end CryptoLib.X509.Signatures;

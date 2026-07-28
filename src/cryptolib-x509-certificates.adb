@@ -188,6 +188,10 @@ package body CryptoLib.X509.Certificates is
          return Result;
       end if;
       Result.Sig_Algorithm := Signature_Algorithm_For (Work, Alg_ID);
+      if Has_P then
+         Result.Sig_Parameters :=
+           (First => Encoded_First (Param), Last => Encoded_Last (Param));
+      end if;
 
       declare
          Unused : Natural;
@@ -549,6 +553,9 @@ package body CryptoLib.X509.Certificates is
 
    function Signature_Bytes (Item : Certificate) return Octets
    is (Slice (Item, Item.Signature));
+
+   function Signature_Parameters (Item : Certificate) return Octets
+   is (Slice (Item, Item.Sig_Parameters));
 
    function DER_Bytes (Item : Certificate) return Octets
    is (if Item.Present then Item.DER else Empty_Octets);

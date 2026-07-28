@@ -16,6 +16,10 @@ with CryptoLib.X509.Certificates;
 --  where trust bugs live.
 package CryptoLib.X509.Signatures is
 
+   --  No parameters, for the algorithms that carry none.
+   Empty_Parameters : constant CryptoLib.ASN1.Octets (1 .. 0) :=
+     [others => 0];
+
    type Verification_Result is
      (Valid,
       --  The signature is the issuer key's over the certificate's signed
@@ -68,13 +72,15 @@ package CryptoLib.X509.Signatures is
    --  @param Signature the signature value, without its BIT STRING wrapper
    --  @param Algorithm the algorithm the signature claims to be
    --  @param Issuer the certificate whose public key is proposed as signer
+   --  @param Parameters the algorithm's own parameters, where it has them
    --  @return Valid only when the signature verifies; see the type for what
    --  the other results mean
    function Verify_Signed_Data
      (Signed    : CryptoLib.ASN1.Octets;
       Signature : CryptoLib.ASN1.Octets;
       Algorithm : Signature_Algorithm;
-      Issuer    : CryptoLib.X509.Certificates.Certificate)
+      Issuer    : CryptoLib.X509.Certificates.Certificate;
+      Parameters : CryptoLib.ASN1.Octets := Empty_Parameters)
       return Verification_Result;
 
    --  Is this signature over these bytes that public key's?
@@ -89,12 +95,17 @@ package CryptoLib.X509.Signatures is
    --  @param Key_Kind what kind of key Public_Key is
    --  @param Public_Key the key itself, as a SubjectPublicKeyInfo carries it
    --  @return Valid only when the signature verifies
+   --  @param Parameters the algorithm's own parameters, for the algorithms
+   --  that have them; RSASSA-PSS states its hash and salt length there and
+   --  cannot be checked without them
    function Verify_With_Key
      (Signed     : CryptoLib.ASN1.Octets;
       Signature  : CryptoLib.ASN1.Octets;
       Algorithm  : Signature_Algorithm;
       Key_Kind   : Public_Key_Algorithm;
-      Public_Key : CryptoLib.ASN1.Octets) return Verification_Result;
+      Public_Key : CryptoLib.ASN1.Octets;
+      Parameters : CryptoLib.ASN1.Octets := Empty_Parameters)
+      return Verification_Result;
 
    --  Can this crate verify signatures of this algorithm at all?
    --

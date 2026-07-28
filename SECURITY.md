@@ -27,7 +27,7 @@ The reference sources are:
 | Finite-field DH | groups 1 / 14 / 16 / 18 | live vs OpenSSH; group16/18 pin the exact RFC 3526 primes |
 | Post-quantum | ML-KEM-768, sntrup761 (+ hybrid x25519 KEX) | NIST / live vs OpenSSH sntrup761x25519 |
 | X.509 (`Certificates`) | local CA, server/client/email issuance, CSR signing, PKCS#12 | PKCS#12 MAC key byte-exact vs OpenSSL; issued Ed25519 and P-384 certificates chain-verified against their CA by OpenSSL in the suite |
-| RSA | PKCS#1 v1.5 verification, SHA-256/384/512 | signatures produced by OpenSSL at 2048 and 3072 bits; a cube-root forgery against a low exponent is refused |
+| RSA | PKCS#1 v1.5 and PSS verification, SHA-256/384/512 | signatures produced by OpenSSL at 2048 and 3072 bits; a cube-root forgery against a low exponent is refused; PSS checked at both salt lengths OpenSSL emits, and a signature does not verify under a salt length or hash other than the one its parameters state |
 | X.509 parsing (`ASN1`, `PEM`, `X509.*`) | DER reader, PEM armour, certificate decode, extensions, signature verification | field-by-field against `openssl x509 -text` on the same certificates; an OpenSSL-issued RSA chain verifies here and under `openssl verify` |
 | Revocation (`X509.CRLs`, `OCSP`) | CRL and OCSP parsing and signature checking | against a CRL and OCSP responses OpenSSL produced through `openssl ca -revoke`; the request builder is byte-identical to `openssl ocsp -reqout`; a delegate without OCSP-signing authority is refused |
 | Service identity (`X509.Identity`) | RFC 9525 DNS and IP matching | negative cases pinned: a wildcard matches neither the bare domain nor across two labels, an address is never matched as text, and the common name is consulted only when a caller asks for it |
@@ -117,8 +117,10 @@ The RNG **fails closed**: if no OS source is available it returns
   `Ok`, so an unchecked identity is never mistaken for a checked one.
 - **RSA is verification only** — there is no RSA signing, key generation, or
   private-key operation, and no RSA-PSS. `X509.Signatures` reports
-  `Unsupported_Algorithm` for RSA-PSS rather than failing it, so "we did not
-  check" is never mistaken for "the signature was bad". RSA verification touches only public values, so nothing in it needs to
+  `Unsupported_Algorithm` rather than a failure whenever it cannot check a
+  signature, so "we did not check" is never mistaken for "the signature was
+  bad" -- RSA-PSS whose parameters name a hash this crate does not implement
+  lands there. RSA verification touches only public values, so nothing in it needs to
   be constant-time.
 - **Path validation checks a supplied path; it does not build one.**
   `X509.Validation` verifies signatures along a chain, issuer/subject linkage,

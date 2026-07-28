@@ -104,6 +104,17 @@ package CryptoLib.X509.Certificates is
    function Signature_Algorithm_Of
      (Item : Certificate) return Signature_Algorithm;
 
+   --  The signature algorithm's parameters, as encoded.
+   --
+   --  Empty for the algorithms that have none. RSASSA-PSS is why this is
+   --  exported: PSS states its hash, its mask generation function and its
+   --  salt length here rather than in the algorithm's name, so a verifier
+   --  that cannot see the parameters cannot check a PSS signature at all --
+   --  it can only guess, and a guess that happens to be right proves nothing.
+   --  @param Item the certificate to inspect
+   --  @return the parameters' DER, header included, empty when absent
+   function Signature_Parameters (Item : Certificate) return Octets;
+
    --  The algorithm of the subject public key.
    --  @param Item the certificate to inspect
    --  @return the public-key algorithm, Unknown when unrecognised
@@ -207,6 +218,7 @@ private
       SPKI_Key        : Span;
       TBS             : Span;
       Signature       : Span;
+      Sig_Parameters  : Span;
       Valid_From      : Certificate_Time;
       Valid_To        : Certificate_Time;
       Sig_Algorithm   : Signature_Algorithm := Unknown_Signature_Algorithm;

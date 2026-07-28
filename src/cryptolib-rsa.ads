@@ -51,6 +51,36 @@ package CryptoLib.RSA is
       Signature : Ada.Streams.Stream_Element_Array)
       return CryptoLib.Errors.Status;
 
+   --  Is this signature the given RSA public key's, under RSASSA-PSS?
+   --
+   --  PSS carries its own parameters -- which hash, which mask generation
+   --  function, how long the salt -- in the algorithm identifier rather than
+   --  in the algorithm's name, so a caller has to supply them. Getting them
+   --  from anywhere but the signature's own parameters is guessing, and a
+   --  guess that happens to be right proves nothing about the next one.
+   --
+   --  Salt_Length is the length the parameters state. The recovered salt is
+   --  required to be exactly that: accepting whatever length turns up would
+   --  let a signature be reinterpreted with a shorter salt than its issuer
+   --  chose.
+   --  @param Modulus the public modulus n, unsigned big-endian
+   --  @param Exponent the public exponent e, unsigned big-endian
+   --  @param Hash which digest the signature was made with, used for the
+   --  message digest and for the mask generation function alike
+   --  @param Salt_Length the salt length the parameters state, in octets
+   --  @param Message the signed message
+   --  @param Signature the signature, exactly as long as the modulus
+   --  @return Ok when the signature verifies, Authentication_Failed when it
+   --          does not, Handshake_Failed when an argument cannot be used
+   function Verify_PSS
+     (Modulus     : Ada.Streams.Stream_Element_Array;
+      Exponent    : Ada.Streams.Stream_Element_Array;
+      Hash        : Hash_Algorithm;
+      Salt_Length : Natural;
+      Message     : Ada.Streams.Stream_Element_Array;
+      Signature   : Ada.Streams.Stream_Element_Array)
+      return CryptoLib.Errors.Status;
+
    --  How many bits wide is this modulus?
    --
    --  For a caller enforcing a minimum key size. No minimum is imposed here:
