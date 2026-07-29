@@ -102,7 +102,7 @@ package body CryptoLib.X509.Times is
       end loop;
 
       if Fields (1) not in 1 .. 12
-        or else Fields (2) not in 1 .. 31
+        or else Fields (2) < 1
         or else Fields (3) > 23
         or else Fields (4) > 59
         or else Fields (5) > 60
@@ -110,6 +110,26 @@ package body CryptoLib.X509.Times is
          Status := Invalid_Value;
          return;
       end if;
+
+      --  The day has to exist in the month it names. Checking it against 31
+      --  and no further accepts the 31st of February, which is not a date:
+      --  a certificate expiring on it is compared field by field like any
+      --  other and so stays valid for the days after the month has ended.
+      --  Whoever wrote the certificate chose that number.
+      declare
+         Leap : constant Boolean :=
+           (Year mod 4 = 0 and then Year mod 100 /= 0)
+           or else Year mod 400 = 0;
+         Days_In_Month : constant array (1 .. 12) of Natural :=
+           [1  => 31, 2 => (if Leap then 29 else 28), 3  => 31, 4  => 30,
+            5  => 31, 6 => 30, 7  => 31, 8  => 31, 9  => 30, 10 => 31,
+            11 => 30, 12 => 31];
+      begin
+         if Fields (2) > Days_In_Month (Fields (1)) then
+            Status := Invalid_Value;
+            return;
+         end if;
+      end;
 
       Value :=
         (Year   => Year,

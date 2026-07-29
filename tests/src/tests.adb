@@ -21,6 +21,7 @@ with CryptoLib.PKCS8;
 with CryptoLib.PKCS12;
 with CryptoLib.Identities;
 with CryptoLib.X509.Policies;
+with CryptoLib.X509.Times;
 with CryptoLib.X509.Validation;
 with CryptoLib.X509.Path_Building;
 with CryptoLib.X509.Name_Constraints;
@@ -5998,6 +5999,66 @@ procedure Tests is
              & "clamped to it");
    end Check_Validity_Not_Past_Issuer;
 
+   --  A date that does not exist is not a time.
+   --
+   --  The day was checked against 31 and no further, so the 31st of
+   --  February decoded happily. Nothing downstream notices: times are
+   --  compared field by field, so a notAfter of 31 February keeps a
+   --  certificate valid for the days after February has ended, and the
+   --  number was chosen by whoever wrote the certificate. OpenSSL calls the
+   --  same encoding a bad time value.
+   --
+   --  It also quietly disabled the issuer-expiry ceiling, which has to turn
+   --  the CA's notAfter into a clock time and cannot turn that into one.
+   procedure Check_Impossible_Dates is
+      use type CryptoLib.ASN1.Errors.Decode_Status;
+
+      --  A GeneralizedTime carrying exactly these characters.
+      function Reads (Text : String) return Boolean is
+         Data   : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (Text'Length + 2));
+         Cursor : Ada.Streams.Stream_Element_Offset := 1;
+         Value  : CryptoLib.X509.Certificate_Time;
+         Status : CryptoLib.ASN1.Errors.Decode_Status;
+      begin
+         Data (1) := 16#18#;
+         Data (2) := Ada.Streams.Stream_Element (Text'Length);
+         for I in Text'Range loop
+            Data (2 + Ada.Streams.Stream_Element_Offset (I - Text'First + 1)) :=
+              Character'Pos (Text (I));
+         end loop;
+         CryptoLib.X509.Times.Read
+           (Data, Cursor, Data'Last, 0, CryptoLib.ASN1.Default_Limits,
+            Value, Status);
+         return Status = CryptoLib.ASN1.Errors.Ok;
+      end Reads;
+   begin
+      Check (not Reads ("20260231000000Z"),
+             "the 31st of February is refused");
+      Check (not Reads ("20260230000000Z"),
+             "and the 30th");
+      Check (not Reads ("20260431000000Z"),
+             "and the 31st of a month with thirty days");
+      Check (not Reads ("20260000000000Z"),
+             "and a zeroth day");
+
+      --  The leap year rule is the Gregorian one, not "divisible by four".
+      Check (Reads ("20240229000000Z"),
+             "the 29th of February stands in a leap year");
+      Check (not Reads ("20250229000000Z"),
+             "and not in an ordinary one");
+      Check (not Reads ("21000229000000Z"),
+             "not in 2100, which is divisible by four and not a leap year");
+      Check (Reads ("20000229000000Z"),
+             "and does stand in 2000, which is divisible by four hundred");
+
+      --  Dates that do exist still decode, or this would be refusing real
+      --  certificates rather than impossible ones.
+      Check (Reads ("20260131000000Z"), "the 31st of January is a date");
+      Check (Reads ("20260430000000Z"), "so is the 30th of April");
+      Check (Reads ("20261231235959Z"), "and the last second of a year");
+   end Check_Impossible_Dates;
+
    procedure Check_X509_Extensions is
       use type CryptoLib.ASN1.Errors.Decode_Status;
       use type CryptoLib.PEM.Decode_Status;
@@ -10921,6 +10982,7 @@ begin
    Check_Ed448_Certificate;
    Check_CSR_Signing;
    Check_Validity_Not_Past_Issuer;
+   Check_Impossible_Dates;
    Check_Random_Fails_Closed;
    Check_Off_Curve_Key;
    Check_Ed25519_Encoding;
