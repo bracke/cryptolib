@@ -217,7 +217,15 @@ every status reading `Ok` while every key it produces is predictable.
   carried through the tree: §6.1 never consults them, a node's qualifiers are
   those of the certificate that created it, and the ones belonging to a
   chain's established policies are the leaf's own, which `Policies_Of` gives
-  directly. A policy set is a set at both ends. A certificate
+  directly. The `SkipCerts` counts in `policyConstraints` are
+  context-tagged INTEGERs carrying an INTEGER's content without its tag, so
+  the shared reader cannot be called on them and they are folded by hand;
+  that hand-written path now makes the same three checks the shared one does
+  -- a negative count is malformed rather than large, a non-minimal encoding
+  is refused, and the accumulation saturates instead of overflowing. Four
+  octets reach 4294967295 where `Natural` stops at 2147483647, so before
+  this a four-octet field raised `CONSTRAINT_ERROR` out of a parser whose
+  contract is that it does not. A policy set is a set at both ends. A certificate
   naming the same policy twice in one extension is refused rather than folded
   down to one -- RFC 5280 §4.2.1.4 forbids the repeat, OpenSSL refuses it as
   error 42, and two copies carrying two qualifier sets have no single meaning

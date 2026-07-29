@@ -420,14 +420,40 @@ package body CryptoLib.X509.Policies is
                return Result;
             end if;
 
-            --  The content is an INTEGER's, without its own tag.
-            if Content_Length (Field) = 0
-              or else Content_Length (Field) > 4
+            --  The content is an INTEGER's, without its own tag, so the
+            --  checks Read_Small_Integer would have made have to be made
+            --  here: an implicit tag is why this is read by hand, and it
+            --  is not a reason to read it any less carefully.
+            if Content_Length (Field) = 0 then
+               return Result;
+            end if;
+
+            --  SkipCerts is INTEGER (0..MAX), so a negative one is not a
+            --  large number to be clamped, it is malformed.
+            if (Data (Field.First) and 16#80#) /= 0 then
+               return Result;
+            end if;
+
+            --  Minimal form: a leading zero is only there to clear a sign
+            --  bit that would otherwise be set.
+            if Content_Length (Field) > 1
+              and then Data (Field.First) = 0
+              and then (Data (Field.First + 1) and 16#80#) = 0
             then
                return Result;
             end if;
+
+            --  Saturate rather than overflow. Any SkipCerts at or beyond
+            --  the length of the path counts down the same way -- it never
+            --  reaches zero -- so clamping loses nothing, and a CA writing
+            --  a huge value to mean "never" is not writing a bad
+            --  certificate.
             for I in Field.First .. Field.Last loop
-               Value := Value * 256 + Natural (Data (I));
+               if Value > (Natural'Last - Natural (Data (I))) / 256 then
+                  Value := Natural'Last;
+               else
+                  Value := Value * 256 + Natural (Data (I));
+               end if;
             end loop;
 
             case Field.Number is

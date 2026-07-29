@@ -4837,6 +4837,142 @@ procedure Tests is
       end;
    end Check_Policy_Set_Is_A_Set;
 
+   --  SkipCerts, read by hand and so read wrongly.
+   --
+   --  Both policyConstraints fields are context-tagged INTEGERs carrying an
+   --  INTEGER's content without an INTEGER's tag, so the shared reader --
+   --  which rejects a negative value, insists on the minimal form, and
+   --  guards its own accumulation -- could not be called and the bytes were
+   --  folded by hand instead. The hand-written loop did none of the three.
+   --  A four-octet field reaches 4294967295 and Natural stops at
+   --  2147483647, so a certificate could raise CONSTRAINT_ERROR out of a
+   --  parser whose whole contract is that it does not: anyone can put four
+   --  octets in an extension.
+   --
+   --  If any of this crashes rather than fails, the suite dies here, which
+   --  is the outcome being guarded against.
+   procedure Check_Policy_Constraint_Skipcerts is
+      package X509C renames CryptoLib.X509.Certificates;
+      package PP renames CryptoLib.X509.Policies;
+
+      Skip_Negative_DER : constant String :=
+        "3082016d30820114a003020102021411e4e06fd4d42c37f49055a01d0252baf2727c69300a06082a8648ce3d04" &
+        "030230133111300f06035504030c084f766572666c6f77301e170d3236303732393038353135305a170d333431" &
+        "3031353038353135305a30133111300f06035504030c084f766572666c6f773059301306072a8648ce3d020106" &
+        "082a8648ce3d03010703420004616e1c07a40b382e5a6b6cbd16ccb32d1035c52f6c7cec204e75d6623d97aec4" &
+        "f0d33d2af1e46da7b892fcf24489dab8f038c39218fba2ad11e06d3a9c0e6815a3463044300f0603551d130101" &
+        "ff040530030101ff30120603551d240101ff04083006800480000000301d0603551d0e041604144d81fe58bc05" &
+        "ce60d8225766eeb6c37877cfefc5300a06082a8648ce3d0403020347003044022002773f3c71a3b6a61f010cfc" &
+        "f3fe352a2064f2d07e90f00e4b61a8e62105067d022060132cf2b1249bf79fcefdcac6f91f36e9269160446f6b" &
+        "fafe780d559b5b4c4a";
+
+      Skip_Huge_DER : constant String :=
+        "3082016030820107a00302010202146c79d5de8ad1b36736a50ecd6ebead7486953767300a06082a8648ce3d04" &
+        "0302300c310a300806035504030c0154301e170d3236303732393038353334345a170d33343130313530383533" &
+        "34345a300c310a300806035504030c01543059301306072a8648ce3d020106082a8648ce3d0301070342000461" &
+        "6e1c07a40b382e5a6b6cbd16ccb32d1035c52f6c7cec204e75d6623d97aec4f0d33d2af1e46da7b892fcf24489" &
+        "dab8f038c39218fba2ad11e06d3a9c0e6815a3473045300f0603551d130101ff040530030101ff30130603551d" &
+        "240101ff04093007800500ffffffff301d0603551d0e041604144d81fe58bc05ce60d8225766eeb6c37877cfef" &
+        "c5300a06082a8648ce3d0403020347003044022014020108045a4a5523786cdde89c7b1e1abd491b38afc4b068" &
+        "d7c7c0b5f9a61102204c8b942529e8a08dcb928717847c4fa6cd06f984798acfcb7abe1a33f54b2362";
+
+      Skip_Non_Minimal_DER : constant String :=
+        "3082015d30820104a00302010202141e0f9c28b63b2fb1d3312894e0320d449078be36300a06082a8648ce3d04" &
+        "0302300c310a300806035504030c0154301e170d3236303732393038353430315a170d33343130313530383534" &
+        "30315a300c310a300806035504030c01543059301306072a8648ce3d020106082a8648ce3d0301070342000461" &
+        "6e1c07a40b382e5a6b6cbd16ccb32d1035c52f6c7cec204e75d6623d97aec4f0d33d2af1e46da7b892fcf24489" &
+        "dab8f038c39218fba2ad11e06d3a9c0e6815a3443042300f0603551d130101ff040530030101ff30100603551d" &
+        "240101ff0406300480020001301d0603551d0e041604144d81fe58bc05ce60d8225766eeb6c37877cfefc5300a" &
+        "06082a8648ce3d040302034700304402207b9aea4da0777599d00a09fd972498aa6d4da5759ab3e4c428f0af00" &
+        "a88250850220574018d1249aae8989915afb20ac01b0b3c384832dc0a4078f6f85327e67fc24";
+
+      Skip_Plain_DER : constant String :=
+        "3082015d30820103a0030201020214536596ec8bbf720a5e3a2db18d3ada585bfd7a75300a06082a8648ce3d04" &
+        "0302300c310a300806035504030c0154301e170d3236303732393038353430315a170d33343130313530383534" &
+        "30315a300c310a300806035504030c01543059301306072a8648ce3d020106082a8648ce3d0301070342000461" &
+        "6e1c07a40b382e5a6b6cbd16ccb32d1035c52f6c7cec204e75d6623d97aec4f0d33d2af1e46da7b892fcf24489" &
+        "dab8f038c39218fba2ad11e06d3a9c0e6815a3433041300f0603551d130101ff040530030101ff300f0603551d" &
+        "240101ff04053003800105301d0603551d0e041604144d81fe58bc05ce60d8225766eeb6c37877cfefc5300a06" &
+        "082a8648ce3d0403020348003045022100d428d89fdcd24eb41b89d438547fafcacdd4bceb5be1d41603fa25b7" &
+        "3dcb1f850220205e3891d01c91ba2d35d5c82662fb4aa2d9b061c29677dc1cc2a42daad4170a";
+
+      Status : CryptoLib.ASN1.Errors.Decode_Status;
+
+      function From_Hex
+        (Text : String) return Ada.Streams.Stream_Element_Array
+      is
+         Result : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (Text'Length / 2));
+         function Nibble (C : Character) return Natural
+         is (case C is
+                when '0' .. '9' => Character'Pos (C) - Character'Pos ('0'),
+                when others     => Character'Pos (C) - Character'Pos ('a') + 10);
+      begin
+         for I in Result'Range loop
+            Result (I) :=
+              Ada.Streams.Stream_Element
+                (Nibble (Text (Text'First + 2 * Natural (I - 1))) * 16
+                 + Nibble (Text (Text'First + 2 * Natural (I - 1) + 1)));
+         end loop;
+         return Result;
+      end From_Hex;
+
+      function Constraints (Hex : String) return PP.Policy_Constraints
+      is (PP.Constraints_Of
+            (X509C.Decode_DER
+               (From_Hex (Hex), CryptoLib.ASN1.Default_Limits, Status)));
+   begin
+      --  0x80000000: one past what Natural holds, and with the top bit set
+      --  it is a negative INTEGER, which SkipCerts (0..MAX) does not allow.
+      --  Malformed, not merely large.
+      declare
+         Negative : constant PP.Policy_Constraints :=
+           Constraints (Skip_Negative_DER);
+      begin
+         Check (Negative.Present, "the extension is there to be judged");
+         Check (not Negative.Well_Formed,
+                "a negative SkipCerts is refused rather than folded into a "
+                & "positive one");
+      end;
+
+      --  4294967295, written the long way and genuinely positive. A CA
+      --  meaning "never" this way is not writing a bad certificate, so it
+      --  is clamped rather than refused -- any value at or past the length
+      --  of the path counts down identically.
+      declare
+         Huge : constant PP.Policy_Constraints := Constraints (Skip_Huge_DER);
+      begin
+         Check (Huge.Well_Formed,
+                "a large but valid SkipCerts is usable");
+         Check (Huge.Has_Require_Explicit
+                and then Huge.Require_Explicit = Natural'Last,
+                "clamped to what Natural holds, got"
+                & Natural'Image (Huge.Require_Explicit));
+      end;
+
+      --  A leading zero octet that clears no sign bit is not the minimal
+      --  form, and DER has exactly one encoding per value.
+      declare
+         Padded : constant PP.Policy_Constraints :=
+           Constraints (Skip_Non_Minimal_DER);
+      begin
+         Check (not Padded.Well_Formed,
+                "a non-minimal SkipCerts is refused, as it would be with "
+                & "its own INTEGER tag on it");
+      end;
+
+      --  And the ordinary case still reads as itself.
+      declare
+         Plain : constant PP.Policy_Constraints := Constraints (Skip_Plain_DER);
+      begin
+         Check (Plain.Well_Formed
+                and then Plain.Has_Require_Explicit
+                and then Plain.Require_Explicit = 5,
+                "an ordinary SkipCerts is unaffected, got"
+                & Natural'Image (Plain.Require_Explicit));
+      end;
+   end Check_Policy_Constraint_Skipcerts;
+
    procedure Check_X509_Extensions is
       use type CryptoLib.ASN1.Errors.Decode_Status;
       use type CryptoLib.PEM.Decode_Status;
@@ -9751,6 +9887,7 @@ begin
    Check_Verification_Failure_Kinds;
    Check_Policy_Tree_Bound;
    Check_Policy_Set_Is_A_Set;
+   Check_Policy_Constraint_Skipcerts;
    Check_Random_Fails_Closed;
    Check_Off_Curve_Key;
    Check_Ed25519_Encoding;
