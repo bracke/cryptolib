@@ -831,6 +831,70 @@ package body CryptoLib.ECDSA is
          return Authentication_Failed;
       end if;
 
+      --  The public point has to be on the curve, and nothing above
+      --  establishes that: the coordinates arrive as bytes and were turned
+      --  into field elements without anything checking they satisfy the
+      --  curve equation.
+      --
+      --  It matters wherever the key is the attacker's to choose rather than
+      --  something a CA already vouched for -- a self-signed certificate, or
+      --  a certificate request, where the signature is the only evidence the
+      --  requester holds the key. Verifying against a point off the curve is
+      --  arithmetic in a group nobody chose, and the guarantee that only the
+      --  private key could have produced the signature does not survive it.
+      declare
+         X_Raw : constant Element :=
+           From_Bytes
+             (Cv.Field,
+              Public_Point (Public_Point'First + 1
+                            .. Public_Point'First + P_Len));
+         Y_Raw : constant Element :=
+           From_Bytes
+             (Cv.Field,
+              Public_Point (Public_Point'First + P_Len + 1
+                            .. Public_Point'Last));
+         P_Mod : constant Element := Modulus (Cv.Field);
+
+         X_M : constant Element := To_Mont (Cv.Field, X_Raw);
+         Y_M : constant Element := To_Mont (Cv.Field, Y_Raw);
+
+         --  a is -3 on all three curves, so 3 is its negation, and only 3*b
+         --  is carried. Checking 3*y^2 = 3*x^3 + 3*a*x + 3*b keeps to what
+         --  the curve data holds.
+         Three_M : constant Element := Sub (Cv.Field, Zero, Cv.A3_Mont);
+         Left    : constant Element :=
+           Mont_Mul (Cv.Field, Three_M, Mont_Mul (Cv.Field, Y_M, Y_M));
+         X_Cubed : constant Element :=
+           Mont_Mul (Cv.Field, Mont_Mul (Cv.Field, X_M, X_M), X_M);
+         Right   : constant Element :=
+           Add (Cv.Field,
+                Add (Cv.Field,
+                     Mont_Mul (Cv.Field, Three_M, X_Cubed),
+                     Mont_Mul (Cv.Field, Three_M,
+                               Mont_Mul (Cv.Field, Cv.A3_Mont, X_M))),
+                Cv.B3_Mont);
+      begin
+         --  Coordinates outside the field are not coordinates.
+         if Geq_Mask (X_Raw, P_Mod) /= 0
+           or else Geq_Mask (Y_Raw, P_Mod) /= 0
+         then
+            return Authentication_Failed;
+         end if;
+
+         --  Compared after Add (.., Zero) on both sides, which is how the
+         --  rest of this file normalises before Equal_Mask: a Montgomery
+         --  result is not necessarily the least residue, so two equal field
+         --  elements can hold different representations and compare unequal.
+         --  Without it this rejected perfectly good keys, and which ones
+         --  depended on the values.
+         if Equal_Mask
+              (Add (Cv.Field, Left, Zero), Add (Cv.Field, Right, Zero))
+            /= All_Ones
+         then
+            return Authentication_Failed;
+         end if;
+      end;
+
       Q :=
         (X => To_Mont
                 (Cv.Field,

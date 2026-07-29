@@ -73,8 +73,8 @@ package body OpenSSL_Interop is
 
    function Chain_Verifies (CA_PEM : String; Leaf_PEM : String) return Boolean
    is
-      CA      : Handle := Read_Certificate (CA_PEM);
-      Leaf    : Handle := Read_Certificate (Leaf_PEM);
+      CA      : constant Handle := Read_Certificate (CA_PEM);
+      Leaf    : constant Handle := Read_Certificate (Leaf_PEM);
       Store   : Handle := Null_Handle;
       Context : Handle := Null_Handle;
       Result  : Boolean := False;

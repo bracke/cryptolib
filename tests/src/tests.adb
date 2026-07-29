@@ -2972,6 +2972,99 @@ procedure Tests is
       end;
    end Check_Oversized_Serial;
 
+   --  A public point that is not on the curve.
+   --
+   --  Verification built the point from the coordinate bytes and never
+   --  checked that they satisfy the curve equation. Where the key is
+   --  vouched for by a CA that hardly matters, but it is not always: a
+   --  self-signed certificate and a certificate request are both verified
+   --  against a key their own sender chose, and for a request the signature
+   --  is the only evidence the requester holds the private key at all.
+   --  Arithmetic on a point off the curve happens in a group nobody chose,
+   --  and "only the private key could have produced this" does not survive
+   --  the move.
+   procedure Check_Off_Curve_Key is
+      Rng  : CryptoLib.Random.Random_Source;
+      Seed : Ada.Streams.Stream_Element_Array (1 .. 48);
+      Pub  : Ada.Streams.Stream_Element_Array (1 .. 97);
+      Msg  : constant Ada.Streams.Stream_Element_Array (1 .. 6) :=
+        [1, 2, 3, 4, 5, 6];
+      R, S : Ada.Streams.Stream_Element_Array (1 .. 48);
+      St   : CryptoLib.Errors.Status;
+   begin
+      CryptoLib.Random.Initialize_Production (Rng);
+      St := CryptoLib.ECDSA.Generate_Nistp384_Keypair (Rng, Seed, Pub);
+      Check (St = CryptoLib.Errors.Ok, "fixture: a P-384 key pair");
+
+      St := CryptoLib.ECDSA.Sign_Nistp384_Raw (Seed, Msg, R, S);
+      Check (St = CryptoLib.Errors.Ok, "fixture: it signs");
+
+      --  The honest case, over many keys rather than one. A Montgomery
+      --  result is not necessarily the least residue, so comparing the two
+      --  sides of the curve equation without normalising them first rejects
+      --  keys whose representation happens not to be reduced -- which is
+      --  most of the time fine and occasionally not. One key would have
+      --  passed that broken check about as often as not.
+      declare
+         Good : Natural := 0;
+         Tries : constant := 40;
+      begin
+         for Attempt in 1 .. Tries loop
+            declare
+               Seed_N : Ada.Streams.Stream_Element_Array (1 .. 48);
+               Pub_N  : Ada.Streams.Stream_Element_Array (1 .. 97);
+               R_N, S_N : Ada.Streams.Stream_Element_Array (1 .. 48);
+            begin
+               exit when CryptoLib.ECDSA.Generate_Nistp384_Keypair
+                           (Rng, Seed_N, Pub_N) /= CryptoLib.Errors.Ok;
+               exit when CryptoLib.ECDSA.Sign_Nistp384_Raw
+                           (Seed_N, Msg, R_N, S_N) /= CryptoLib.Errors.Ok;
+               if CryptoLib.ECDSA.Verify_Nistp384_Raw
+                    (Pub_N, Msg, R_N, S_N) = CryptoLib.Errors.Ok
+               then
+                  Good := Good + 1;
+               end if;
+            end;
+         end loop;
+
+         Check (Good = Tries,
+                "every honest key verifies under itself:"
+                & Natural'Image (Good) & " of" & Natural'Image (Tries));
+      end;
+
+      --  Move x by one. The chance that the result is still a point on the
+      --  curve is about one in 2**191, so this is off it.
+      declare
+         Bent : Ada.Streams.Stream_Element_Array := Pub;
+      begin
+         Bent (Bent'First + 1) := Bent (Bent'First + 1) xor 1;
+         Check (CryptoLib.ECDSA.Verify_Nistp384_Raw (Bent, Msg, R, S)
+                /= CryptoLib.Errors.Ok,
+                "a key off the curve is refused");
+      end;
+
+      --  A coordinate at or above the field prime is not a coordinate. All
+      --  ones is comfortably above p for every curve here.
+      declare
+         Huge : Ada.Streams.Stream_Element_Array := Pub;
+      begin
+         Huge (Huge'First + 1 .. Huge'First + 48) := [others => 16#FF#];
+         Check (CryptoLib.ECDSA.Verify_Nistp384_Raw (Huge, Msg, R, S)
+                /= CryptoLib.Errors.Ok,
+                "a coordinate outside the field is refused");
+      end;
+
+      --  x = y = 0 satisfies nothing: b is not zero on any of these curves.
+      declare
+         Zeroed : Ada.Streams.Stream_Element_Array := Pub;
+      begin
+         Zeroed (Zeroed'First + 1 .. Zeroed'Last) := [others => 0];
+         Check (CryptoLib.ECDSA.Verify_Nistp384_Raw (Zeroed, Msg, R, S)
+                /= CryptoLib.Errors.Ok,
+                "the all-zero point is refused");
+      end;
+   end Check_Off_Curve_Key;
+
    procedure Check_X509_Extensions is
       use type CryptoLib.ASN1.Errors.Decode_Status;
       use type CryptoLib.PEM.Decode_Status;
@@ -7816,6 +7909,7 @@ begin
    Check_X509_Decode;
    Check_X509_Verify;
    Check_X509_Extensions;
+   Check_Off_Curve_Key;
    Check_Serial_Numbers;
    Check_Validity_Window;
    Check_Key_Identifiers;
