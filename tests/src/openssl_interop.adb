@@ -28,6 +28,20 @@ package body OpenSSL_Interop is
    procedure X509_free (Item : Handle)
      with Import, Convention => C, External_Name => "X509_free";
 
+   function X509_get_pubkey (Item : Handle) return Handle
+     with Import, Convention => C, External_Name => "X509_get_pubkey";
+
+   function EVP_PKEY_get_bits (Item : Handle) return Interfaces.C.int
+     with Import, Convention => C, External_Name => "EVP_PKEY_get_bits";
+
+   function EVP_PKEY_get_base_id (Item : Handle) return Interfaces.C.int
+     with Import, Convention => C, External_Name => "EVP_PKEY_get_base_id";
+
+   procedure EVP_PKEY_free (Item : Handle)
+     with Import, Convention => C, External_Name => "EVP_PKEY_free";
+
+   EVP_PKEY_RSA : constant Interfaces.C.int := 6;
+
    function X509_STORE_new return Handle
      with Import, Convention => C, External_Name => "X509_STORE_new";
 
@@ -104,5 +118,58 @@ package body OpenSSL_Interop is
       end if;
       return Result;
    end Chain_Verifies;
+
+   --  Read a certificate and hand its public key to a caller-supplied test.
+   generic
+      type Answer is private;
+      Absent : Answer;
+      with function Examine (Key : Handle) return Answer;
+   function Ask_Public_Key (Leaf_PEM : String) return Answer;
+
+   function Ask_Public_Key (Leaf_PEM : String) return Answer is
+      Text : Interfaces.C.Strings.chars_ptr :=
+        Interfaces.C.Strings.New_String (Leaf_PEM);
+      Source : constant Handle :=
+        BIO_new_mem_buf (Text, Interfaces.C.int (Leaf_PEM'Length));
+      Cert   : Handle := Null_Handle;
+      Key    : Handle := Null_Handle;
+      Result : Answer := Absent;
+      Ignored : Interfaces.C.int;
+   begin
+      if Source /= Null_Handle then
+         Cert := PEM_read_bio_X509
+           (Source, Null_Handle, Null_Handle, Null_Handle);
+      end if;
+      if Cert /= Null_Handle then
+         Key := X509_get_pubkey (Cert);
+      end if;
+      if Key /= Null_Handle then
+         Result := Examine (Key);
+         EVP_PKEY_free (Key);
+      end if;
+      if Cert /= Null_Handle then
+         X509_free (Cert);
+      end if;
+      if Source /= Null_Handle then
+         Ignored := BIO_free (Source);
+      end if;
+      Interfaces.C.Strings.Free (Text);
+      return Result;
+   end Ask_Public_Key;
+
+   function Bits_Of (Key : Handle) return Natural
+   is (Natural (Integer'Max (0, Integer (EVP_PKEY_get_bits (Key)))));
+
+   function Is_RSA_Of (Key : Handle) return Boolean
+   is (EVP_PKEY_get_base_id (Key) = EVP_PKEY_RSA);
+
+   function Bits_Query is new Ask_Public_Key (Natural, 0, Bits_Of);
+   function RSA_Query is new Ask_Public_Key (Boolean, False, Is_RSA_Of);
+
+   function Certificate_Key_Bits (Leaf_PEM : String) return Natural
+   is (Bits_Query (Leaf_PEM));
+
+   function Certificate_Key_Is_RSA (Leaf_PEM : String) return Boolean
+   is (RSA_Query (Leaf_PEM));
 
 end OpenSSL_Interop;

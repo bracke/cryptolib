@@ -328,7 +328,8 @@ procedure Tests is
       declare
          use type CryptoLib.Certificates.Key_Algorithm;
 
-         procedure Check_Chain (Algorithm : CryptoLib.Certificates.Key_Algorithm)
+         procedure Check_Chain
+           (Algorithm : CryptoLib.Certificates.Generatable_Key_Algorithm)
          is
             Label   : constant String :=
               (case Algorithm is
@@ -373,6 +374,136 @@ procedure Tests is
                Label & " issued key belongs to the certificate issued with it");
          end Check_Chain;
       begin
+         --  An RSA subject, which this crate cannot generate a key for and
+         --  can now certify: the key comes from CryptoLib.RSA, the
+         --  SubjectPublicKeyInfo from RSA_Public_Key_Info, and the
+         --  certificate from the supplied-key entry point. OpenSSL verifying
+         --  the chain is what says the rsaEncryption identifier, its explicit
+         --  NULL parameters, and the two-integer BIT STRING are all right --
+         --  none of which resembles the fixed-width keys the other arms use.
+         declare
+            Rng : CryptoLib.Random.Random_Source;
+            N   : Ada.Streams.Stream_Element_Array (1 .. 256);
+            E   : Ada.Streams.Stream_Element_Array (1 .. 3);
+            D   : Ada.Streams.Stream_Element_Array (1 .. 256);
+            P, Q, DP, DQ, QI : Ada.Streams.Stream_Element_Array (1 .. 128);
+            Root, Root_Key, Leaf : Ada.Strings.Unbounded.Unbounded_String;
+         begin
+            CryptoLib.Random.Initialize_Production (Rng);
+            Check (CryptoLib.RSA.Generate_Keypair_With_Primes
+                     (CryptoLib.RSA.RSA_2048, Rng, N, E, D, P, Q, DP, DQ, QI)
+                     = CryptoLib.Errors.Ok,
+                   "an RSA subject key is generated");
+            Check (CryptoLib.Certificates.Create_Local_CA
+                     ("cryptolib-chain-check-rsa-subject", Root, Root_Key,
+                      CryptoLib.Certificates.P256_Key)
+                     = CryptoLib.Certificates.Ok,
+                   "a P-256 CA to certify it with");
+
+            declare
+               SPKI : constant String :=
+                 CryptoLib.Certificates.RSA_Public_Key_Info (N, E);
+               SPKI_Bytes : Ada.Streams.Stream_Element_Array
+                 (1 .. Ada.Streams.Stream_Element_Offset (SPKI'Length));
+            begin
+               Check (SPKI /= "", "the RSA SubjectPublicKeyInfo encodes");
+               for I in SPKI_Bytes'Range loop
+                  SPKI_Bytes (I) :=
+                    Character'Pos (SPKI (SPKI'First + Natural (I - 1)));
+               end loop;
+               Check (CryptoLib.Certificates.Issue_Server_Certificate_For_Key
+                        (Ada.Strings.Unbounded.To_String (Root),
+                         Ada.Strings.Unbounded.To_String (Root_Key),
+                         "rsa-subject.example",
+                         [1 => Ada.Strings.Unbounded.To_Unbounded_String
+                                 ("rsa-subject.example")],
+                         SPKI_Bytes, Leaf)
+                        = CryptoLib.Certificates.Ok,
+                      "an RSA leaf is issued for a supplied key");
+               Check (OpenSSL_Interop.Chain_Verifies
+                        (Ada.Strings.Unbounded.To_String (Root),
+                         Ada.Strings.Unbounded.To_String (Leaf)),
+                      "the RSA leaf verifies against its CA in OpenSSL");
+
+               --  Chaining is not enough, and this is the reason the two
+               --  checks below exist. The chain check verifies the CA's
+               --  signature; the subject's own key is only carried along, so
+               --  a subject key encoded wrongly chains perfectly. Swapping
+               --  the modulus and the exponent in the SubjectPublicKeyInfo
+               --  passed the chain check -- OpenSSL has to be asked what key
+               --  it thinks is in there before anything notices.
+               Check (OpenSSL_Interop.Certificate_Key_Is_RSA
+                        (Ada.Strings.Unbounded.To_String (Leaf)),
+                      "OpenSSL reads the subject key as RSA");
+               Check (OpenSSL_Interop.Certificate_Key_Bits
+                        (Ada.Strings.Unbounded.To_String (Leaf)) = 2048,
+                      "and as 2048 bits, which a swapped modulus and exponent"
+                      & " would not be, got"
+                      & Natural'Image (OpenSSL_Interop.Certificate_Key_Bits
+                          (Ada.Strings.Unbounded.To_String (Leaf))));
+            end;
+
+            --  And the private key file this crate writes for that key is one
+            --  anything else can read: nine values, all required.
+            Check (CryptoLib.Certificates.RSA_Private_Key_PEM
+                     (N, E, D, P, Q, DP, DQ, QI) /= "",
+                   "the RSA private key writes as PKCS#8 PEM");
+            Check (Ada.Strings.Fixed.Index
+                     (CryptoLib.Certificates.RSA_Private_Key_PEM
+                        (N, E, D, P, Q, DP, DQ, QI),
+                      "-----BEGIN PRIVATE KEY-----") = 1,
+                   "and it is armoured as a PKCS#8 private key");
+
+            --  The client profile takes the same supplied key, and the
+            --  certificate it produces must still chain and still carry the
+            --  RSA key -- a profile that swapped the subject key for the CA's
+            --  would chain just as well.
+            declare
+               SPKI : constant String :=
+                 CryptoLib.Certificates.RSA_Public_Key_Info (N, E);
+               SPKI_Bytes : Ada.Streams.Stream_Element_Array
+                 (1 .. Ada.Streams.Stream_Element_Offset (SPKI'Length));
+               Client : Ada.Strings.Unbounded.Unbounded_String;
+            begin
+               for I in SPKI_Bytes'Range loop
+                  SPKI_Bytes (I) :=
+                    Character'Pos (SPKI (SPKI'First + Natural (I - 1)));
+               end loop;
+               Check (CryptoLib.Certificates.Issue_Client_Certificate_For_Key
+                        (Ada.Strings.Unbounded.To_String (Root),
+                         Ada.Strings.Unbounded.To_String (Root_Key),
+                         "rsa-client.example",
+                         [1 => Ada.Strings.Unbounded.To_Unbounded_String
+                                 ("rsa-client.example")],
+                         SPKI_Bytes, Client)
+                        = CryptoLib.Certificates.Ok,
+                      "an RSA client certificate is issued for a supplied key");
+               Check (OpenSSL_Interop.Chain_Verifies
+                        (Ada.Strings.Unbounded.To_String (Root),
+                         Ada.Strings.Unbounded.To_String (Client))
+                      and then OpenSSL_Interop.Certificate_Key_Bits
+                        (Ada.Strings.Unbounded.To_String (Client)) = 2048,
+                      "and it chains carrying the same 2048-bit RSA key");
+            end;
+
+            --  A supplied key with an empty SPKI is refused rather than
+            --  certified as nothing.
+            declare
+               Nothing : Ada.Streams.Stream_Element_Array (1 .. 0);
+               Ignored : Ada.Strings.Unbounded.Unbounded_String;
+            begin
+               Check (CryptoLib.Certificates.Issue_Server_Certificate_For_Key
+                        (Ada.Strings.Unbounded.To_String (Root),
+                         Ada.Strings.Unbounded.To_String (Root_Key),
+                         "rsa-subject.example",
+                         [1 => Ada.Strings.Unbounded.To_Unbounded_String
+                                 ("rsa-subject.example")],
+                         Nothing, Ignored)
+                        /= CryptoLib.Certificates.Ok,
+                      "an empty subject key is refused");
+            end;
+         end;
+
          Check_Chain (CryptoLib.Certificates.Ed25519_Key);
          --  P-256 last of the curves to arrive, and the one most certificates
          --  in the world actually use. OpenSSL verifying the chain is what

@@ -1,3 +1,4 @@
+with Ada.Streams;
 with Ada.Strings.Unbounded;
 
 package CryptoLib.Certificates is
@@ -7,6 +8,12 @@ package CryptoLib.Certificates is
      (Ok,
       Invalid_Input,
       Unsupported_Profile,
+      --  The algorithm is one this crate knows but cannot do on this path:
+      --  an RSA CA handed to a path that generates and sizes keys from the
+      --  algorithm's name. Distinct from Invalid_Input, which says the caller
+      --  passed something wrong, and from Unsupported_Profile, which is about
+      --  the profile.
+      Unsupported_Key_Algorithm,
       Internal_Error);
 
    type Subject_Alternative_Name_List is array (Positive range <>) of Unbounded_String;
@@ -29,7 +36,23 @@ package CryptoLib.Certificates is
    --  a P-256 certificate and match a key to one, and not being able to issue
    --  one was the remaining half of that oddity. It is a smaller curve than
    --  P-384, which is the trade a caller makes for the wider deployment.
-   type Key_Algorithm is (Ed25519_Key, P256_Key, P384_Key, Ed448_Key);
+   --  RSA is last on purpose, so that the algorithms this crate will generate
+   --  a key for form a contiguous range and the compiler can enforce it. RSA
+   --  can sign a certificate and can be certified; it cannot be generated
+   --  here, because an RSA private key is a structure of nine values whose
+   --  width depends on a modulus size this enumeration does not carry. Use
+   --  CryptoLib.RSA.Generate_Keypair_With_Primes and the RSA encoders below,
+   --  then Issue_*_For_Key.
+   type Key_Algorithm is
+     (Ed25519_Key, P256_Key, P384_Key, Ed448_Key, RSA_Key);
+
+   --  The algorithms this crate generates keys for.
+   --
+   --  A subtype rather than a runtime check: a path that generates a key takes
+   --  this, so handing it RSA does not compile rather than failing at run
+   --  time.
+   subtype Generatable_Key_Algorithm is
+     Key_Algorithm range Ed25519_Key .. Ed448_Key;
 
    --  How long an issued certificate is valid, in days, counted from the
    --  moment it is issued.
@@ -71,7 +94,7 @@ package CryptoLib.Certificates is
      (Common_Name     : String;
       Certificate_PEM : out Unbounded_String;
       Private_Key_PEM : out Unbounded_String;
-      Algorithm       : Key_Algorithm := Ed25519_Key;
+      Algorithm       : Generatable_Key_Algorithm := Ed25519_Key;
       Valid_Days      : Positive := Default_CA_Days)
       return Certificate_Status;
 
@@ -143,6 +166,93 @@ package CryptoLib.Certificates is
      (CA_Certificate_PEM : String;
       CA_Private_Key_PEM : String;
       CSR_PEM            : String;
+      Certificate_PEM    : out Unbounded_String;
+      Valid_Days         : Positive := Default_Certificate_Days)
+      return Certificate_Status;
+
+   --  SubjectPublicKeyInfo for an RSA public key, as a certificate carries it.
+   --
+   --  What Issue_*_For_Key wants for an RSA subject. The BIT STRING wraps a
+   --  SEQUENCE of two integers here, where an Edwards or EC key puts its
+   --  point in directly -- which is why an RSA key cannot simply be handed to
+   --  the paths that take a fixed-width public key.
+   --  @param Modulus         the modulus n, unsigned big-endian
+   --  @param Public_Exponent the public exponent e, unsigned big-endian
+   --  @return the DER SubjectPublicKeyInfo, or "" if either value is empty
+   function RSA_Public_Key_Info
+     (Modulus         : Ada.Streams.Stream_Element_Array;
+      Public_Exponent : Ada.Streams.Stream_Element_Array) return String;
+
+   --  A PKCS#8 private key file for an RSA key, in PEM.
+   --
+   --  All nine values RFC 3447 requires, which is what any other
+   --  implementation needs to read the key. Pass what
+   --  CryptoLib.RSA.Generate_Keypair_With_Primes returned.
+   --  @param Modulus          the modulus n
+   --  @param Public_Exponent  the public exponent e
+   --  @param Private_Exponent the private exponent d
+   --  @param Prime_P          the first prime
+   --  @param Prime_Q          the second prime
+   --  @param Exponent_P       d mod (p-1)
+   --  @param Exponent_Q       d mod (q-1)
+   --  @param Coefficient      q inverse mod p
+   --  @return the PEM private key, or "" if any value is empty
+   function RSA_Private_Key_PEM
+     (Modulus          : Ada.Streams.Stream_Element_Array;
+      Public_Exponent  : Ada.Streams.Stream_Element_Array;
+      Private_Exponent : Ada.Streams.Stream_Element_Array;
+      Prime_P          : Ada.Streams.Stream_Element_Array;
+      Prime_Q          : Ada.Streams.Stream_Element_Array;
+      Exponent_P       : Ada.Streams.Stream_Element_Array;
+      Exponent_Q       : Ada.Streams.Stream_Element_Array;
+      Coefficient      : Ada.Streams.Stream_Element_Array) return String;
+
+   --  Issue a certificate for a public key the caller already holds.
+   --
+   --  No key is generated and none is returned: the caller has the private
+   --  half already. This is how an RSA certificate is issued, and it is also
+   --  the way to certify a key this crate cannot generate at all -- one held
+   --  in a token, or made by something else.
+   --
+   --  Subject_SPKI is the subject's SubjectPublicKeyInfo in DER, which is what
+   --  RSA_Public_Key_Info returns for an RSA key and what a CSR carries for
+   --  any other. It is passed through as given: whether it is a key this crate
+   --  could have produced is not asked, and no proof that the caller holds the
+   --  private half is required either. Sign_CSR is the entry point that
+   --  demands that proof; this one certifies what it is told to.
+   --  @param CA_Certificate_PEM the issuing CA certificate in PEM form
+   --  @param CA_Private_Key_PEM the issuing CA private key in PEM form
+   --  @param Common_Name        the subject common name
+   --  @param Names              subject alternative names
+   --  @param Subject_SPKI       the subject's SubjectPublicKeyInfo, DER
+   --  @param Certificate_PEM    receives the issued certificate in PEM form
+   --  @param Valid_Days         how long the certificate is valid, from now
+   --  @return Ok on success, otherwise a deterministic failure status
+   function Issue_Server_Certificate_For_Key
+     (CA_Certificate_PEM : String;
+      CA_Private_Key_PEM : String;
+      Common_Name        : String;
+      Names              : Subject_Alternative_Name_List;
+      Subject_SPKI       : Ada.Streams.Stream_Element_Array;
+      Certificate_PEM    : out Unbounded_String;
+      Valid_Days         : Positive := Default_Certificate_Days)
+      return Certificate_Status;
+
+   --  As Issue_Server_Certificate_For_Key, with the TLS client profile.
+   --  @param CA_Certificate_PEM the issuing CA certificate in PEM form
+   --  @param CA_Private_Key_PEM the issuing CA private key in PEM form
+   --  @param Common_Name        the subject common name
+   --  @param Names              subject alternative names
+   --  @param Subject_SPKI       the subject's SubjectPublicKeyInfo, DER
+   --  @param Certificate_PEM    receives the issued certificate in PEM form
+   --  @param Valid_Days         how long the certificate is valid, from now
+   --  @return Ok on success, otherwise a deterministic failure status
+   function Issue_Client_Certificate_For_Key
+     (CA_Certificate_PEM : String;
+      CA_Private_Key_PEM : String;
+      Common_Name        : String;
+      Names              : Subject_Alternative_Name_List;
+      Subject_SPKI       : Ada.Streams.Stream_Element_Array;
       Certificate_PEM    : out Unbounded_String;
       Valid_Days         : Positive := Default_Certificate_Days)
       return Certificate_Status;
