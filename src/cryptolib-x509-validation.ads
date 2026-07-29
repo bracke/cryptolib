@@ -88,6 +88,13 @@ package CryptoLib.X509.Validation is
       --  and one that has can demand an explicit policy of the whole chain.
       Policy_Options            : CryptoLib.X509.Policies.Policy_Options :=
         CryptoLib.X509.Policies.Default_Options;
+
+      --  Which policies the caller will accept. Empty accepts any, and
+      --  naming some only refuses a path when a certificate in it required
+      --  an explicit policy -- see X509.Policies.Accepted_Policies, which
+      --  says why that is less than it sounds.
+      Accepted_Policies         : CryptoLib.X509.Policies.Accepted_Policies :=
+        CryptoLib.X509.Policies.Accept_Any;
    end record;
 
    Default_Policy : constant Validation_Policy :=
@@ -96,7 +103,9 @@ package CryptoLib.X509.Validation is
       Require_Key_Cert_Sign     => True,
       Reject_Unknown_Critical   => True,
       Policy_Options            =>
-        CryptoLib.X509.Policies.Default_Options);
+        CryptoLib.X509.Policies.Default_Options,
+      Accepted_Policies         =>
+        CryptoLib.X509.Policies.Accept_Any);
 
    --  Why a path failed, and where.
    --

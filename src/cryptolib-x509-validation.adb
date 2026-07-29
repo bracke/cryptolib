@@ -252,7 +252,9 @@ package body CryptoLib.X509.Validation is
          Below  : constant Natural := Path_Length - 1;
          Engine : PP.Engine (Path_Length => Natural'Max (Below, 1));
          Ok     : Boolean;
-         None_Wanted : constant PP.Policy_Array (1 .. 0) := [others => <>];
+         Wanted : constant PP.Policy_Array :=
+           Policy.Accepted_Policies.Values
+             (1 .. Policy.Accepted_Policies.Count);
       begin
          if Below = 0 then
             --  A path of the anchor alone establishes no policies and needs
@@ -286,7 +288,7 @@ package body CryptoLib.X509.Validation is
 
          declare
             Outcome : constant PP.Policy_Outcome :=
-              PP.Finish (Engine, None_Wanted);
+              PP.Finish (Engine, Wanted);
          begin
             if not Outcome.Acceptable then
                return Fail (Policy_Not_Established, 1);

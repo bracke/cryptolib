@@ -3442,6 +3442,46 @@ procedure Tests is
       Check (not Verdict (Map, With_Policy).Valid,
              "and the unmapped one no longer does, because mapping replaced "
              & "what the issuer expects rather than adding to it");
+
+      --  The caller's own policy set: RFC 5280's user-initial-policy-set.
+      declare
+         package PP renames CryptoLib.X509.Policies;
+
+         function Only (Encoded : String) return PP.Accepted_Policies is
+            Result : PP.Accepted_Policies := PP.Accept_Any;
+         begin
+            Result.Count := 1;
+            Result.Values (1) := PP.To_Policy (From_Hex (Encoded));
+            return Result;
+         end Only;
+
+         function Asking (Encoded : String; Leaf : Which_Leaf)
+           return XV.Validation_Result
+         is (XV.Validate_Path
+               (Chain'(Inter => Req, Leaf => Leaf), At_Time,
+                (Maximum_Path_Length       => 8,
+                 Require_Basic_Constraints => True,
+                 Require_Key_Cert_Sign     => True,
+                 Reject_Unknown_Critical   => True,
+                 Policy_Options            => PP.Default_Options,
+                 Accepted_Policies         => Only (Encoded))));
+
+         Wanted : constant String := "2b06010401868d1f01";
+         Other  : constant String := "2b0601040184df5109";
+      begin
+         Check (Asking (Wanted, With_Policy).Valid,
+                "a caller asking for the policy the chain establishes is "
+                & "satisfied: "
+                & XV.Failure_Image (Asking (Wanted, With_Policy).Failure));
+
+         --  The chain is exactly as valid as before; what changed is what
+         --  the caller will accept from it.
+         Check (not Asking (Other, With_Policy).Valid
+                and then Asking (Other, With_Policy).Failure
+                         = XV.Policy_Not_Established,
+                "and one asking for a policy it does not is refused, got "
+                & XV.Failure_Image (Asking (Other, With_Policy).Failure));
+      end;
    end Check_Policy_Processing;
 
    --  What happens when there is no randomness.
@@ -4065,7 +4105,9 @@ procedure Tests is
                Require_Key_Cert_Sign     => True,
                Reject_Unknown_Critical   => True,
                Policy_Options            =>
-                 CryptoLib.X509.Policies.Default_Options));
+                 CryptoLib.X509.Policies.Default_Options,
+               Accepted_Policies         =>
+                 CryptoLib.X509.Policies.Accept_Any));
          Check (not Result.Valid and then Result.Failure = XV.Path_Too_Long,
                 "a path longer than policy allows is refused, got "
                 & XV.Failure_Image (Result.Failure));

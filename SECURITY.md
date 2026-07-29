@@ -199,8 +199,14 @@ every status reading `Ok` while every key it produces is predictable.
   the leaf asserts: a certificate may name a policy no issuer above it
   granted, and that certificate is refused when an explicit policy is
   required. The three initial inputs are in `Validation_Policy.Policy_Options`
-  and all default off, so a caller that has not thought about policies sees no
-  change in behaviour. The tree is bounded; running out of room makes the
+  and all default off, and the user-initial-policy-set is
+  `Validation_Policy.Accepted_Policies`, empty by default, so a caller that has
+  not thought about policies sees no change in behaviour. Naming policies there
+  only decides the outcome when some certificate required an explicit policy:
+  otherwise §6.1.5 succeeds on the `explicit_policy` counter alone and the set
+  is reported rather than enforced. That is the RFC's behaviour and OpenSSL's,
+  and it surprises people -- asking for a policy does not by itself make a
+  chain lacking it fail. The tree is bounded; running out of room makes the
   outcome unacceptable rather than truncating it, because a partial tree is
   missing exactly the nodes that pruning would have removed and can only be
   too permissive. **Revocation (CRL/OCSP) is not

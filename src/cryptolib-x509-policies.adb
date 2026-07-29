@@ -42,6 +42,9 @@ package body CryptoLib.X509.Policies is
       return Result;
    end To_Policy;
 
+   function Accept_Any return Accepted_Policies
+   is (Count => 0, Values => [others => <>]);
+
    function Is_Present (Item : Policy_Value) return Boolean
    is (Item.Length > 0);
 

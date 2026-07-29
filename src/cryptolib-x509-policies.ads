@@ -165,6 +165,24 @@ package CryptoLib.X509.Policies is
 
    Default_Options : constant Policy_Options := (others => False);
 
+   --  The policies a caller will accept: RFC 5280's user-initial-policy-set.
+   --
+   --  An empty set is the RFC's any-policy, which accepts whatever the path
+   --  establishes. Naming policies here only decides the outcome when some
+   --  certificate required an explicit policy -- otherwise section 6.1.5
+   --  succeeds on the explicit_policy counter alone and the set is reported
+   --  rather than enforced. That is the RFC's behaviour and OpenSSL's, and it
+   --  surprises people: asking for a policy does not by itself make a chain
+   --  that lacks it fail.
+   type Accepted_Policies is record
+      Count  : Natural := 0;
+      Values : Policy_Array (1 .. Maximum_Policies);
+   end record;
+
+   --  Accept whatever the path establishes.
+   --  @return an empty set, the RFC's any-policy
+   function Accept_Any return Accepted_Policies;
+
    --  What processing concluded.
    --
    --  Acceptable is the section 6.1.5 verdict. Values holds the policies the
