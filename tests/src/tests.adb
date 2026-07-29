@@ -7271,6 +7271,79 @@ procedure Tests is
              "as is one bit of what was signed");
    end Check_OpenSSH_Signature;
 
+   --  The ECDSA entry points that pick their own digest.
+   --
+   --  Verify_Signature takes the digest from the caller and is well covered.
+   --  The Nistp*_Raw wrappers do not: they pair the curve with a digest
+   --  themselves, which is what SSH means by ecdsa-sha2-nistp256 and what
+   --  ssh_lib calls. P-384's wrapper was exercised; the other two were the
+   --  only users of their branch of that pairing, so a curve wired to the
+   --  wrong hash would have verified nothing anybody here asked about while
+   --  failing against every signature made elsewhere.
+   --
+   --  The signatures below were made by pyca over the matching digest, so
+   --  they only verify if the pairing agrees with the rest of the world.
+   procedure Check_ECDSA_Raw_Entry_Points is
+      P256_Point : constant String :=
+        "04114f0722565bc55edc6866d91d24d465e4b14325f7eb85707a153773b9ebe2f1f338c2f3ae68502eb2" &
+        "9d1d197bd3875efdb5917d3dd4a1702bf3774140e3edc7";
+      P256_R : constant String :=
+        "06e75b9a986021357108920b8320a199ba8574b237c439c0b3e53a5bb46de3c3";
+      P256_S : constant String :=
+        "50174c2670a3400e4df61149f809b73b6ebb08c96309c3aef9aba153bfd606c5";
+      P521_Point : constant String :=
+        "0401ce4e8335ea49fd856fdff7ec6698aff6699616d2ac27e12b2baa96fa4356ef9beb083c2ad4e9be98" &
+        "b8dd7234d434d528263fb684b3ed36a24b1b29292dfdfeb1e200bbd7d73f7572a32b74bcbd800b38f5e5" &
+        "50369a5d35e4591367b004bd116f54248243e4ca9dadcd1c3c54213966d4b110693d5b5257c4e5f373fd" &
+        "11a0a5eb351474";
+      P521_R : constant String :=
+        "01eff7360bfd44c7b6ca30eb4e8ae8b17e799e4f9f0e2b3cb27b8bfa9d25f8285e792ad642339b800f54" &
+        "267b47f2d46ce2cd43c8c880464d5f6bb2ae03ecb129bbba";
+      P521_S : constant String :=
+        "018cd9ed5c5d7bae1396d480d7ae3a6b9ebc4d0481839b85917ad2ce85389c4d7e259da32e1a297c771e" &
+        "e4669272996ecce03018e22d7e19edd3f9e87403b4259054";
+      EC_Message : constant String :=
+        "72617720656364736120656e74727920706f696e7420636865636b";
+
+      function From_Hex
+        (Text : String) return Ada.Streams.Stream_Element_Array
+      is
+         Result : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (Text'Length / 2));
+         function Nibble (C : Character) return Natural
+         is (case C is
+                when '0' .. '9' => Character'Pos (C) - Character'Pos ('0'),
+                when others     => Character'Pos (C) - Character'Pos ('a') + 10);
+      begin
+         for I in Result'Range loop
+            Result (I) :=
+              Ada.Streams.Stream_Element
+                (Nibble (Text (Text'First + 2 * Natural (I - 1))) * 16
+                 + Nibble (Text (Text'First + 2 * Natural (I - 1) + 1)));
+         end loop;
+         return Result;
+      end From_Hex;
+   begin
+      Check (CryptoLib.ECDSA.Verify_Nistp256_Raw
+               (From_Hex (P256_Point), From_Hex (EC_Message),
+                From_Hex (P256_R), From_Hex (P256_S))
+             = CryptoLib.Errors.Ok,
+             "P-256 through its own entry point pairs the curve with SHA-256");
+
+      Check (CryptoLib.ECDSA.Verify_Nistp521_Raw
+               (From_Hex (P521_Point), From_Hex (EC_Message),
+                From_Hex (P521_R), From_Hex (P521_S))
+             = CryptoLib.Errors.Ok,
+             "and P-521 with SHA-512");
+
+      --  A signature is for one message, whichever door it comes through.
+      Check (CryptoLib.ECDSA.Verify_Nistp256_Raw
+               (From_Hex (P256_Point), From_Hex (P521_Point),
+                From_Hex (P256_R), From_Hex (P256_S))
+             /= CryptoLib.Errors.Ok,
+             "and neither verifies over something else");
+   end Check_ECDSA_Raw_Entry_Points;
+
    procedure Check_X509_Extensions is
       use type CryptoLib.ASN1.Errors.Decode_Status;
       use type CryptoLib.PEM.Decode_Status;
@@ -12269,6 +12342,7 @@ begin
    Check_Bcrypt_PBKDF;
    Check_OpenSSH_Key_Unlock;
    Check_OpenSSH_Signature;
+   Check_ECDSA_Raw_Entry_Points;
    Check_Constant_Time_Equal;
    Check_DH_Peer_Validation;
    Check_OpenSSH_Fingerprints;
