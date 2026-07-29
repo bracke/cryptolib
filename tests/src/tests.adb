@@ -7914,6 +7914,61 @@ procedure Tests is
              & "unnoticed");
    end Check_CBC_Paths_Agree;
 
+   --  The guard on a negotiated UMAC name.
+   --
+   --  ssh_lib asks Is_OpenSSH_UMAC_Name whether a selected MAC is one of
+   --  these at all, Is_Implemented whether it can be performed, and
+   --  Fail_Closed_Status for the answer to give when it cannot. None of the
+   --  three was named by a test, and between them they decide whether a
+   --  connection proceeds with a MAC this crate can actually compute.
+   --
+   --  The four names are also written down in ssh_lib, in Mac_Kind_For. Two
+   --  lists that must not drift, so the same four are asserted here.
+   procedure Check_UMAC_Negotiation_Guard is
+      package U renames CryptoLib.UMAC;
+   begin
+      --  Exactly the four OpenSSH spellings, and the etm ones are among
+      --  them: ssh_lib carries the same four and would offer a name this
+      --  refused, or refuse one it offered, if either list moved.
+      Check (U.Is_OpenSSH_UMAC_Name ("umac-64@openssh.com")
+             and then U.Is_OpenSSH_UMAC_Name ("umac-128@openssh.com")
+             and then U.Is_OpenSSH_UMAC_Name ("umac-64-etm@openssh.com")
+             and then U.Is_OpenSSH_UMAC_Name ("umac-128-etm@openssh.com"),
+             "the four OpenSSH UMAC names are recognised");
+      Check (not U.Is_OpenSSH_UMAC_Name ("umac-64")
+             and then not U.Is_OpenSSH_UMAC_Name ("hmac-sha2-256")
+             and then not U.Is_OpenSSH_UMAC_Name (""),
+             "and a name that is not one of them is not, including umac-64 "
+             & "without the suffix that makes it OpenSSH's");
+
+      --  Recognised and performable are separate questions, and the guard
+      --  distinguishes three answers rather than two.
+      Check (U.Is_Implemented ("umac-128-etm@openssh.com"),
+             "a recognised name is one this crate can perform");
+      Check (U.Fail_Closed_Status ("umac-128-etm@openssh.com")
+             = CryptoLib.Errors.Ok,
+             "so the guard admits it");
+      Check (U.Fail_Closed_Status ("hmac-sha2-256")
+             = CryptoLib.Errors.Handshake_Failed,
+             "a MAC that is not UMAC at all is refused outright rather than "
+             & "reported unsupported, which is a different thing");
+      Check (U.Fail_Closed_Status ("umac-192@openssh.com")
+             = CryptoLib.Errors.Handshake_Failed,
+             "and so is a UMAC-shaped name this crate never agreed to");
+
+      --  Tag width follows the name, and the etm spelling does not change
+      --  it: a 128 name that produced a 64-bit tag would authenticate with
+      --  half the bits the peer expects.
+      Check (U.Tag_Length ("umac-64@openssh.com") = 8
+             and then U.Tag_Length ("umac-64-etm@openssh.com") = 8,
+             "a umac-64 name means an eight-byte tag either way");
+      Check (U.Tag_Length ("umac-128@openssh.com") = 16
+             and then U.Tag_Length ("umac-128-etm@openssh.com") = 16,
+             "and a umac-128 name a sixteen-byte one");
+      Check (U.Tag_Length ("hmac-sha2-256") = 0,
+             "a name this does not know has no tag length to give");
+   end Check_UMAC_Negotiation_Guard;
+
    procedure Check_X509_Extensions is
       use type CryptoLib.ASN1.Errors.Decode_Status;
       use type CryptoLib.PEM.Decode_Status;
@@ -12924,6 +12979,7 @@ begin
    Check_Chacha_Length_Agreement;
    Check_Hybrid_PQ_Names;
    Check_CBC_Paths_Agree;
+   Check_UMAC_Negotiation_Guard;
    Check_Cipher_Names;
    Check_X25519_Shared_Secret;
    Check_Chain_Constraint_Bypasses;
