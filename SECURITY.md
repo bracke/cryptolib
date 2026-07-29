@@ -87,7 +87,13 @@ branches, memory indexing, or variable-latency arithmetic:
   `if` adds a jump and fails it; this was verified by making that edit. A data-dependent memory access leaves no branch behind and would
   pass. Constant-timeness here is still a source-level discipline, and the
   primitives' scalar ladders and field arithmetic are **not** covered by the
-  budgets -- only the four routines whose entire job is to be branchless.
+  budgets. Sixteen routines are covered: the mask helpers and `CT_Select` in
+  `EC_Arith` and `Modexp`, `Constant_Time.Equal`, the five bit-sliced AES
+  S-box routines that stand in for the lookup table (`GF_Mul_BS`,
+  `GF_Inv_BS`, `Affine_BS`, `Inv_Affine_BS`, `Sub_Word`), the GHASH multiply
+  that runs on the GCM subkey, and sntrup761's Barrett freezes and swap flag.
+  Eleven of them carry a budget of zero. The scalar ladders themselves, the
+  wider field arithmetic, and ML-KEM are **not** covered.
 - AES is **bit-sliced, not AES-NI** — it eliminates the cache-timing channel but
   is slower than hardware AES (the deliberate correctness/side-channel tradeoff).
 - `Constant_Time_Proof` is a **declarative manifest, not an automated proof**.

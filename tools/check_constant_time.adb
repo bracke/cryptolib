@@ -274,6 +274,42 @@ begin
         ("cryptolib__modexp__ct_select", 16, "loop bounds and range checks");
       Require_Within
         ("cryptolib__ec_arith__equal_mask", 0, "branchless outright");
+      Require_Within
+        ("cryptolib__ec_arith__is_zero_mask", 0, "branchless outright");
+      Require_Within
+        ("cryptolib__ec_arith__geq_mask", 0, "branchless outright");
+      Require_Within
+        ("cryptolib__ec_arith__all_ones", 0, "branchless outright");
+
+      --  The bit-sliced AES S-box. These are what stands in for the lookup
+      --  table the binary is checked not to contain: affine(x^254) over
+      --  GF(2^8) with branchless field arithmetic. A branch appearing in any
+      --  of them is the substitution becoming data-dependent again.
+      Require_Within
+        ("cryptolib__ciphers__gf_mul_bs", 0, "branchless outright");
+      Require_Within
+        ("cryptolib__ciphers__gf_inv_bs", 0, "branchless outright");
+      Require_Within
+        ("cryptolib__ciphers__affine_bs", 0, "branchless outright");
+      Require_Within
+        ("cryptolib__ciphers__inv_affine_bs", 0, "branchless outright");
+      Require_Within
+        ("cryptolib__ciphers__sub_word", 0, "branchless outright");
+
+      --  GHASH runs on the GCM authentication subkey, so its multiply is on
+      --  secret input; the one jump is the loop counter over 128 bits.
+      Require_Within
+        ("cryptolib__ciphers__ghash_multiply", 1, "one loop counter");
+
+      --  sntrup761 replaced mod and hardware division with Barrett
+      --  multiply-shift; what is left in each is a GNAT range check that
+      --  never fires for an in-range value.
+      Require_Within
+        ("cryptolib__sntrup761__fq_freeze", 1, "one range check");
+      Require_Within
+        ("cryptolib__sntrup761__f3_freeze", 1, "one range check");
+      Require_Within
+        ("cryptolib__sntrup761__swap_flag", 1, "one range check");
    end if;
 
    if Failures = 0 then
