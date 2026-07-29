@@ -458,7 +458,8 @@ package body CryptoLib.X509.Name_Constraints is
       Inside_DN  : out Boolean;
       Inside_URI : out Boolean;
       Inside_Mail : out Boolean;
-      Usable     : out Boolean)
+      Usable     : out Boolean;
+      Unapplied  : out Boolean)
    is
       Limits : constant Decode_Limits := Default_Limits;
       Cursor : Offset := Region.First;
@@ -478,6 +479,7 @@ package body CryptoLib.X509.Name_Constraints is
       Inside_URI := False;
       Inside_Mail := False;
       Usable := True;
+      Unapplied := False;
 
       while not DER_Reader.At_End (Cursor, Region.Last) loop
          declare
@@ -638,11 +640,16 @@ package body CryptoLib.X509.Name_Constraints is
 
                when others =>
                   --  A form this cannot apply -- an EDI party name, an
-                  --  x400Address, a registered identifier. Saying so beats
-                  --  ignoring it: an unapplied constraint is not a
-                  --  constraint.
-                  Usable := False;
-                  return;
+                  --  x400Address, a registered identifier. Note it and carry
+                  --  on rather than condemning the extension outright: a
+                  --  subtree restricts only names of its own type, so one
+                  --  naming a form the certificate does not use restricts
+                  --  nothing, and refusing on sight turns away chains that
+                  --  are inside every constraint that could reach them.
+                  --  Whether it could reach this certificate is the caller's
+                  --  question, since only the caller knows what names the
+                  --  certificate carries.
+                  Unapplied := True;
             end case;
          end;
       end loop;
@@ -665,6 +672,11 @@ package body CryptoLib.X509.Name_Constraints is
       Has_Mail : Boolean := False;
       Has_DN  : constant Boolean :=
         CryptoLib.X509.Certificates.Subject_Bytes (Item)'Length > 0;
+
+      --  A name of a form this does not model -- otherName, an EDI party,
+      --  an x400Address, a registered identifier. Only such a name can be
+      --  reached by a subtree this cannot apply.
+      Has_Other : Boolean := False;
    begin
       if Constraints_Value'Length = 0 then
          return Malformed;
@@ -680,6 +692,8 @@ package body CryptoLib.X509.Name_Constraints is
          elsif XE.Subject_Alternative_Name_Kind (Item, N) = XE.Email_Address
          then
             Has_Mail := True;
+         elsif XE.Subject_Alternative_Name_Kind (Item, N) = XE.Other_Name then
+            Has_Other := True;
          end if;
       end loop;
 
@@ -719,6 +733,7 @@ package body CryptoLib.X509.Name_Constraints is
             Inside_URI : Boolean;
             Inside_Mail : Boolean;
             Usable     : Boolean;
+            Unapplied  : Boolean;
          begin
             DER_Reader.Read
               (Constraints_Value, Cursor, Outer.Last, 1, Limits, Tag, Status);
@@ -731,8 +746,17 @@ package body CryptoLib.X509.Name_Constraints is
             Scan_Subtrees
               (Constraints_Value, Tag, Item, Any_DNS, Any_IP, Any_DN, Any_URI,
                Any_Mail, Inside_DNS, Inside_IP, Inside_DN, Inside_URI,
-               Inside_Mail, Usable);
+               Inside_Mail, Usable, Unapplied);
             if not Usable then
+               return Unsupported_Constraint;
+            end if;
+
+            --  A subtree naming a form this cannot apply matters only if the
+            --  certificate carries a name of such a form. If it does, the
+            --  constraint might have caught it and cannot be checked, so the
+            --  chain fails as before -- a constraint half-applied is not the
+            --  constraint the issuer imposed.
+            if Unapplied and then Has_Other then
                return Unsupported_Constraint;
             end if;
 

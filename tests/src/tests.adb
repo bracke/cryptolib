@@ -5284,6 +5284,158 @@ procedure Tests is
              "and an empty one is not a number at all");
    end Check_Serial_Comparison;
 
+   --  A constraint that could never have reached this certificate.
+   --
+   --  A subtree naming a form this cannot apply -- an EDI party, an
+   --  x400Address, a registered identifier -- used to fail the chain on
+   --  sight. But a subtree restricts only names of its own type, which this
+   --  file says a few lines further down and then did not act on: a
+   --  registered-identifier subtree cannot reach a DNS name, so a
+   --  certificate carrying nothing but DNS names is inside every constraint
+   --  that could apply to it. Refusing it turned away chains OpenSSL admits
+   --  and RFC 5280 does not constrain.
+   --
+   --  What decides it is whether the certificate carries a name of a form
+   --  this cannot model. If it does, the constraint might have caught it
+   --  and cannot be checked, and the chain fails as before.
+   procedure Check_Unapplicable_Name_Constraint is
+      package X509C renames CryptoLib.X509.Certificates;
+      package XV renames CryptoLib.X509.Validation;
+      use type XV.Validation_Failure;
+
+      RID_CA_DER : constant String :=
+        "3082018d30820132a00302010202144ad6c368bc3a5310b702d3c8a525283f6d059134300a06082a8648ce3d04" &
+        "03023011310f300d06035504030c06524944204341301e170d3236303732393039333434305a170d3334313031" &
+        "353039333434305a3011310f300d06035504030c065249442043413059301306072a8648ce3d020106082a8648" &
+        "ce3d03010703420004d4d11e1f569d040dad1737de150c59b319d19959ecfe91884a236539153a332fea1a708e" &
+        "04293571b861113274e141a3bdaa088bf36615221b4c4178f45afa36a3683066300f0603551d130101ff040530" &
+        "030101ff300e0603551d0f0101ff04040302020430240603551d1e0101ff041a3018a016300d820b6578616d70" &
+        "6c652e636f6d300588032a0304301d0603551d0e041604144c78c3d8a1d5ed92202b440ab68795c367ba2c3130" &
+        "0a06082a8648ce3d0403020349003046022100d14fc517f5e944e5592b5b77f810baeb5c5d6c2e908ff57224c1" &
+        "0a570d960ef8022100d08a46d0afb2060de55b3cffa96302c0dd272b21464c9a3a78194f470c7ce258";
+
+      RID_Plain_Leaf_DER : constant String :=
+        "3082019b30820141a00302010202140bd161fb93e5d7aee9448b72a39415ded759cf28300a06082a8648ce3d04" &
+        "03023011310f300d06035504030c06524944204341301e170d3236303732393039333435315a170d3332303131" &
+        "393039333435315a301b3119301706035504030c10686f73742e6578616d706c652e636f6d3059301306072a86" &
+        "48ce3d020106082a8648ce3d03010703420004955478fa987d715bca1af1fff19facffde33e741ab3fbf4badc7" &
+        "e13e5441d8d082dd475cb1d18be0af76ec111c9745e45d1341612e41ff93709f4903aea8bd52a36d306b300c06" &
+        "03551d130101ff04023000301b0603551d11041430128210686f73742e6578616d706c652e636f6d301d060355" &
+        "1d0e041604144fd1c61613a7c100678942333f5a505a9c261928301f0603551d230418301680144c78c3d8a1d5" &
+        "ed92202b440ab68795c367ba2c31300a06082a8648ce3d0403020348003045022100dcbbfeb033fde51e705d0a" &
+        "79422c9331e630332f70ec67607445c4e1388e3e880220287c1ddb2d486c20ba96a44c307911ca9d15f99ffb04" &
+        "3d19fb7e2723335c662e";
+
+      RID_Named_Leaf_DER : constant String :=
+        "308201a030820146a00302010202140bd161fb93e5d7aee9448b72a39415ded759cf2a300a06082a8648ce3d04" &
+        "03023011310f300d06035504030c06524944204341301e170d3236303732393039333634355a170d3332303131" &
+        "393039333634355a301b3119301706035504030c10686f73742e6578616d706c652e636f6d3059301306072a86" &
+        "48ce3d020106082a8648ce3d03010703420004955478fa987d715bca1af1fff19facffde33e741ab3fbf4badc7" &
+        "e13e5441d8d082dd475cb1d18be0af76ec111c9745e45d1341612e41ff93709f4903aea8bd52a3723070300c06" &
+        "03551d130101ff0402300030200603551d11041930178210686f73742e6578616d706c652e636f6d88032a0304" &
+        "301d0603551d0e041604144fd1c61613a7c100678942333f5a505a9c261928301f0603551d230418301680144c" &
+        "78c3d8a1d5ed92202b440ab68795c367ba2c31300a06082a8648ce3d0403020348003045022100c1e24fe2ba46" &
+        "9652f4abe5a01c34f342fba967eefc61e7f31c5741851114dc9502205caef3c210d2329f15f2007314190a25e9" &
+        "2ba61ec0f31eebcee7d5f1fb9b50c9";
+
+      RID_Outside_Leaf_DER : constant String :=
+        "308201a230820147a00302010202140bd161fb93e5d7aee9448b72a39415ded759cf29300a06082a8648ce3d04" &
+        "03023011310f300d06035504030c06524944204341301e170d3236303732393039333632375a170d3332303131" &
+        "393039333632375a301e311c301a06035504030c13686f73742e656c736577686572652e746573743059301306" &
+        "072a8648ce3d020106082a8648ce3d03010703420004955478fa987d715bca1af1fff19facffde33e741ab3fbf" &
+        "4badc7e13e5441d8d082dd475cb1d18be0af76ec111c9745e45d1341612e41ff93709f4903aea8bd52a370306e" &
+        "300c0603551d130101ff04023000301e0603551d11041730158213686f73742e656c736577686572652e746573" &
+        "74301d0603551d0e041604144fd1c61613a7c100678942333f5a505a9c261928301f0603551d23041830168014" &
+        "4c78c3d8a1d5ed92202b440ab68795c367ba2c31300a06082a8648ce3d0403020349003046022100b5401c2edd" &
+        "57aab2e8f4f52948e310b9355a95e98f7b2489d715d92ccbac4fca022100ba190ac8910c331027ff3d0264350a" &
+        "cb7c7ebd6b00df9c28b1a256662dd63a2e";
+
+      Status : CryptoLib.ASN1.Errors.Decode_Status;
+
+      function From_Hex
+        (Text : String) return Ada.Streams.Stream_Element_Array
+      is
+         Result : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (Text'Length / 2));
+         function Nibble (C : Character) return Natural
+         is (case C is
+                when '0' .. '9' => Character'Pos (C) - Character'Pos ('0'),
+                when others     => Character'Pos (C) - Character'Pos ('a') + 10);
+      begin
+         for I in Result'Range loop
+            Result (I) :=
+              Ada.Streams.Stream_Element
+                (Nibble (Text (Text'First + 2 * Natural (I - 1))) * 16
+                 + Nibble (Text (Text'First + 2 * Natural (I - 1) + 1)));
+         end loop;
+         return Result;
+      end From_Hex;
+
+      function Decoded (Hex : String) return X509C.Certificate
+      is (X509C.Decode_DER
+            (From_Hex (Hex), CryptoLib.ASN1.Default_Limits, Status));
+
+      --  One CA throughout: permitted DNS:example.com and a registered
+      --  identifier this cannot apply. Only the leaf changes.
+      type Under_CA (Leaf : Natural) is limited new XV.Path_Source
+        with null record;
+
+      overriding function Length (Source : Under_CA) return Positive is (2);
+
+      overriding function Certificate_At
+        (Source : Under_CA; Index : Positive) return X509C.Certificate
+      is (if Index /= 1 then Decoded (RID_CA_DER)
+          elsif Source.Leaf = 1 then Decoded (RID_Plain_Leaf_DER)
+          elsif Source.Leaf = 2 then Decoded (RID_Named_Leaf_DER)
+          else Decoded (RID_Outside_Leaf_DER));
+
+      overriding function Is_Trust_Anchor
+        (Source : Under_CA; Item : X509C.Certificate) return Boolean
+      is (X509C.Subject_Bytes (Item) = X509C.Subject_Bytes (Decoded (RID_CA_DER)));
+
+      At_Time : constant CryptoLib.X509.Certificate_Time :=
+        (Year => 2026, Month => 9, Day => 1,
+         Hour => 12, Minute => 0, Second => 0);
+   begin
+      --  Only DNS names, all inside the permitted subtree. The registered
+      --  identifier subtree has nothing to say about it.
+      declare
+         Verdict : constant XV.Validation_Result :=
+           XV.Validate_Path (Under_CA'(Leaf => 1), At_Time);
+      begin
+         Check (Verdict.Valid,
+                "a subtree that cannot reach any name this certificate "
+                & "carries does not refuse it, got "
+                & XV.Failure_Image (Verdict.Failure));
+      end;
+
+      --  Now the certificate carries a registered identifier of its own, so
+      --  the constraint is one that might have caught it.
+      declare
+         Verdict : constant XV.Validation_Result :=
+           XV.Validate_Path (Under_CA'(Leaf => 2), At_Time);
+      begin
+         Check (not Verdict.Valid,
+                "but once the certificate carries a name of that form the "
+                & "unapplied constraint fails the chain");
+         Check (Verdict.Failure = XV.Unsupported_Name_Constraint,
+                "saying it could not be applied rather than that a name was "
+                & "outside it, got " & XV.Failure_Image (Verdict.Failure));
+      end;
+
+      --  And the constraint this can apply still applies.
+      declare
+         Verdict : constant XV.Validation_Result :=
+           XV.Validate_Path (Under_CA'(Leaf => 3), At_Time);
+      begin
+         Check (not Verdict.Valid,
+                "a name outside the permitted subtree is still caught");
+         Check (Verdict.Failure = XV.Name_Constraint_Violation,
+                "and named as the violation it is, got "
+                & XV.Failure_Image (Verdict.Failure));
+      end;
+   end Check_Unapplicable_Name_Constraint;
+
    procedure Check_X509_Extensions is
       use type CryptoLib.ASN1.Errors.Decode_Status;
       use type CryptoLib.PEM.Decode_Status;
@@ -10131,15 +10283,22 @@ procedure Tests is
              & XV.Failure_Image (Result.Failure));
 
       --  A constraint on a form still not applied here -- a registered
-      --  identifier. Refused rather than checked against only the part that
-      --  could be applied: a constraint half applied is not the constraint
-      --  the issuer imposed.
+      --  identifier, and nothing else permitted. It used to refuse the chain
+      --  on sight, which was stricter than the constraint. A subtree
+      --  restricts only names of its own type, so a permitted set naming
+      --  none but registered identifiers says nothing at all about the DNS
+      --  name this certificate carries, and RFC 5280 4.2.1.10 asks for the
+      --  constraint to be processed or the certificate rejected only when an
+      --  instance of that name form actually appears. None does here, and
+      --  OpenSSL admits the same chain.
+      --
+      --  The certificate that does carry such a name is still refused --
+      --  see Check_Unapplicable_Name_Constraint, which holds the two apart.
       Result :=
         XV.Validate_Path (Constrained_Path'(Kind => Email), Now_Time);
-      Check (not Result.Valid
-             and then Result.Failure = XV.Unsupported_Name_Constraint,
-             "a constraint on a form still not applied is refused, got "
-             & XV.Failure_Image (Result.Failure));
+      Check (Result.Valid,
+             "a constraint that reaches no name this certificate carries "
+             & "does not refuse it, got " & XV.Failure_Image (Result.Failure));
 
       --  The subtree rule is not a suffix match. "example.com" covers
       --  "a.example.com" and must not cover "notexample.com", which is the
@@ -10195,6 +10354,7 @@ begin
    Check_Name_Constraint_Depth_Fields;
    Check_Weak_RSA_Key;
    Check_Serial_Comparison;
+   Check_Unapplicable_Name_Constraint;
    Check_Random_Fails_Closed;
    Check_Off_Curve_Key;
    Check_Ed25519_Encoding;

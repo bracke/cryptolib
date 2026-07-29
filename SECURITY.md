@@ -194,8 +194,14 @@ every status reading `Ok` while every key it produces is predictable.
   if a caller enables the fallback, so the constraint and the identity check
   cover the same ground rather than leaving a gap between them; a constraint naming a form this crate
   cannot apply (an EDI party name, an x400 address, a registered identifier)
-  makes the chain fail
-  rather than be checked against only the part that could be applied. The same
+  makes the chain fail rather than be checked against only the part that
+  could be applied -- but only when the certificate carries a name of such a
+  form, since a subtree restricts only names of its own type and one naming
+  a form the certificate does not use could never have reached it. RFC 5280
+  §4.2.1.10 asks for the constraint to be processed or the certificate
+  rejected when an instance of that name form appears; when none does, there
+  is nothing to process and nothing to reject, and OpenSSL admits such a
+  chain too. The same
   answer covers a subtree carrying the `minimum` or `maximum` depth fields:
   they are a restriction on the subtree this does not apply, and on a
   permitted subtree skipping one would admit names the CA did not. RFC 5280
