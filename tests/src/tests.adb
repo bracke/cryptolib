@@ -7792,6 +7792,76 @@ procedure Tests is
 
          Check (XI.Match_DNS_Name (Wild, "a.other.com") = XI.No_Match,
                 "a wildcard does not match a different domain");
+      end;
+
+      --  A star that is only part of a label is not a wildcard. Reading it
+      --  as one is how "www*.example.com" comes to speak for every host
+      --  whose name starts with www, which is not what the issuer wrote.
+      declare
+         Partial : constant X509C.Certificate :=
+           Leaf_With ([1 => To_Unbounded_String ("www*.example.com")]);
+      begin
+         Check (XI.Match_DNS_Name (Partial, "www1.example.com") = XI.No_Match,
+                "a star sharing a label with other characters matches "
+                & "nothing under it");
+         Check (XI.Match_DNS_Name (Partial, "www.example.com") = XI.No_Match,
+                "not even the name it looks like a prefix of");
+      end;
+
+      --  The same thing with the star at the front of the label. This one
+      --  does start with a star, so it gets past any check that only looks
+      --  at the first character.
+      --
+      --  Wildcard_Matches carries a guard for exactly this shape, requiring
+      --  the whole first label to be the star. That guard turns out to be
+      --  unreachable: the name is refused as unusable before matching is
+      --  attempted, and the only names that reach Wildcard_Matches at all
+      --  are well-formed bare-star wildcards. Deleting it changes nothing
+      --  any test can see. It is right to keep and worth knowing about,
+      --  since an unreachable guard is one nobody is checking.
+      declare
+         Leading : constant X509C.Certificate :=
+           Leaf_With ([1 => To_Unbounded_String ("*x.example.com")]);
+      begin
+         --  Reported as unusable rather than merely not matching. A name
+         --  with a star stuck to other characters is not a name, and a
+         --  certificate carrying one is worth being suspicious of -- saying
+         --  "no match" would let it pass as an ordinary mismatch.
+         Check (XI.Match_DNS_Name (Leading, "foo.example.com")
+                = XI.Malformed_Identity,
+                "a star at the head of a longer label makes the name "
+                & "unusable, got "
+                & XI.Result_Image
+                    (XI.Match_DNS_Name (Leading, "foo.example.com")));
+         Check (XI.Match_DNS_Name (Leading, "ax.example.com")
+                /= XI.Matched,
+                "and it certainly does not match by completing the label");
+      end;
+
+      --  A wildcard has to be the leftmost label. One buried in the middle
+      --  would otherwise reach across a level the issuer never named.
+      declare
+         Middle : constant X509C.Certificate :=
+           Leaf_With ([1 => To_Unbounded_String ("a.*.example.com")]);
+      begin
+         Check (XI.Match_DNS_Name (Middle, "a.b.example.com") = XI.No_Match,
+                "a wildcard in the middle of a name matches nothing");
+      end;
+
+      --  A wildcard needs a real domain under it. "*.com" would otherwise
+      --  be a certificate for every name in the registry.
+      declare
+         Too_Wide : constant X509C.Certificate :=
+           Leaf_With ([1 => To_Unbounded_String ("*.com")]);
+      begin
+         Check (XI.Match_DNS_Name (Too_Wide, "foo.com") = XI.No_Match,
+                "a wildcard over a single label matches nothing");
+      end;
+
+      declare
+         Wild : constant X509C.Certificate :=
+           Leaf_With ([1 => To_Unbounded_String ("*.example.com")]);
+      begin
 
          --  A caller that refuses wildcards gets no wildcard matching.
          Check (XI.Match_DNS_Name
