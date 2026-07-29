@@ -5,14 +5,14 @@
 --  it performs no timing measurement and always flags that independent external
 --  review is still required.
 --
---  The list spans the stack rather than this crate. RSA_Private_Exponentiation
---  and ECDSA_P256_Scalar_Arithmetic name operations `ssh_lib` implements on top
---  of this one: `CryptoLib.RSA` verifies and never holds a private key, and
---  P-256 here is verification only. Reading the manifest as an inventory of
---  what this crate does would therefore overstate it in one direction --
---  claiming private-key operations that are not here -- and understate it in
---  another, since the P-384 and P-521 signing that *is* here reaches the same
---  scalar arithmetic under a name the list does not carry.
+--  The list is an assurance record, not an inventory of what is implemented
+--  here, and the two have drifted together over time rather than apart.
+--  RSA_Private_Exponentiation and ECDSA_P256_Scalar_Arithmetic once named only
+--  operations `ssh_lib` performs on top of this crate; both are now here --
+--  CryptoLib.RSA signs, and P-256 signs -- and the entries cover them. What
+--  the list still does not carry is a name for the P-384 and P-521 signing
+--  beside them, which reaches the same scalar arithmetic, so it under-names
+--  what it covers rather than over-claiming.
 --
 --  What the levels record is review, not measurement. The measured part lives
 --  in `tools/bin/check_constant_time`, which holds named routines to a

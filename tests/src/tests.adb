@@ -9190,6 +9190,190 @@ procedure Tests is
       end;
    end Check_Manifests_And_Helpers;
 
+   --  RSA signing: the private-key half of a package that was verification
+   --  only. The key is one OpenSSL generated; the two deterministic vectors
+   --  were produced by an independent Python implementation and confirmed by
+   --  pyca before any of this existed.
+   procedure Check_RSA_Signing is
+      package R renames CryptoLib.RSA;
+
+      Modulus : constant Ada.Streams.Stream_Element_Array := Bytes_From_Hex
+        ("bb574636d26885d938fac8887232f483126ae37d13ef89d515eed4db157b91"
+         & "8cfb6dbadcdab75cda478ee60f2fa6080b76c19181442787ea3dde483842d6"
+         & "9997ae414e1f41c60b6336dc1b63f69f54dfc91340928e0fd7b5b2d8a3a6e3"
+         & "f4f103072cef9d7112b10e00a7ca52fceb243ff6c4f8a692c5c931fabb561c"
+         & "c4c9017004b8d45a7c0b641922d31f7809c945a515430bb78ed7eeaa63be81"
+         & "f5891411ed0aa34f8f3e460f110adbc0a2cd58b119d1a3d94991128b2f1463"
+         & "e296638bb8c7ed64d6e1bb719b3f5beee1fa61917ac1ae4b16d8fbfa1d966e"
+         & "c8ad42f7977d644436e6aa7eb1376441b80c1791e61b6bbae806f253a600ff"
+         & "7ce9dda711370c13");
+      Public_Exponent : constant Ada.Streams.Stream_Element_Array :=
+        Bytes_From_Hex ("010001");
+      Private_Exponent : constant Ada.Streams.Stream_Element_Array :=
+        Bytes_From_Hex
+        ("1e6442fe9b75711ab37232670ef3b23eb3405b906129652db2e5b06aac4504"
+         & "1b4accb08454b26b774e7ae1aff4006b8caf3829753ee114dd0cd560824961"
+         & "8c15932382b0c7c300fa42f399394725ee51c6f529c41214d8348b58e17a59"
+         & "152afb87f0a3c761b3c667bef679785611dad5ca4adbb5c0d8ccfcca856aab"
+         & "b71c39705dd8fabf11bb8dee4de8d60b4aaa423e114132535ef2ce652554ea"
+         & "2522ddf5638e2c7c375a31300bc853a7dfbb1b79dc1491ed3a5eeedd3ceb45"
+         & "d3744e57c90887f26fecf2c9ed0db3d7e4660fc0fd22a841a2261926c9de76"
+         & "869df98ec7e737c47fbd56e178f36af8c48bb3f0198dcd886008ff4688f538"
+         & "d248167ef2e7ade1");
+      Want_PSS_Salt0 : constant Ada.Streams.Stream_Element_Array :=
+        Bytes_From_Hex
+        ("90881c9ed0c0962243c7272f9383722e71c2c11ae4f61a6e942c0711dde337"
+         & "8a302f1d6186543307210e33a7daaf56e52254eafb996a9375b5aaa491b4db"
+         & "b86ae9d2287ab4fe7828a95b9470eb15c5d11021be4f13be351b0ab4bef06c"
+         & "5180c306bc29722948b65f8821d1ea25d42efb285839aecfc0c409a09d9e36"
+         & "f1a5317ea09322af6a95a74411d916558a6909d8726f746331bdf34a28338f"
+         & "2177070958fb2d0411215dc679254455a2ff955fe31f2b7a2881508229565a"
+         & "cd78b37545a5c532daafc72de962ab452f1ce22dbd6c3edcd474ef8d5f1cea"
+         & "b94be7786dd997dfe5e739223f264e029b2bf2f3c5b1b2842b863c32826e3d"
+         & "6d67ab599fcca2fb");
+      Want_PKCS1 : constant Ada.Streams.Stream_Element_Array :=
+        Bytes_From_Hex
+        ("7e260df096f97246dbefbb6a219a36b913197f29f988e5930d4f0bf34043ee"
+         & "cfb5a343fc9a3b186370ec7fe6c82aa09248ca5f32e818cfa8892b67f31b5a"
+         & "b43a5fe5b20f7f08d2b6410995bf2fd4ec09d63a265af7b598f3a4ff636a53"
+         & "d2919e72d568c1ec2a8ad6921553dd030558c91c594f9b3f54fc3b15c34119"
+         & "ef35882854de82011dade262aee4ec10a3c22f2e3ca6a500cf8072d9fb7044"
+         & "db016be52e3acf61ad29031bbc2f23faa6a9e0c0e3ac4218d500caeac0b741"
+         & "562c66640aa181d636c27f8bd4d898afd6c79338dd578e6e13f6cbb9cd2cde"
+         & "9545cb6be5aa291cdd62d97cb97ac41aea6f78f1d934a4b80c60c679236b25"
+         & "be0d692436baaef9");
+
+      Message : constant Ada.Streams.Stream_Element_Array :=
+        Bytes_From_String ("cryptolib rsa-pss signing");
+      Signature : Ada.Streams.Stream_Element_Array (1 .. 256);
+      Rng : CryptoLib.Random.Random_Source;
+      St  : CryptoLib.Errors.Status;
+   begin
+      CryptoLib.Random.Initialize_Production (Rng);
+
+      --  PKCS#1 v1.5 is deterministic, so it is pinned byte for byte.
+      St := R.Sign_PKCS1_V1_5
+        (Modulus, Public_Exponent, Private_Exponent, R.SHA256, Message,
+         Signature);
+      Check (St = CryptoLib.Errors.Ok, "RSA v1.5 signing succeeds");
+      Check (Signature = Want_PKCS1, "RSA v1.5 signature is byte for byte");
+      Check (R.Verify_PKCS1_V1_5
+               (Modulus, Public_Exponent, R.SHA256, Message, Signature)
+               = CryptoLib.Errors.Ok,
+             "and this crate's own verifier accepts it");
+
+      --  PSS with a zero-length salt is deterministic too, which is the only
+      --  way to hold a randomised scheme to an exact answer.
+      St := R.Sign_PSS
+        (Modulus, Public_Exponent, Private_Exponent, R.SHA256, 0, Message,
+         Rng, Signature);
+      Check (St = CryptoLib.Errors.Ok, "RSA PSS signing succeeds at salt 0");
+      Check (Signature = Want_PSS_Salt0,
+             "RSA PSS salt-0 signature is byte for byte");
+      Check (R.Verify_PSS
+               (Modulus, Public_Exponent, R.SHA256, 0, Message, Signature)
+               = CryptoLib.Errors.Ok,
+             "and this crate's own verifier accepts it");
+
+      --  With a real salt the scheme is randomised: two signatures over one
+      --  message must differ and both must verify. A PSS implementation that
+      --  forgot to draw a salt would still round-trip, and only this notices.
+      declare
+         First, Second : Ada.Streams.Stream_Element_Array (1 .. 256);
+      begin
+         Check (R.Sign_PSS (Modulus, Public_Exponent, Private_Exponent,
+                            R.SHA256, 32, Message, Rng, First)
+                  = CryptoLib.Errors.Ok
+                and then R.Sign_PSS (Modulus, Public_Exponent,
+                                     Private_Exponent, R.SHA256, 32, Message,
+                                     Rng, Second) = CryptoLib.Errors.Ok,
+                "RSA PSS signs twice at salt 32");
+         Check (First /= Second,
+                "two PSS signatures over one message differ");
+         Check (R.Verify_PSS (Modulus, Public_Exponent, R.SHA256, 32,
+                              Message, First) = CryptoLib.Errors.Ok
+                and then R.Verify_PSS (Modulus, Public_Exponent, R.SHA256, 32,
+                                       Message, Second)
+                  = CryptoLib.Errors.Ok,
+                "and both verify");
+         --  A signature made with one salt length must not verify under
+         --  another: the length is part of what was signed.
+         Check (R.Verify_PSS (Modulus, Public_Exponent, R.SHA256, 0,
+                              Message, First) /= CryptoLib.Errors.Ok,
+                "a salt-32 signature does not verify as salt-0");
+      end;
+
+      --  SHA-384 and SHA-512 arms.
+      for Hash in R.Hash_Algorithm loop
+         declare
+            Sig : Ada.Streams.Stream_Element_Array (1 .. 256);
+         begin
+            Check (R.Sign_PSS (Modulus, Public_Exponent, Private_Exponent,
+                               Hash, 16, Message, Rng, Sig)
+                     = CryptoLib.Errors.Ok
+                   and then R.Verify_PSS (Modulus, Public_Exponent, Hash, 16,
+                                          Message, Sig)
+                     = CryptoLib.Errors.Ok,
+                   "RSA PSS round-trips under " & Hash'Image);
+            Check (R.Sign_PKCS1_V1_5 (Modulus, Public_Exponent,
+                                      Private_Exponent, Hash, Message, Sig)
+                     = CryptoLib.Errors.Ok
+                   and then R.Verify_PKCS1_V1_5 (Modulus, Public_Exponent,
+                                                 Hash, Message, Sig)
+                     = CryptoLib.Errors.Ok,
+                   "RSA v1.5 round-trips under " & Hash'Image);
+         end;
+      end loop;
+
+      --  A signature must not verify over a message it does not cover.
+      St := R.Sign_PKCS1_V1_5
+        (Modulus, Public_Exponent, Private_Exponent, R.SHA256, Message,
+         Signature);
+      Check (R.Verify_PKCS1_V1_5
+               (Modulus, Public_Exponent, R.SHA256,
+                Bytes_From_String ("a different message"), Signature)
+               /= CryptoLib.Errors.Ok,
+             "a v1.5 signature does not verify over another message");
+
+      --  Refusals, each leaving the buffer zero.
+      declare
+         Wrong_D : constant Ada.Streams.Stream_Element_Array (1 .. 256) :=
+           [others => 3];
+         Even_N  : Ada.Streams.Stream_Element_Array := Modulus;
+         Short   : Ada.Streams.Stream_Element_Array (1 .. 128) :=
+           [others => 16#A5#];
+         Sig     : Ada.Streams.Stream_Element_Array (1 .. 256) :=
+           [others => 16#A5#];
+      begin
+         --  The wrong private exponent produces a signature that does not
+         --  verify, and the verify-after-sign check refuses to hand it back.
+         Check (R.Sign_PKCS1_V1_5 (Modulus, Public_Exponent, Wrong_D,
+                                   R.SHA256, Message, Sig)
+                  /= CryptoLib.Errors.Ok,
+                "a signature that does not verify is not returned");
+         Check (Sig = [Sig'Range => 0], "and the buffer is left zero");
+
+         Even_N (Even_N'Last) := Even_N (Even_N'Last) and 16#FE#;
+         Check (R.Sign_PKCS1_V1_5 (Even_N, Public_Exponent, Private_Exponent,
+                                   R.SHA256, Message, Sig)
+                  /= CryptoLib.Errors.Ok,
+                "an even modulus is not an RSA modulus");
+
+         Check (R.Sign_PKCS1_V1_5 (Modulus, Public_Exponent, Private_Exponent,
+                                   R.SHA256, Message, Short)
+                  /= CryptoLib.Errors.Ok,
+                "the output must be exactly as long as the modulus");
+         Check (Short = [Short'Range => 0], "and it too is left zero");
+
+         --  A salt too long for the modulus and digest is refused rather than
+         --  quietly shortened.
+         Check (R.Sign_PSS (Modulus, Public_Exponent, Private_Exponent,
+                            R.SHA256, 256, Message, Rng, Sig)
+                  /= CryptoLib.Errors.Ok,
+                "a salt too long for the modulus is refused");
+      end;
+   end Check_RSA_Signing;
+
    procedure Check_Zero_On_Failure is
       Pattern : constant Ada.Streams.Stream_Element := 16#A5#;
 
@@ -14572,6 +14756,7 @@ begin
    Check_ECDH;
    Check_MLKEM_Core_Algebra;
    Check_Manifests_And_Helpers;
+   Check_RSA_Signing;
    Check_Cipher_Names;
    Check_X25519_Shared_Secret;
    Check_Chain_Constraint_Bypasses;

@@ -127,6 +127,21 @@ package CryptoLib.PKCS8 is
    --  @return the public exponent, empty when the key is not RSA
    function RSA_Exponent (Item : Private_Key) return Octets;
 
+   --  The private exponent d of an RSA key.
+   --
+   --  Secret, unlike RSA_Modulus and RSA_Exponent beside it, and returned as
+   --  a slice of storage this key wipes when it goes out of scope -- so it is
+   --  valid only while the key is, and a caller that copies it elsewhere has
+   --  taken responsibility for scrubbing the copy.
+   --
+   --  Empty for a key that is not RSA. The CRT parameters that follow d in an
+   --  RSAPrivateKey are not surfaced: CryptoLib.RSA signs without them, and
+   --  exposing them would invite a CRT implementation with the fault mode
+   --  that comes with it.
+   --  @param Item the decoded private key
+   --  @return the private exponent as unsigned big-endian octets, or empty
+   function RSA_Private_Exponent (Item : Private_Key) return Octets;
+
    --  Overwrite the key's storage now rather than at end of scope.
    --  @param Item the key to scrub
    procedure Wipe (Item : in out Private_Key);
@@ -149,6 +164,7 @@ private
          Value     : Span;
          Modulus   : Span;
          Exponent  : Span;
+         Private_D : Span;
          Held      : Offset := 0;
          DER       : Octets (1 .. Maximum_Key_Size) := [others => 0];
       end record;

@@ -30,6 +30,7 @@ package body CryptoLib.PKCS8 is
       Item.Value := (First => 1, Last => 0);
       Item.Modulus := (First => 1, Last => 0);
       Item.Exponent := (First => 1, Last => 0);
+      Item.Private_D := (First => 1, Last => 0);
       Item.Held := 0;
    end Wipe;
 
@@ -295,6 +296,20 @@ package body CryptoLib.PKCS8 is
                      end if;
                      Item.Exponent :=
                        (First => Number.First, Last => Number.Last);
+
+                     --  privateExponent, the field after publicExponent.
+                     --  Read so a parsed key can be signed with; the CRT
+                     --  parameters after it are deliberately left alone.
+                     DER_Reader.Read_Integer
+                       (Work, Part, Key.Last, 3, Limits, Number, Minus,
+                        Status);
+                     if Status /= Ok or else Minus then
+                        Wipe (Item);
+                        Status := Invalid_Value;
+                        return;
+                     end if;
+                     Item.Private_D :=
+                       (First => Number.First, Last => Number.Last);
                   end;
                end;
 
@@ -323,6 +338,11 @@ package body CryptoLib.PKCS8 is
    is (if not Item.Present or else Item.Exponent.Last < Item.Exponent.First
        then Empty_Octets
        else Item.DER (Item.Exponent.First .. Item.Exponent.Last));
+
+   function RSA_Private_Exponent (Item : Private_Key) return Octets
+   is (if not Item.Present or else Item.Private_D.Last < Item.Private_D.First
+       then Empty_Octets
+       else Item.DER (Item.Private_D.First .. Item.Private_D.Last));
 
    function Private_Value (Item : Private_Key) return Octets
    is (if not Item.Present or else Item.Value.Last < Item.Value.First

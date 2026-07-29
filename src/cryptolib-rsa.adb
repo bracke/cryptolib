@@ -144,6 +144,78 @@ package body CryptoLib.RSA is
       end loop;
    end MGF1;
 
+   --  EM for RSASSA-PKCS1-v1_5: 00 01 FF..FF 00 || DigestInfo || H(message).
+   --
+   --  One body, used to build the block a signature must decrypt to and to
+   --  build the block a signature is made from. Verification's whole argument
+   --  is that it compares against a fully determined block rather than
+   --  parsing what it recovered; signing has to produce exactly that block or
+   --  the two disagree about what a valid signature is.
+   --  @param Hash    which digest
+   --  @param Message the message to encode
+   --  @param K       the modulus length in octets
+   --  @param Block   out: the encoded block, K octets
+   --  @param Usable  out: False when K is too small to hold the block
+   procedure Encode_PKCS1_V1_5
+     (Hash    : Hash_Algorithm;
+      Message : Octets;
+      K       : Natural;
+      Block   : out Octets;
+      Usable  : out Boolean)
+   is
+      Prefix_Length : constant Natural :=
+        (case Hash is
+            when SHA256 => Natural (SHA256_Prefix'Length),
+            when SHA384 => Natural (SHA384_Prefix'Length),
+            when SHA512 => Natural (SHA512_Prefix'Length));
+      Block_Length : constant Natural := Prefix_Length + Digest_Length (Hash);
+      Tail : constant Offset := Offset (K) - Offset (Block_Length) + 1;
+   begin
+      Block := [others => 16#FF#];
+      Usable := False;
+      --  Two leading octets, at least eight padding octets, the separator.
+      if K < Block_Length + 11 or else Natural (Block'Length) /= K then
+         return;
+      end if;
+
+      Block (Block'First) := 16#00#;
+      Block (Block'First + 1) := 16#01#;
+      Block (Block'First + Tail - 2) := 16#00#;
+
+      case Hash is
+         when SHA256 =>
+            Block (Block'First + Tail - 1
+                   .. Block'First + Tail - 2 + SHA256_Prefix'Length) :=
+              SHA256_Prefix;
+         when SHA384 =>
+            Block (Block'First + Tail - 1
+                   .. Block'First + Tail - 2 + SHA384_Prefix'Length) :=
+              SHA384_Prefix;
+         when SHA512 =>
+            Block (Block'First + Tail - 1
+                   .. Block'First + Tail - 2 + SHA512_Prefix'Length) :=
+              SHA512_Prefix;
+      end case;
+
+      declare
+         Digest_First : constant Offset :=
+           Block'First + Tail - 1 + Offset (Prefix_Length);
+      begin
+         case Hash is
+            when SHA256 =>
+               Block (Digest_First .. Block'Last) :=
+                 Octets (CryptoLib.Hashes.SHA256 (Message));
+            when SHA384 =>
+               Block (Digest_First .. Block'Last) :=
+                 Octets (CryptoLib.Hashes.SHA384 (Message));
+            when SHA512 =>
+               Block (Digest_First .. Block'Last) :=
+                 Octets (CryptoLib.Hashes.SHA512 (Message));
+         end case;
+      end;
+      Usable := True;
+   end Encode_PKCS1_V1_5;
+
    function Verify_PKCS1_V1_5
      (Modulus   : Octets;
       Exponent  : Octets;
@@ -183,73 +255,22 @@ package body CryptoLib.RSA is
          end if;
 
          declare
-            Prefix_Length : constant Natural :=
-              (case Hash is
-                  when SHA256 => Natural (SHA256_Prefix'Length),
-                  when SHA384 => Natural (SHA384_Prefix'Length),
-                  when SHA512 => Natural (SHA512_Prefix'Length));
-            Digest_Length : constant Natural :=
-              (case Hash is
-                  when SHA256 => 32,
-                  when SHA384 => 48,
-                  when SHA512 => 64);
-            Block_Length  : constant Natural :=
-              Prefix_Length + Digest_Length;
          begin
-            --  Two leading octets, at least eight padding octets, and the
-            --  separator. A modulus smaller than that cannot hold a valid
-            --  block, so no signature under it could ever verify.
-            if K < Block_Length + 11 then
-               return CryptoLib.Errors.Handshake_Failed;
-            end if;
-
             declare
                Recovered : constant Octets :=
                  CryptoLib.Modexp.Mod_Exp (Signature, E, N);
-               Expected  : Octets (1 .. Offset (K)) := [others => 16#FF#];
-               Tail      : constant Offset :=
-                 Offset (K) - Offset (Block_Length) + 1;
+               Expected  : Octets (1 .. Offset (K));
+               Usable    : Boolean;
             begin
+               Encode_PKCS1_V1_5 (Hash, Message, K, Expected, Usable);
+               if not Usable then
+                  --  A modulus too small to hold a valid block: no signature
+                  --  under it could ever verify.
+                  return CryptoLib.Errors.Handshake_Failed;
+               end if;
                if Recovered'Length /= Expected'Length then
                   return CryptoLib.Errors.Internal_Error;
                end if;
-
-               --  EM = 00 01 FF..FF 00 || DigestInfo, fully determined: the
-               --  only freedom is how many FF octets, and that follows from
-               --  the modulus size. Nothing here is scanned for or inferred
-               --  from the recovered block.
-               Expected (1) := 16#00#;
-               Expected (2) := 16#01#;
-               Expected (Tail - 1) := 16#00#;
-
-               case Hash is
-                  when SHA256 =>
-                     Expected (Tail .. Tail + SHA256_Prefix'Length - 1) :=
-                       SHA256_Prefix;
-                  when SHA384 =>
-                     Expected (Tail .. Tail + SHA384_Prefix'Length - 1) :=
-                       SHA384_Prefix;
-                  when SHA512 =>
-                     Expected (Tail .. Tail + SHA512_Prefix'Length - 1) :=
-                       SHA512_Prefix;
-               end case;
-
-               declare
-                  Digest_First : constant Offset :=
-                    Tail + Offset (Prefix_Length);
-               begin
-                  case Hash is
-                     when SHA256 =>
-                        Expected (Digest_First .. Expected'Last) :=
-                          Octets (CryptoLib.Hashes.SHA256 (Message));
-                     when SHA384 =>
-                        Expected (Digest_First .. Expected'Last) :=
-                          Octets (CryptoLib.Hashes.SHA384 (Message));
-                     when SHA512 =>
-                        Expected (Digest_First .. Expected'Last) :=
-                          Octets (CryptoLib.Hashes.SHA512 (Message));
-                  end case;
-               end;
 
                if CryptoLib.Constant_Time.Equal (Recovered, Expected) then
                   return CryptoLib.Errors.Ok;
@@ -403,5 +424,230 @@ package body CryptoLib.RSA is
          end;
       end;
    end Verify_PSS;
+
+   --  The private operation, plus the check that it worked.
+   --
+   --  Exponentiating with d is the only place a secret is touched; Modexp is
+   --  constant-time in the exponent. The result is then raised to the public
+   --  exponent and compared with what went in, which costs one cheap
+   --  exponentiation and catches a fault in the private one. Releasing a
+   --  faulty RSA signature is not a wrong answer -- next to a correct one it
+   --  can give up the factorisation -- so a mismatch returns nothing.
+   function Private_Operation
+     (Block            : Octets;
+      Modulus          : Octets;
+      Public_Exponent  : Octets;
+      Private_Exponent : Octets;
+      Signature        : out Octets) return CryptoLib.Errors.Status
+   is
+      Candidate : constant Octets :=
+        CryptoLib.Modexp.Mod_Exp (Block, Private_Exponent, Modulus);
+      Round_Trip : constant Octets :=
+        CryptoLib.Modexp.Mod_Exp (Candidate, Public_Exponent, Modulus);
+   begin
+      Signature := [others => 0];
+      if Candidate'Length /= Signature'Length
+        or else Round_Trip'Length /= Block'Length
+      then
+         return CryptoLib.Errors.Internal_Error;
+      end if;
+      if not CryptoLib.Constant_Time.Equal (Round_Trip, Block) then
+         return CryptoLib.Errors.Authentication_Failed;
+      end if;
+      Signature := Candidate;
+      return CryptoLib.Errors.Ok;
+   end Private_Operation;
+
+   --  Shared entry checks: strip leading zeros, refuse a modulus that is not
+   --  one, and size the output.
+   procedure Prepare
+     (Modulus          : Octets;
+      Public_Exponent  : Octets;
+      Private_Exponent : Octets;
+      Signature        : Octets;
+      N_First, E_First, D_First : out Offset;
+      K                : out Natural;
+      Usable           : out Boolean)
+   is
+   begin
+      N_First := Value_First (Modulus);
+      E_First := Value_First (Public_Exponent);
+      D_First := Value_First (Private_Exponent);
+      K := 0;
+      Usable := False;
+      if N_First > Modulus'Last
+        or else E_First > Public_Exponent'Last
+        or else D_First > Private_Exponent'Last
+      then
+         return;
+      end if;
+      --  Montgomery arithmetic needs an odd modulus, and an RSA modulus is a
+      --  product of two odd primes.
+      if Modulus (Modulus'Last) mod 2 = 0 then
+         return;
+      end if;
+      K := Natural (Modulus'Last - N_First + 1);
+      if Natural (Signature'Length) /= K then
+         K := 0;
+         return;
+      end if;
+      Usable := True;
+   end Prepare;
+
+   function Sign_PKCS1_V1_5
+     (Modulus          : Octets;
+      Public_Exponent  : Octets;
+      Private_Exponent : Octets;
+      Hash             : Hash_Algorithm;
+      Message          : Octets;
+      Signature        : out Octets) return CryptoLib.Errors.Status
+   is
+      N_First, E_First, D_First : Offset;
+      K      : Natural;
+      Usable : Boolean;
+   begin
+      Signature := [others => 0];
+      Prepare (Modulus, Public_Exponent, Private_Exponent, Signature,
+               N_First, E_First, D_First, K, Usable);
+      if not Usable then
+         return CryptoLib.Errors.Handshake_Failed;
+      end if;
+
+      declare
+         Block : Octets (1 .. Offset (K));
+         Fits  : Boolean;
+      begin
+         Encode_PKCS1_V1_5 (Hash, Message, K, Block, Fits);
+         if not Fits then
+            return CryptoLib.Errors.Handshake_Failed;
+         end if;
+         return Private_Operation
+           (Block,
+            Modulus (N_First .. Modulus'Last),
+            Public_Exponent (E_First .. Public_Exponent'Last),
+            Private_Exponent (D_First .. Private_Exponent'Last),
+            Signature);
+      end;
+   exception
+      when others =>
+         Signature := [others => 0];
+         return CryptoLib.Errors.Internal_Error;
+   end Sign_PKCS1_V1_5;
+
+   function Sign_PSS
+     (Modulus          : Octets;
+      Public_Exponent  : Octets;
+      Private_Exponent : Octets;
+      Hash             : Hash_Algorithm;
+      Salt_Length      : Natural;
+      Message          : Octets;
+      Rng              : in out CryptoLib.Random.Random_Source;
+      Signature        : out Octets) return CryptoLib.Errors.Status
+   is
+      N_First, E_First, D_First : Offset;
+      K      : Natural;
+      Usable : Boolean;
+      H_Len  : constant Natural := Digest_Length (Hash);
+   begin
+      Signature := [others => 0];
+      Prepare (Modulus, Public_Exponent, Private_Exponent, Signature,
+               N_First, E_First, D_First, K, Usable);
+      if not Usable then
+         return CryptoLib.Errors.Handshake_Failed;
+      end if;
+
+      declare
+         --  RFC 8017 9.1.1: emBits is modBits - 1, so the block is one bit
+         --  short of the modulus and EM is never numerically larger than n.
+         Em_Bits : constant Natural :=
+           Modulus_Bits (Modulus (N_First .. Modulus'Last)) - 1;
+         Em_Len  : constant Natural := (Em_Bits + 7) / 8;
+         Spare   : constant Natural := 8 * Em_Len - Em_Bits;
+      begin
+         if Em_Len < H_Len + Salt_Length + 2 then
+            --  The modulus cannot hold a digest, this salt, the separator and
+            --  the trailer. Refused rather than silently shortening the salt.
+            return CryptoLib.Errors.Handshake_Failed;
+         end if;
+
+         declare
+            Salt   : Octets (1 .. Offset (Salt_Length));
+            M_Hash : constant Octets := Digest_Of (Hash, Message);
+            Block  : Octets (1 .. Offset (Em_Len)) := [others => 0];
+            DB_Len : constant Offset := Offset (Em_Len - H_Len - 1);
+         begin
+            if Salt_Length > 0 then
+               declare
+                  use type CryptoLib.Errors.Status;
+               begin
+                  if CryptoLib.Random.Fill (Rng, Salt) /= CryptoLib.Errors.Ok
+                  then
+                     return CryptoLib.Errors.Internal_Error;
+                  end if;
+               end;
+            end if;
+
+            declare
+               --  M' = eight zero octets || mHash || salt, hashed to H.
+               Primed : Octets (1 .. 8 + Offset (H_Len) + Salt'Length) :=
+                 [others => 0];
+            begin
+               Primed (9 .. 8 + Offset (H_Len)) := M_Hash;
+               if Salt_Length > 0 then
+                  Primed (9 + Offset (H_Len) .. Primed'Last) := Salt;
+               end if;
+
+               declare
+                  H_Value : constant Octets := Digest_Of (Hash, Primed);
+                  DB      : Octets (1 .. DB_Len) := [others => 0];
+                  Mask    : Octets (1 .. DB_Len);
+               begin
+                  --  DB = PS (zeros) || 01 || salt
+                  DB (DB_Len - Salt'Length) := 16#01#;
+                  if Salt_Length > 0 then
+                     DB (DB_Len - Salt'Length + 1 .. DB_Len) := Salt;
+                  end if;
+
+                  MGF1 (Hash, H_Value, Mask);
+                  for I in DB'Range loop
+                     DB (I) := DB (I) xor Mask (I);
+                  end loop;
+
+                  --  Clear the leftmost spare bits, so EM stays below the
+                  --  modulus. Without this the signature can exceed n and
+                  --  RFC 8017's verifier refuses it.
+                  if Spare > 0 then
+                     DB (DB'First) :=
+                       DB (DB'First)
+                       and Ada.Streams.Stream_Element (2 ** (8 - Spare) - 1);
+                  end if;
+
+                  Block (1 .. DB_Len) := DB;
+                  Block (DB_Len + 1 .. DB_Len + Offset (H_Len)) := H_Value;
+                  Block (Block'Last) := 16#BC#;
+               end;
+            end;
+
+            --  A modulus whose bit length is one more than a multiple of
+            --  eight gives an EM one octet shorter than the modulus; the
+            --  private operation wants a full-width block.
+            declare
+               Padded : Octets (1 .. Offset (K)) := [others => 0];
+            begin
+               Padded (Offset (K) - Block'Length + 1 .. Offset (K)) := Block;
+               return Private_Operation
+                 (Padded,
+                  Modulus (N_First .. Modulus'Last),
+                  Public_Exponent (E_First .. Public_Exponent'Last),
+                  Private_Exponent (D_First .. Private_Exponent'Last),
+                  Signature);
+            end;
+         end;
+      end;
+   exception
+      when others =>
+         Signature := [others => 0];
+         return CryptoLib.Errors.Internal_Error;
+   end Sign_PSS;
 
 end CryptoLib.RSA;
