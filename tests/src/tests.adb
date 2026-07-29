@@ -8049,6 +8049,67 @@ procedure Tests is
       end loop;
    end Check_Streaming_SHA256_SHA512;
 
+   --  The SHA-1 fingerprint, which is the one a Windows store answers to.
+   --
+   --  The SHA-256 fingerprint is tested. This one was not, and it is the
+   --  one with a failure mode that says nothing: certutil matches
+   --  "Cert Hash(sha1)", and handed a SHA-256 it exits zero having deleted
+   --  nothing. devcert removes a development CA from the Windows store by
+   --  this value, so a wrong one leaves that CA trusted and reports success.
+   --
+   --  Checked against what openssl prints for the same certificate, and
+   --  checked not to be the other fingerprint -- the two are both lowercase
+   --  hex over the same DER, and swapping them is precisely the mistake the
+   --  spec warns about.
+   procedure Check_SHA1_Fingerprint is
+      E448_Leaf_PEM : constant String :=
+        "-----BEGIN CERTIFICATE-----" & ASCII.LF &
+        "MIIBpDCCASSgAwIBAgIUQLczDWL7WwuZoYVM4WsLqa7MwWIwBQYDK2VxMBUxEzAR" & ASCII.LF &
+        "BgNVBAMMCkVkNDQ4IFJvb3QwHhcNMjYwNzI5MDk1NDQ4WhcNMzIwMTE5MDk1NDQ4" & ASCII.LF &
+        "WjAYMRYwFAYDVQQDDA1lZDQ0OC5leGFtcGxlMEMwBQYDK2VxAzoANsYQp79ULh3d" & ASCII.LF &
+        "SjdMmNmFUG1+o2Q5SSCXICPq8UUqzOYBYHeJ7hNF32pZzaGPBjzs2Z+SamfvyS0A" & ASCII.LF &
+        "o2owaDAMBgNVHRMBAf8EAjAAMBgGA1UdEQQRMA+CDWVkNDQ4LmV4YW1wbGUwHQYD" & ASCII.LF &
+        "VR0OBBYEFNb187dyLV9qCvIGD4F3TJR0WLUqMB8GA1UdIwQYMBaAFMbdgp4UBnjX" & ASCII.LF &
+        "ERu+ekkzVsgRgRsVMAUGAytlcQNzAJMzV/lMPoEHUcr1PaG6vEbABaXpt5YnsLan" & ASCII.LF &
+        "6gdTjwBoGMzeoSJNgElR+VgnUzhMFksq9RbPy3KFgPsA1OPP3RxrFlAhuBi4cmPR" & ASCII.LF &
+        "jsn91H3D6FErtsx6azAZ9tTrESyu0MCqMMmGyNuLdEKBFNJO+XIKAA==" & ASCII.LF &
+        "-----END CERTIFICATE-----";
+
+      Expected_SHA1 : constant String :=
+        "ef2b656b25ce4502b72d46af56f68dad01d47f74";
+      --  Colon-separated, which is what a person compares in a browser or
+      --  a certificate manager. SHA1_Fingerprint deliberately is not: a
+      --  store that wants the plain hex would not match this one either,
+      --  which is the same mistake in the other direction.
+      Expected_SHA256 : constant String :=
+        "90:41:30:c5:10:0a:37:17:2c:e5:ef:b0:ee:da:e7:22"
+        & ":9b:46:ed:9d:39:c7:35:e6:66:25:ee:14:17:21:a2:39";
+
+      Got_SHA1 : constant String :=
+        CryptoLib.Certificates.SHA1_Fingerprint (E448_Leaf_PEM);
+      Got_SHA256 : constant String :=
+        CryptoLib.Certificates.Fingerprint (E448_Leaf_PEM);
+   begin
+      Check (Got_SHA1 = Expected_SHA1,
+             "the SHA-1 fingerprint is what openssl prints for the same "
+             & "certificate, got " & Got_SHA1);
+      Check (Got_SHA256 = Expected_SHA256,
+             "and the SHA-256 one likewise");
+      Check (Got_SHA1 /= Got_SHA256,
+             "the two are different values, so a store told the wrong one "
+             & "would not match by accident");
+      Check ((for all C of Got_SHA1 => C /= ':'),
+             "and the SHA-1 form carries no separators, certutil wanting "
+             & "the digits unbroken");
+      Check (Got_SHA1'Length = 40,
+             "SHA-1 is forty hex digits, got"
+             & Natural'Image (Got_SHA1'Length));
+
+      Check (CryptoLib.Certificates.SHA1_Fingerprint ("") = "",
+             "and text carrying no certificate has no fingerprint rather "
+             & "than the hash of nothing");
+   end Check_SHA1_Fingerprint;
+
    procedure Check_X509_Extensions is
       use type CryptoLib.ASN1.Errors.Decode_Status;
       use type CryptoLib.PEM.Decode_Status;
@@ -13061,6 +13122,7 @@ begin
    Check_CBC_Paths_Agree;
    Check_UMAC_Negotiation_Guard;
    Check_Streaming_SHA256_SHA512;
+   Check_SHA1_Fingerprint;
    Check_Cipher_Names;
    Check_X25519_Shared_Secret;
    Check_Chain_Constraint_Bypasses;
