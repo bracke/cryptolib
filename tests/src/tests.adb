@@ -22,6 +22,7 @@ with CryptoLib.PKCS12;
 with CryptoLib.Identities;
 with CryptoLib.X509.Policies;
 with CryptoLib.HKDF;
+with CryptoLib.TLS13_KDF;
 with CryptoLib.Hybrid_PQ_Kex;
 with CryptoLib.Fingerprints;
 with CryptoLib.Constant_Time;
@@ -8343,6 +8344,279 @@ procedure Tests is
       end;
    end Check_Consumer_Entry_Points;
 
+   --  RFC 8439 AEAD_CHACHA20_POLY1305 -- the construction TLS, IPsec and
+   --  everything outside SSH mean by "ChaCha20-Poly1305", which is not the
+   --  OpenSSH one this package also implements.
+   procedure Check_ChaCha20_Poly1305_RFC8439 is
+      package CP renames CryptoLib.ChaCha20_Poly1305;
+
+      Key : constant Ada.Streams.Stream_Element_Array := Bytes_From_Hex
+        ("808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f");
+      Nonce : constant Ada.Streams.Stream_Element_Array :=
+        Bytes_From_Hex ("070000004041424344454647");
+      Aad : constant Ada.Streams.Stream_Element_Array :=
+        Bytes_From_Hex ("50515253c0c1c2c3c4c5c6c7");
+      Plain : constant Ada.Streams.Stream_Element_Array := Bytes_From_String
+        ("Ladies and Gentlemen of the class of '99: If I could offer you "
+         & "only one tip for the future, sunscreen would be it.");
+      Want : constant Ada.Streams.Stream_Element_Array := Bytes_From_Hex
+        ("d31a8d34648e60db7b86afbc53ef7ec2a4aded51296e08fea9e2b5a736ee62d63"
+         & "dbea45e8ca9671282fafb69da92728b1a71de0a9e060b2905d6a5b67ecd3b369"
+         & "2ddbd7f2d778b8c9803aee328091b58fab324e4fad675945585808b4831d7bc3"
+         & "ff4def08e4b7a9de576d26586cec64b61161ae10b594f09e26a7e902ecbd0600"
+         & "691");
+      Empty : constant Ada.Streams.Stream_Element_Array (1 .. 0) :=
+        [others => 0];
+
+      Wire : Ada.Streams.Stream_Element_Array (1 .. Plain'Length + 16);
+      Back : Ada.Streams.Stream_Element_Array (1 .. Plain'Length);
+      St   : CryptoLib.Errors.Status;
+   begin
+      St := CP.Seal_AEAD (Key, Nonce, Aad, Plain, Wire);
+      Check (St = CryptoLib.Errors.Ok, "RFC 8439 seal status");
+      Check (Wire = Want, "RFC 8439 2.8.2 ciphertext and tag");
+
+      St := CP.Open_AEAD (Key, Nonce, Aad, Wire, Back);
+      Check (St = CryptoLib.Errors.Ok and then Back = Plain,
+             "RFC 8439 round-trips");
+
+      --  A flipped tag, a flipped ciphertext bit and a changed AAD must each
+      --  be refused, with nothing left in the output buffer.
+      declare
+         Bad : Ada.Streams.Stream_Element_Array := Wire;
+      begin
+         Bad (Bad'Last) := Bad (Bad'Last) xor 1;
+         St := CP.Open_AEAD (Key, Nonce, Aad, Bad, Back);
+         Check (St /= CryptoLib.Errors.Ok, "RFC 8439 refuses a flipped tag");
+         Check (Back = [Back'Range => 0],
+                "RFC 8439 zeroes the plaintext on a bad tag");
+
+         Bad := Wire;
+         Bad (Bad'First) := Bad (Bad'First) xor 16#80#;
+         Check (CP.Open_AEAD (Key, Nonce, Aad, Bad, Back)
+                  /= CryptoLib.Errors.Ok,
+                "RFC 8439 refuses tampered ciphertext");
+      end;
+      Check (CP.Open_AEAD (Key, Nonce, Empty, Wire, Back)
+               /= CryptoLib.Errors.Ok,
+             "RFC 8439 refuses a changed AAD");
+
+      --  Empty plaintext and empty AAD are both legal.
+      declare
+         W0 : Ada.Streams.Stream_Element_Array (1 .. 16);
+         P0 : Ada.Streams.Stream_Element_Array (1 .. 0);
+      begin
+         Check (CP.Seal_AEAD (Key, Nonce, Empty, Empty, W0)
+                  = CryptoLib.Errors.Ok
+                and then CP.Open_AEAD (Key, Nonce, Empty, W0, P0)
+                  = CryptoLib.Errors.Ok,
+                "RFC 8439 seals and opens an empty plaintext");
+      end;
+
+      --  Wrong-width key and nonce are refused rather than padded.
+      declare
+         SSH_Key : constant Ada.Streams.Stream_Element_Array (1 .. 64) :=
+           [others => 7];
+         Short_N : constant Ada.Streams.Stream_Element_Array (1 .. 8) :=
+           [others => 1];
+      begin
+         Check (CP.Seal_AEAD (SSH_Key, Nonce, Aad, Plain, Wire)
+                  /= CryptoLib.Errors.Ok,
+                "RFC 8439 refuses the SSH construction's 64-byte key");
+         Check (CP.Seal_AEAD (Key, Short_N, Aad, Plain, Wire)
+                  /= CryptoLib.Errors.Ok,
+                "RFC 8439 refuses an 8-byte nonce");
+      end;
+
+      --  The two constructions in this package must not be confusable. They
+      --  share ChaCha20 and Poly1305 and agree on nothing else, so sealing
+      --  the same bytes each way must differ, and neither may open the
+      --  other's output.
+      declare
+         SSH_Key  : constant Ada.Streams.Stream_Element_Array (1 .. 64) :=
+           [others => 16#2B#];
+         AEAD_Key : constant Ada.Streams.Stream_Element_Array (1 .. 32) :=
+           SSH_Key (1 .. 32);
+         Zero_N   : constant Ada.Streams.Stream_Element_Array (1 .. 12) :=
+           [others => 0];
+         Packet   : constant Ada.Streams.Stream_Element_Array (1 .. 20) :=
+           [others => 16#41#];
+         SSH_Wire  : Ada.Streams.Stream_Element_Array (1 .. 36);
+         AEAD_Wire : Ada.Streams.Stream_Element_Array (1 .. 36);
+         Out_Buf   : Ada.Streams.Stream_Element_Array (1 .. 20);
+      begin
+         Check (CP.Seal (SSH_Key, 0, Packet, SSH_Wire) = CryptoLib.Errors.Ok
+                and then CP.Seal_AEAD (AEAD_Key, Zero_N, Empty, Packet,
+                                       AEAD_Wire) = CryptoLib.Errors.Ok,
+                "both constructions seal the same bytes");
+         Check (SSH_Wire /= AEAD_Wire,
+                "the SSH and RFC 8439 constructions produce different wire "
+                & "bytes");
+         Check (CP.Open_AEAD (AEAD_Key, Zero_N, Empty, SSH_Wire, Out_Buf)
+                  /= CryptoLib.Errors.Ok,
+                "RFC 8439 cannot open an OpenSSH packet");
+         Check (CP.Open (SSH_Key, 0, AEAD_Wire, Out_Buf)
+                  /= CryptoLib.Errors.Ok,
+                "OpenSSH cannot open an RFC 8439 packet");
+      end;
+   end Check_ChaCha20_Poly1305_RFC8439;
+
+   --  RFC 8446 7.1 key-schedule derivations, against RFC 8448's published
+   --  handshake values.
+   procedure Check_TLS13_KDF is
+      package K renames CryptoLib.TLS13_KDF;
+      package H renames CryptoLib.HKDF;
+
+      Empty : constant Ada.Streams.Stream_Element_Array (1 .. 0) :=
+        [others => 0];
+      Zeros32 : constant Ada.Streams.Stream_Element_Array (1 .. 32) :=
+        [others => 0];
+      Early, Derived : Ada.Streams.Stream_Element_Array (1 .. 32);
+      St : CryptoLib.Errors.Status;
+   begin
+      --  The first two steps of every TLS 1.3 handshake, byte for byte as
+      --  RFC 8448 prints them.
+      St := H.Extract (H.SHA256, Empty, Zeros32, Early);
+      Check (St = CryptoLib.Errors.Ok
+             and then Early = Bytes_From_Hex
+               ("33ad0a1c607ec03b09e6cd9893680ce210adf300aa1f2660e1b22e10f170"
+                & "f92a"),
+             "RFC 8448 early secret");
+
+      St := K.Derive_Secret (H.SHA256, Early, "derived", Empty, Derived);
+      Check (St = CryptoLib.Errors.Ok
+             and then Derived = Bytes_From_Hex
+               ("6f2615a108c702c5678f54fc9dbab69716c076189c48250cebeac3576c36"
+                & "11ba"),
+             "RFC 8448 Derive-Secret(early, 'derived', '')");
+
+      --  Expand-Label at the widths TLS asks for: a 16-byte key, a 12-byte
+      --  IV, and a 32-byte finished key with a non-empty context.
+      declare
+         Secret : constant Ada.Streams.Stream_Element_Array := Bytes_From_Hex
+           ("3fce516009c21727d0f2e4e86ee403bc3fce516009c21727d0f2e4e86ee403bc");
+         Ctx    : constant Ada.Streams.Stream_Element_Array :=
+           Bytes_From_Hex ("0102030405");
+         Key16  : Ada.Streams.Stream_Element_Array (1 .. 16);
+         Iv12   : Ada.Streams.Stream_Element_Array (1 .. 12);
+         Fin32  : Ada.Streams.Stream_Element_Array (1 .. 32);
+      begin
+         Check (K.Expand_Label (H.SHA256, Secret, "key", Empty, Key16)
+                  = CryptoLib.Errors.Ok
+                and then Key16 = Bytes_From_Hex
+                  ("2090cfce94b714260a55851367768505"),
+                "HKDF-Expand-Label 'key' at 16 octets");
+         Check (K.Expand_Label (H.SHA256, Secret, "iv", Empty, Iv12)
+                  = CryptoLib.Errors.Ok
+                and then Iv12 = Bytes_From_Hex ("13bb276fe56315b474c6e454"),
+                "HKDF-Expand-Label 'iv' at 12 octets");
+         Check (K.Expand_Label (H.SHA256, Secret, "finished", Ctx, Fin32)
+                  = CryptoLib.Errors.Ok
+                and then Fin32 = Bytes_From_Hex
+                  ("68fcae0978b33ec74bacce1a51c1f124f641e227d762b574744871de4d"
+                   & "3bfc8e"),
+                "HKDF-Expand-Label 'finished' with a context");
+
+         --  The "tls13 " prefix has to actually be applied. Expanding with a
+         --  hand-built info that omits it must give something else -- without
+         --  this, a package that forgot the prefix would still pass every
+         --  round-trip test written against itself.
+         declare
+            No_Prefix : constant Ada.Streams.Stream_Element_Array :=
+              [16#00#, 16#10#, 16#03#, Character'Pos ('k'),
+               Character'Pos ('e'), Character'Pos ('y'), 16#00#];
+            Other : Ada.Streams.Stream_Element_Array (1 .. 16);
+         begin
+            Check (H.Expand (H.SHA256, Secret, No_Prefix, Other)
+                     = CryptoLib.Errors.Ok
+                   and then Other /= Key16,
+                   "the label is prefixed with 'tls13 ', not used bare");
+         end;
+
+         --  Two labels over one secret must not collide.
+         declare
+            A, B : Ada.Streams.Stream_Element_Array (1 .. 16);
+         begin
+            Check (K.Expand_Label (H.SHA256, Secret, "key", Empty, A)
+                     = CryptoLib.Errors.Ok
+                   and then K.Expand_Label (H.SHA256, Secret, "iv", Empty, B)
+                     = CryptoLib.Errors.Ok,
+                   "both labels expand");
+            Check (A /= B, "different labels give unrelated keys");
+         end;
+      end;
+
+      --  The SHA-384 arm, which TLS_AES_256_GCM_SHA384 uses.
+      declare
+         Z48 : constant Ada.Streams.Stream_Element_Array (1 .. 48) :=
+           [others => 0];
+         E48, D48 : Ada.Streams.Stream_Element_Array (1 .. 48);
+      begin
+         St := H.Extract (H.SHA384, Empty, Z48, E48);
+         Check (St = CryptoLib.Errors.Ok, "SHA-384 early secret extracts");
+         St := K.Derive_Secret (H.SHA384, E48, "derived", Empty, D48);
+         Check (St = CryptoLib.Errors.Ok
+                and then D48 = Bytes_From_Hex
+                  ("1591dac5cbbf0330a4a84de9c753330e92d01f0a88214b4464972fd668"
+                   & "049e93e52f2b16fad922fdc0584478428f282b"),
+                "SHA-384 Derive-Secret(early, 'derived', '')");
+      end;
+
+      --  Derive_Secret and Derive_Secret_From_Transcript must agree: one
+      --  hashes the messages, the other is handed the digest.
+      declare
+         Msgs : constant Ada.Streams.Stream_Element_Array :=
+           Bytes_From_String ("a handshake transcript");
+         Digest : constant Ada.Streams.Stream_Element_Array :=
+           Ada.Streams.Stream_Element_Array
+             (CryptoLib.Hashes.SHA256 (Msgs));
+         A, B : Ada.Streams.Stream_Element_Array (1 .. 32);
+      begin
+         St := K.Derive_Secret (H.SHA256, Early, "c hs traffic", Msgs, A);
+         Check (St = CryptoLib.Errors.Ok, "Derive_Secret over messages");
+         St := K.Derive_Secret_From_Transcript
+           (H.SHA256, Early, "c hs traffic", Digest, B);
+         Check (St = CryptoLib.Errors.Ok and then A = B,
+                "hashing the transcript here or outside gives one answer");
+      end;
+
+      --  Refusals, each with the buffer left zero.
+      declare
+         Secret : constant Ada.Streams.Stream_Element_Array (1 .. 32) :=
+           [others => 1];
+         Short  : constant Ada.Streams.Stream_Element_Array (1 .. 31) :=
+           [others => 1];
+         Big    : constant Ada.Streams.Stream_Element_Array (1 .. 256) :=
+           [others => 2];
+         Long_Label : constant String (1 .. 250) := [others => 'x'];
+         Out16  : Ada.Streams.Stream_Element_Array (1 .. 16) :=
+           [others => 16#A5#];
+         Out31  : Ada.Streams.Stream_Element_Array (1 .. 31) :=
+           [others => 16#A5#];
+      begin
+         Check (K.Expand_Label (H.SHA256, Secret, "", Empty, Out16)
+                  /= CryptoLib.Errors.Ok,
+                "an empty label is refused");
+         Check (Out16 = [Out16'Range => 0], "and the output is zeroed");
+
+         Check (K.Expand_Label (H.SHA256, Secret, Long_Label, Empty, Out16)
+                  /= CryptoLib.Errors.Ok,
+                "a label past 249 characters is refused, not truncated");
+
+         Check (K.Expand_Label (H.SHA256, Short, "key", Empty, Out16)
+                  /= CryptoLib.Errors.Ok,
+                "a secret narrower than the hash is refused");
+
+         Check (K.Expand_Label (H.SHA256, Secret, "key", Big, Out16)
+                  /= CryptoLib.Errors.Ok,
+                "a context past 255 octets is refused");
+
+         Check (K.Derive_Secret (H.SHA256, Secret, "derived", Empty, Out31)
+                  /= CryptoLib.Errors.Ok,
+                "Derive-Secret refuses an output that is not the hash's width");
+      end;
+   end Check_TLS13_KDF;
+
    procedure Check_Zero_On_Failure is
       Pattern : constant Ada.Streams.Stream_Element := 16#A5#;
 
@@ -13700,6 +13974,8 @@ begin
    Check_HKDF;
    Check_Zero_On_Failure;
    Check_Consumer_Entry_Points;
+   Check_ChaCha20_Poly1305_RFC8439;
+   Check_TLS13_KDF;
    Check_Cipher_Names;
    Check_X25519_Shared_Secret;
    Check_Chain_Constraint_Bypasses;

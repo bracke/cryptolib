@@ -30,10 +30,11 @@ Do not run plain system `gnat*`, `gnatmake`, `gnatls`, `gnatprove`,
 | `CryptoLib.SHA3` | SHA3-256/512, SHAKE128/256 |
 | `CryptoLib.Macs` | HMAC-SHA1/256/384/512, PBKDF2, PBKDF1, PKCS12KDF |
 | `CryptoLib.HKDF` | HKDF (RFC 5869) extract-and-expand over HMAC-SHA-256/384/512, for deriving keys from material that is already unguessable |
+| `CryptoLib.TLS13_KDF` | The TLS 1.3 key-schedule derivations (RFC 8446 §7.1): HKDF-Expand-Label and Derive-Secret |
 | `CryptoLib.UMAC` | UMAC-64/128 (RFC 4418) |
 | `CryptoLib.Bcrypt_PBKDF` | bcrypt-PBKDF (OpenSSH key derivation) |
 | `CryptoLib.Ciphers` | AES-128/192/256 (CTR/CBC/GCM), 3DES, RC2 |
-| `CryptoLib.ChaCha20_Poly1305` | ChaCha20-Poly1305 AEAD (OpenSSH transport framing) |
+| `CryptoLib.ChaCha20_Poly1305` | ChaCha20-Poly1305, both constructions: `Seal`/`Open` are the OpenSSH transport framing, `Seal_AEAD`/`Open_AEAD` are RFC 8439's standard AEAD (one 32-byte key, 96-bit nonce, additional data) |
 | `CryptoLib.Curve25519` | X25519 key agreement |
 | `CryptoLib.Ed25519` | Ed25519 signatures |
 | `CryptoLib.Ed448` | Ed448 signatures (RFC 8032 PureEdDSA, empty context) |

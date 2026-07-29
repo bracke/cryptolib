@@ -1,4 +1,5 @@
 with CryptoLib.Constant_Time;
+with CryptoLib.Secure_Wipe;
 
 package body CryptoLib.ChaCha20_Poly1305 is
    use Ada.Streams;
@@ -149,20 +150,22 @@ package body CryptoLib.ChaCha20_Poly1305 is
       end loop;
    end ChaCha20_Block;
 
+   --  The keystream body. Both constructions in this package run it: the SSH
+   --  one hands it a nonce built from the packet sequence number, RFC 8439
+   --  hands it the caller's 96-bit nonce. Kept as one body so a fix to the
+   --  keystream cannot reach one construction and miss the other.
    procedure Apply_ChaCha20
      (Key_Data : Byte_Array;
-      Sequence : Unsigned_32;
+      Nonce    : Byte_Array;
       Counter  : Word;
       Input    : Stream_Element_Array;
       Output   : out Stream_Element_Array)
    is
-      Nonce   : Byte_Array (0 .. 11);
       Block   : Byte_Array (0 .. 63);
       Count   : Word := Counter;
       In_Pos  : Stream_Element_Offset := Input'First;
       Out_Pos : Stream_Element_Offset := Output'First;
    begin
-      Make_Nonce (Sequence, Nonce);
       while In_Pos <= Input'Last loop
          ChaCha20_Block (Key_Data, Count, Nonce, Block);
          Count := Count + 1;
@@ -175,6 +178,20 @@ package body CryptoLib.ChaCha20_Poly1305 is
          end loop;
       end loop;
    end Apply_ChaCha20;
+
+   --  The SSH construction's nonce is the packet sequence number.
+   procedure Apply_ChaCha20_Seq
+     (Key_Data : Byte_Array;
+      Sequence : Unsigned_32;
+      Counter  : Word;
+      Input    : Stream_Element_Array;
+      Output   : out Stream_Element_Array)
+   is
+      Nonce : Byte_Array (0 .. 11);
+   begin
+      Make_Nonce (Sequence, Nonce);
+      Apply_ChaCha20 (Key_Data, Nonce, Counter, Input, Output);
+   end Apply_ChaCha20_Seq;
 
    function Read_Key
      (Key_Data : Stream_Element_Array; Offset : Natural) return Byte_Array
@@ -364,7 +381,7 @@ package body CryptoLib.ChaCha20_Poly1305 is
          return Handshake_Failed;
       end if;
       Length_Key := Read_Key (Key_Data, 32);
-      Apply_ChaCha20 (Length_Key, Sequence, 0, Header, Output);
+      Apply_ChaCha20_Seq (Length_Key, Sequence, 0, Header, Output);
       return Ok;
    exception
       when others =>
@@ -401,9 +418,9 @@ package body CryptoLib.ChaCha20_Poly1305 is
       Payload_Key := Read_Key (Key_Data, 0);
       Header_In := Plain_Packet (Plain_Packet'First .. Plain_Packet'First + 3);
       Body_In := Plain_Packet (Plain_Packet'First + 4 .. Plain_Packet'Last);
-      Apply_ChaCha20 (Length_Key, Sequence, 0, Header_In, Header_Out);
-      Apply_ChaCha20 (Payload_Key, Sequence, 1, Body_In, Body_Out);
-      Apply_ChaCha20 (Payload_Key, Sequence, 0, Zero_Block, OTK_Stream);
+      Apply_ChaCha20_Seq (Length_Key, Sequence, 0, Header_In, Header_Out);
+      Apply_ChaCha20_Seq (Payload_Key, Sequence, 1, Body_In, Body_Out);
+      Apply_ChaCha20_Seq (Payload_Key, Sequence, 0, Zero_Block, OTK_Stream);
       for Index_Value in One_Time_Key'Range loop
          One_Time_Key (Index_Value) :=
            To_Byte
@@ -465,7 +482,7 @@ package body CryptoLib.ChaCha20_Poly1305 is
          return Handshake_Failed;
       end if;
       Payload_Key := Read_Key (Key_Data, 0);
-      Apply_ChaCha20 (Payload_Key, Sequence, 0, Zero_Block, OTK_Stream);
+      Apply_ChaCha20_Seq (Payload_Key, Sequence, 0, Zero_Block, OTK_Stream);
       for Index_Value in One_Time_Key'Range loop
          One_Time_Key (Index_Value) :=
            To_Byte
@@ -498,8 +515,8 @@ package body CryptoLib.ChaCha20_Poly1305 is
         Wire_Packet
           (Wire_Packet'First + 4
            .. Wire_Packet'Last - Stream_Element_Offset (Tag_Length));
-      Apply_ChaCha20 (Length_Key, Sequence, 0, Header_In, Header_Out);
-      Apply_ChaCha20 (Payload_Key, Sequence, 1, Body_In, Body_Out);
+      Apply_ChaCha20_Seq (Length_Key, Sequence, 0, Header_In, Header_Out);
+      Apply_ChaCha20_Seq (Payload_Key, Sequence, 1, Body_In, Body_Out);
       Plain_Packet (Plain_Packet'First .. Plain_Packet'First + 3) :=
         Header_Out;
       Plain_Packet (Plain_Packet'First + 4 .. Plain_Packet'Last) := Body_Out;
@@ -509,4 +526,197 @@ package body CryptoLib.ChaCha20_Poly1305 is
          Plain_Packet := [others => 0];
          return Internal_Error;
    end Open;
+
+   --  RFC 8439 2.8: the tag covers
+   --     AAD || pad16(AAD) || ciphertext || pad16(ciphertext)
+   --     || le64(len AAD) || le64(len ciphertext)
+   --  The padding and the two lengths are what stop a byte moving between the
+   --  additional data and the ciphertext without changing the tag.
+   function AEAD_Mac_Input
+     (Associated_Data : Stream_Element_Array;
+      Ciphertext      : Stream_Element_Array) return Stream_Element_Array
+   is
+      function Pad_To_16 (Length : Stream_Element_Offset)
+        return Stream_Element_Offset
+      is ((16 - Length mod 16) mod 16);
+
+      A_Pad : constant Stream_Element_Offset :=
+        Pad_To_16 (Associated_Data'Length);
+      C_Pad : constant Stream_Element_Offset := Pad_To_16 (Ciphertext'Length);
+      Result : Stream_Element_Array
+        (1 .. Associated_Data'Length + A_Pad + Ciphertext'Length + C_Pad + 16)
+        := [others => 0];
+      Cursor : Stream_Element_Offset := 1;
+
+      procedure Put_LE64 (Value : Stream_Element_Offset) is
+         Work : Unsigned_64 := Unsigned_64 (Value);
+      begin
+         for Index_Value in 0 .. 7 loop
+            Result (Cursor + Stream_Element_Offset (Index_Value)) :=
+              Stream_Element (Work and 16#FF#);
+            Work := Shift_Right (Work, 8);
+         end loop;
+         Cursor := Cursor + 8;
+      end Put_LE64;
+   begin
+      if Associated_Data'Length > 0 then
+         Result (Cursor .. Cursor + Associated_Data'Length - 1) :=
+           Associated_Data;
+      end if;
+      Cursor := Cursor + Associated_Data'Length + A_Pad;
+      if Ciphertext'Length > 0 then
+         Result (Cursor .. Cursor + Ciphertext'Length - 1) := Ciphertext;
+      end if;
+      Cursor := Cursor + Ciphertext'Length + C_Pad;
+      Put_LE64 (Associated_Data'Length);
+      Put_LE64 (Ciphertext'Length);
+      return Result;
+   end AEAD_Mac_Input;
+
+   --  The Poly1305 one-time key is the first 32 octets of the keystream block
+   --  at counter 0; the ciphertext starts at counter 1, so the block that
+   --  produced the key is never reused as keystream.
+   procedure AEAD_One_Time_Key
+     (Key_Bytes : Byte_Array;
+      Nonce     : Byte_Array;
+      Result    : out Byte_Array)
+   is
+      Block : Byte_Array (0 .. 63);
+   begin
+      ChaCha20_Block (Key_Bytes, 0, Nonce, Block);
+      Result := Block (0 .. 31);
+      CryptoLib.Secure_Wipe.Wipe (Block'Address, Block'Length);
+   end AEAD_One_Time_Key;
+
+   --  Read the caller's key and nonce into the internal byte layout, after
+   --  the lengths have been checked.
+   procedure Read_AEAD_Inputs
+     (Key_Data   : Stream_Element_Array;
+      Nonce      : Stream_Element_Array;
+      Key_Bytes  : out Byte_Array;
+      Nonce_Bytes : out Byte_Array) is
+   begin
+      for Index_Value in Key_Bytes'Range loop
+         Key_Bytes (Index_Value) :=
+           To_Byte (Key_Data (Key_Data'First
+                              + Stream_Element_Offset (Index_Value)));
+      end loop;
+      for Index_Value in Nonce_Bytes'Range loop
+         Nonce_Bytes (Index_Value) :=
+           To_Byte (Nonce (Nonce'First
+                           + Stream_Element_Offset (Index_Value)));
+      end loop;
+   end Read_AEAD_Inputs;
+
+   function Seal_AEAD
+     (Key_Data        : Stream_Element_Array;
+      Nonce           : Stream_Element_Array;
+      Associated_Data : Stream_Element_Array;
+      Plaintext       : Stream_Element_Array;
+      Wire            : out Stream_Element_Array) return Status
+   is
+      Key_Bytes    : Byte_Array (0 .. 31) := [others => 0];
+      Nonce_Bytes  : Byte_Array (0 .. 11) := [others => 0];
+      One_Time_Key : Byte_Array (0 .. 31) := [others => 0];
+
+      procedure Scrub is
+      begin
+         CryptoLib.Secure_Wipe.Wipe (Key_Bytes'Address, Key_Bytes'Length);
+         CryptoLib.Secure_Wipe.Wipe
+           (One_Time_Key'Address, One_Time_Key'Length);
+      end Scrub;
+   begin
+      Wire := [others => 0];
+      if Natural (Key_Data'Length) /= AEAD_Key_Length
+        or else Natural (Nonce'Length) /= Nonce_Length
+        or else Wire'Length
+                /= Plaintext'Length + Stream_Element_Offset (Tag_Length)
+      then
+         return Handshake_Failed;
+      end if;
+
+      Read_AEAD_Inputs (Key_Data, Nonce, Key_Bytes, Nonce_Bytes);
+      AEAD_One_Time_Key (Key_Bytes, Nonce_Bytes, One_Time_Key);
+
+      declare
+         Cipher : Stream_Element_Array (1 .. Plaintext'Length);
+      begin
+         if Plaintext'Length > 0 then
+            Apply_ChaCha20 (Key_Bytes, Nonce_Bytes, 1, Plaintext, Cipher);
+            Wire (Wire'First .. Wire'First + Cipher'Length - 1) := Cipher;
+         end if;
+         Wire (Wire'First + Plaintext'Length .. Wire'Last) :=
+           Poly1305_Tag (One_Time_Key,
+                         AEAD_Mac_Input (Associated_Data, Cipher));
+      end;
+      Scrub;
+      return Ok;
+   exception
+      when others =>
+         Wire := [others => 0];
+         Scrub;
+         return Internal_Error;
+   end Seal_AEAD;
+
+   function Open_AEAD
+     (Key_Data        : Stream_Element_Array;
+      Nonce           : Stream_Element_Array;
+      Associated_Data : Stream_Element_Array;
+      Wire            : Stream_Element_Array;
+      Plaintext       : out Stream_Element_Array) return Status
+   is
+      Key_Bytes    : Byte_Array (0 .. 31) := [others => 0];
+      Nonce_Bytes  : Byte_Array (0 .. 11) := [others => 0];
+      One_Time_Key : Byte_Array (0 .. 31) := [others => 0];
+
+      procedure Scrub is
+      begin
+         CryptoLib.Secure_Wipe.Wipe (Key_Bytes'Address, Key_Bytes'Length);
+         CryptoLib.Secure_Wipe.Wipe
+           (One_Time_Key'Address, One_Time_Key'Length);
+      end Scrub;
+   begin
+      Plaintext := [others => 0];
+      if Natural (Key_Data'Length) /= AEAD_Key_Length
+        or else Natural (Nonce'Length) /= Nonce_Length
+        or else Natural (Wire'Length) < Tag_Length
+        or else Plaintext'Length
+                /= Wire'Length - Stream_Element_Offset (Tag_Length)
+      then
+         return Handshake_Failed;
+      end if;
+
+      Read_AEAD_Inputs (Key_Data, Nonce, Key_Bytes, Nonce_Bytes);
+      AEAD_One_Time_Key (Key_Bytes, Nonce_Bytes, One_Time_Key);
+
+      declare
+         Split  : constant Stream_Element_Offset :=
+           Wire'Last - Stream_Element_Offset (Tag_Length);
+         Cipher : constant Stream_Element_Array :=
+           Wire (Wire'First .. Split);
+         Wanted : constant Stream_Element_Array :=
+           Wire (Split + 1 .. Wire'Last);
+         Actual : constant Stream_Element_Array :=
+           Poly1305_Tag (One_Time_Key,
+                         AEAD_Mac_Input (Associated_Data, Cipher));
+      begin
+         --  Verified before anything is decrypted, so a forgery never
+         --  produces plaintext that then has to be thrown away.
+         if not CryptoLib.Constant_Time.Equal (Actual, Wanted) then
+            Scrub;
+            return Handshake_Failed;
+         end if;
+         if Cipher'Length > 0 then
+            Apply_ChaCha20 (Key_Bytes, Nonce_Bytes, 1, Cipher, Plaintext);
+         end if;
+      end;
+      Scrub;
+      return Ok;
+   exception
+      when others =>
+         Plaintext := [others => 0];
+         Scrub;
+         return Internal_Error;
+   end Open_AEAD;
+
 end CryptoLib.ChaCha20_Poly1305;
