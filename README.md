@@ -31,6 +31,8 @@ Do not run plain system `gnat*`, `gnatmake`, `gnatls`, `gnatprove`,
 | `CryptoLib.Macs` | HMAC-SHA1/256/384/512, PBKDF2, PBKDF1, PKCS12KDF |
 | `CryptoLib.HKDF` | HKDF (RFC 5869) extract-and-expand over HMAC-SHA-256/384/512, for deriving keys from material that is already unguessable |
 | `CryptoLib.TLS13_KDF` | The TLS 1.3 key-schedule derivations (RFC 8446 §7.1): HKDF-Expand-Label and Derive-Secret |
+| `CryptoLib.ECDH` | ECDH key agreement on P-256/P-384/P-521, with full peer-point validation |
+| `CryptoLib.EC_Curves` | The NIST prime curves' constants, complete point addition and constant-time ladder, shared by `ECDSA` and `ECDH` |
 | `CryptoLib.UMAC` | UMAC-64/128 (RFC 4418) |
 | `CryptoLib.Bcrypt_PBKDF` | bcrypt-PBKDF (OpenSSH key derivation) |
 | `CryptoLib.Ciphers` | AES-128/192/256 (CTR/CBC/GCM), 3DES, RC2 |

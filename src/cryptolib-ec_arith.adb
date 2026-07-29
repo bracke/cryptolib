@@ -168,8 +168,29 @@ package body CryptoLib.EC_Arith is
          R (J) := Word (Carry and Low_Mask);
          Carry := Shift_Right (Carry, 32);
       end loop;
-      return CT_Select
-        ((Word (0) - Word (Carry)) or Geq_Mask (R, Ctx.M), Raw_Sub (R, Ctx.M), R);
+      return Result : Element :=
+        CT_Select
+          ((Word (0) - Word (Carry)) or Geq_Mask (R, Ctx.M),
+           Raw_Sub (R, Ctx.M), R)
+      do
+         --  Raw_Sub runs the full width of Element. When the carry path is
+         --  taken -- the sum overflowed word N-1, so the true value is
+         --  2**(32N) + R and subtracting M is what cancels the overflow --
+         --  the borrow that does the cancelling runs on past the modulus's
+         --  significant words and leaves every one of them all-ones.
+         --
+         --  Those words hold no value: every operation here reads only the
+         --  low N. But Equal_Mask compares the whole array, so two equal
+         --  field elements tested unequal depending on whether the addition
+         --  that produced one of them had carried. Callers avoided it by
+         --  canonicalizing through Add (Ctx, X, Zero) before comparing,
+         --  which zeroes these words as a side effect; a caller that
+         --  compared two Add results directly got an intermittent wrong
+         --  answer instead. Cleared here so that comparison is simply safe.
+         for J in N .. Element'Last loop
+            Result (J) := 0;
+         end loop;
+      end return;
    end Add;
 
    function Sub (Ctx : Context; A, B : Element) return Element is

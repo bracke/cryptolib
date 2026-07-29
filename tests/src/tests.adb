@@ -23,6 +23,8 @@ with CryptoLib.Identities;
 with CryptoLib.X509.Policies;
 with CryptoLib.HKDF;
 with CryptoLib.TLS13_KDF;
+with CryptoLib.ECDH;
+with CryptoLib.EC_Curves;
 with CryptoLib.Hybrid_PQ_Kex;
 with CryptoLib.Fingerprints;
 with CryptoLib.Constant_Time;
@@ -8617,6 +8619,154 @@ procedure Tests is
       end;
    end Check_TLS13_KDF;
 
+   --  ECDH on the NIST prime curves. The agreement itself is checked against
+   --  NIST CAVP and against secrets OpenSSL derived; the refusals are checked
+   --  because an unvalidated peer point recovers the private key.
+   procedure Check_ECDH is
+      package E renames CryptoLib.ECDH;
+      package C renames CryptoLib.EC_Curves;
+
+      CAVP_D256 : constant Ada.Streams.Stream_Element_Array := Bytes_From_Hex
+        ("7d7dc5f71eb29ddaf80d6214632eeae03d9058af1fb6d22ed80badb62bc1a534");
+      CAVP_Q256 : constant Ada.Streams.Stream_Element_Array := Bytes_From_Hex
+        ("04700c48f77f56584c5cc632ca65640db91b6bacce3a4df6b42ce7cc838833d287"
+         & "db71e509e3fd9b060ddb20ba5c51dcc5948d46fbf640dfe0441782cab85fa4ac");
+      CAVP_Z256 : constant Ada.Streams.Stream_Element_Array := Bytes_From_Hex
+        ("46fc62106420ff012e54a434fbdd2d25ccc5852060561e68040dd7778997bd7b");
+      CAVP_P256 : constant Ada.Streams.Stream_Element_Array := Bytes_From_Hex
+        ("04ead218590119e8876b29146ff89ca61770c4edbbf97d38ce385ed281d8a6b230"
+         & "28af61281fd35e2fa7002523acc85a429cb06ee6648325389f59edfce1405141");
+
+      CAVP_D384 : constant Ada.Streams.Stream_Element_Array := Bytes_From_Hex
+        ("3cc3122a68f0d95027ad38c067916ba0eb8c38894d22e1b15618b6818a661774a"
+         & "d463b205da88cf699ab4d43c9cf98a1");
+      CAVP_Q384 : constant Ada.Streams.Stream_Element_Array := Bytes_From_Hex
+        ("04a7c76b970c3b5fe8b05d2838ae04ab47697b9eaf52e764592efda27fe7513272"
+         & "734466b400091adbf2d68c58e0c50066ac68f19f2e1cb879aed43a9969b91a08"
+         & "39c4c38a49749b661efedf243451915ed0905a32b060992b468c64766fc8437a");
+      CAVP_Z384 : constant Ada.Streams.Stream_Element_Array := Bytes_From_Hex
+        ("5f9d29dc5e31a163060356213669c8ce132e22f57c9a04f40ba7fcead493b457"
+         & "e5621e766c40a2e3d4d6a04b25e533f1");
+
+      --  Keys OpenSSL generated; secret OpenSSL derived with pkeyutl.
+      OSSL_D : constant Ada.Streams.Stream_Element_Array := Bytes_From_Hex
+        ("2f7724167279463ea243509514c2cd7e8aa6dde0daa21e42af431db0dac93233");
+      OSSL_Q : constant Ada.Streams.Stream_Element_Array := Bytes_From_Hex
+        ("048ff6d1fc398a46324dccb4b26c10ee9502d024629aef8136492904642ba6c49d"
+         & "15caecc8661fa6b11e952b04e4f27f0aaccbfb3daed51de2da41df2e9d3861ea");
+      OSSL_Z : constant Ada.Streams.Stream_Element_Array := Bytes_From_Hex
+        ("e6c075c6e17fcae71aa984da3ac4bfb04fcd9f53ea0aeb87de510f09a5b759b0");
+
+      Z32 : Ada.Streams.Stream_Element_Array (1 .. 32);
+      Z48 : Ada.Streams.Stream_Element_Array (1 .. 48);
+      Pub : Ada.Streams.Stream_Element_Array (1 .. 65);
+      St  : CryptoLib.Errors.Status;
+   begin
+      St := E.Shared_Secret (C.Nistp256, CAVP_D256, CAVP_Q256, Z32);
+      Check (St = CryptoLib.Errors.Ok and then Z32 = CAVP_Z256,
+             "ECDH P-256 NIST CAVP shared secret");
+      St := E.Public_Key (C.Nistp256, CAVP_D256, Pub);
+      Check (St = CryptoLib.Errors.Ok and then Pub = CAVP_P256,
+             "ECDH P-256 derives CAVP's own public point");
+      St := E.Shared_Secret (C.Nistp384, CAVP_D384, CAVP_Q384, Z48);
+      Check (St = CryptoLib.Errors.Ok and then Z48 = CAVP_Z384,
+             "ECDH P-384 NIST CAVP shared secret");
+
+      St := E.Shared_Secret (C.Nistp256, OSSL_D, OSSL_Q, Z32);
+      Check (St = CryptoLib.Errors.Ok and then Z32 = OSSL_Z,
+             "ECDH P-256 agrees with a secret OpenSSL derived");
+
+      --  Every refusal a peer can provoke, with the secret left zero.
+      declare
+         Off_Curve : Ada.Streams.Stream_Element_Array := CAVP_Q256;
+         Wrong_Tag : Ada.Streams.Stream_Element_Array := CAVP_Q256;
+         Infinity  : constant Ada.Streams.Stream_Element_Array (1 .. 65) :=
+           [others => 0];
+         --  x set to p exactly: a value From_Bytes would carry unreduced.
+         X_Is_P : constant Ada.Streams.Stream_Element_Array := Bytes_From_Hex
+           ("04ffffffff00000001000000000000000000000000ffffffffffffffffffffffff"
+            & "db71e509e3fd9b060ddb20ba5c51dcc5948d46fbf640dfe0441782cab85fa4ac");
+         Short_Q : constant Ada.Streams.Stream_Element_Array (1 .. 64) :=
+           [others => 4];
+      begin
+         Off_Curve (Off_Curve'Last) := Off_Curve (Off_Curve'Last) + 1;
+         Wrong_Tag (Wrong_Tag'First) := 16#02#;
+
+         Check (E.Shared_Secret (C.Nistp256, CAVP_D256, Off_Curve, Z32)
+                  /= CryptoLib.Errors.Ok,
+                "ECDH refuses a point that is not on the curve");
+         Check (Z32 = [Z32'Range => 0],
+                "and leaves no shared secret behind");
+         Check (not E.Valid_Peer_Point (C.Nistp256, Off_Curve),
+                "Valid_Peer_Point refuses it too");
+
+         Check (E.Shared_Secret (C.Nistp256, CAVP_D256, X_Is_P, Z32)
+                  /= CryptoLib.Errors.Ok,
+                "ECDH refuses a coordinate equal to p rather than reducing it");
+         Check (E.Shared_Secret (C.Nistp256, CAVP_D256, Infinity, Z32)
+                  /= CryptoLib.Errors.Ok,
+                "ECDH refuses the all-zero point");
+         Check (E.Shared_Secret (C.Nistp256, CAVP_D256, Wrong_Tag, Z32)
+                  /= CryptoLib.Errors.Ok,
+                "ECDH refuses a point that is not uncompressed");
+         Check (E.Shared_Secret (C.Nistp256, CAVP_D256, Short_Q, Z32)
+                  /= CryptoLib.Errors.Ok,
+                "ECDH refuses a point of the wrong width");
+
+         --  A scalar outside [1, n-1] is refused as well.
+         declare
+            Zero_D : constant Ada.Streams.Stream_Element_Array (1 .. 32) :=
+              [others => 0];
+            Order  : constant Ada.Streams.Stream_Element_Array :=
+              Bytes_From_Hex
+                ("ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc63"
+                 & "2551");
+         begin
+            Check (E.Shared_Secret (C.Nistp256, Zero_D, CAVP_Q256, Z32)
+                     /= CryptoLib.Errors.Ok,
+                   "ECDH refuses a zero private scalar");
+            Check (E.Shared_Secret (C.Nistp256, Order, CAVP_Q256, Z32)
+                     /= CryptoLib.Errors.Ok,
+                   "ECDH refuses a private scalar equal to the order");
+         end;
+      end;
+
+      --  A fresh exchange on each curve must reach the same secret from both
+      --  sides. P-521 is the reason this loop covers all three: its order is
+      --  seven bits narrower than its octet width, so an unmasked draw lands
+      --  below n about one time in 128 and key generation ran out of
+      --  attempts. P-256 and P-384 have no excess bits and could not show it.
+      for Curve in C.Curve_Kind loop
+         declare
+            Rng : CryptoLib.Random.Random_Source;
+            W   : constant Ada.Streams.Stream_Element_Offset :=
+              Ada.Streams.Stream_Element_Offset (E.Secret_Length (Curve));
+            PW  : constant Ada.Streams.Stream_Element_Offset :=
+              Ada.Streams.Stream_Element_Offset (E.Public_Key_Length (Curve));
+            Da, Db, Za, Zb : Ada.Streams.Stream_Element_Array (1 .. W);
+            Qa, Qb         : Ada.Streams.Stream_Element_Array (1 .. PW);
+            Name : constant String := C.Curve_Kind'Image (Curve);
+         begin
+            CryptoLib.Random.Initialize_Production (Rng);
+            Check (E.Generate_Keypair (Curve, Rng, Da, Qa)
+                     = CryptoLib.Errors.Ok
+                   and then E.Generate_Keypair (Curve, Rng, Db, Qb)
+                     = CryptoLib.Errors.Ok,
+                   "ECDH generates a keypair on " & Name);
+            Check (E.Valid_Peer_Point (Curve, Qa)
+                   and then E.Valid_Peer_Point (Curve, Qb),
+                   "ECDH's own generated points pass its own validation on "
+                   & Name);
+            Check (E.Shared_Secret (Curve, Da, Qb, Za) = CryptoLib.Errors.Ok
+                   and then E.Shared_Secret (Curve, Db, Qa, Zb)
+                     = CryptoLib.Errors.Ok,
+                   "both sides agree a secret on " & Name);
+            Check (Za = Zb and then Za /= [Za'Range => 0],
+                   "and it is the same non-zero secret on " & Name);
+         end;
+      end loop;
+   end Check_ECDH;
+
    procedure Check_Zero_On_Failure is
       Pattern : constant Ada.Streams.Stream_Element := 16#A5#;
 
@@ -13976,6 +14126,7 @@ begin
    Check_Consumer_Entry_Points;
    Check_ChaCha20_Poly1305_RFC8439;
    Check_TLS13_KDF;
+   Check_ECDH;
    Check_Cipher_Names;
    Check_X25519_Shared_Secret;
    Check_Chain_Constraint_Bypasses;
