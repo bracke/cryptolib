@@ -41,6 +41,13 @@ package CryptoLib.Certificates is
    Default_Certificate_Days : constant := 397;
    Default_CA_Days          : constant := 3652;
 
+   --  A certificate issued under a CA is cut short at the CA's own expiry
+   --  when the requested window would run past it. Once the CA expires the
+   --  chain stops verifying, so the extra time is validity the certificate
+   --  states and does not have. Valid_Days is therefore a ceiling and not a
+   --  promise; a caller that needs the full window issues under a CA with
+   --  at least that long to live.
+
    --  Render a status as short diagnostic text.
    --  @param Status the status to describe
    --  @return lower-case text naming the status

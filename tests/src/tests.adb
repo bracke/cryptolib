@@ -2577,7 +2577,12 @@ procedure Tests is
    begin
       Outcome :=
         CryptoLib.Certificates.Create_Local_CA
-          ("validity-ca", CA_PEM, CA_Key, CryptoLib.Certificates.P384_Key);
+          ("validity-ca", CA_PEM, CA_Key, CryptoLib.Certificates.P384_Key,
+           --  Longer than the certificates issued under it, because a leaf
+           --  is now held to its issuer's expiry: a CA of the default life
+           --  would clamp the long one below 2049 and this would be testing
+           --  the clamp rather than the encoding.
+           Valid_Days => 12_000);
       Check (Outcome = CryptoLib.Certificates.Ok, "fixture: CA created");
 
       Outcome :=
@@ -5914,6 +5919,84 @@ procedure Tests is
                 "and no certificate comes out of it");
       end;
    end Check_CSR_Signing;
+
+   --  A certificate must not outlive the one that signed it.
+   --
+   --  Issuing asked only how long the caller wanted, so a CA with two days
+   --  left would happily sign a leaf claiming 397. The moment the CA
+   --  expires the chain stops verifying, so the rest of that year is
+   --  validity the certificate states and does not have -- and nothing said
+   --  so, at issuing time or later. This crate already computes the window
+   --  from the clock rather than writing a decade into the source for the
+   --  same reason.
+   --
+   --  Clamped rather than refused: the caller asked for a certificate good
+   --  for up to that long, and a shorter one that works beats a longer one
+   --  that cannot.
+   procedure Check_Validity_Not_Past_Issuer is
+      package X509C renames CryptoLib.X509.Certificates;
+      use type CryptoLib.PEM.Decode_Status;
+
+      function Expiry (Certificate_PEM : String)
+        return CryptoLib.X509.Certificate_Time
+      is
+         Buffer : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset
+                   (CryptoLib.PEM.Maximum_Decoded_Length (Certificate_PEM)));
+         Last   : Ada.Streams.Stream_Element_Offset;
+         From   : Positive := Certificate_PEM'First;
+         Armour : CryptoLib.PEM.Decode_Status;
+         Status : CryptoLib.ASN1.Errors.Decode_Status;
+      begin
+         CryptoLib.PEM.Decode_Block
+           (Certificate_PEM, CryptoLib.PEM.Certificate_Label, From, Buffer,
+            Last, Armour);
+         if Armour /= CryptoLib.PEM.Ok then
+            return (others => 0);
+         end if;
+         return X509C.Not_After
+                  (X509C.Decode_DER
+                     (Buffer (Buffer'First .. Last),
+                      CryptoLib.ASN1.Default_Limits, Status));
+      end Expiry;
+
+      Short_CA, Short_Key, Leaf, Leaf_Key : Unbounded_String;
+      Long_CA, Long_Key, Long_Leaf, Long_Leaf_Key : Unbounded_String;
+   begin
+      --  A CA with two days left, asked for a leaf good for over a year.
+      Check (CryptoLib.Certificates.Create_Local_CA
+               ("short-lived-ca", Short_CA, Short_Key,
+                CryptoLib.Certificates.Ed25519_Key, 2)
+             = CryptoLib.Certificates.Ok,
+             "a CA with two days left");
+      Check (CryptoLib.Certificates.Issue_Server_Certificate
+               (To_String (Short_CA), To_String (Short_Key), "brief.example",
+                [1 => To_Unbounded_String ("brief.example")],
+                Leaf, Leaf_Key, 397)
+             = CryptoLib.Certificates.Ok,
+             "still issues rather than refusing");
+      Check (CryptoLib.X509.Is_Not_After
+               (Expiry (To_String (Leaf)), Expiry (To_String (Short_CA))),
+             "and the leaf does not outlast the CA that signed it");
+
+      --  The ordinary case is untouched: a leaf under a long-lived CA gets
+      --  the window it asked for, not the CA's.
+      Check (CryptoLib.Certificates.Create_Local_CA
+               ("long-lived-ca", Long_CA, Long_Key)
+             = CryptoLib.Certificates.Ok,
+             "a CA with ten years left");
+      Check (CryptoLib.Certificates.Issue_Server_Certificate
+               (To_String (Long_CA), To_String (Long_Key), "usual.example",
+                [1 => To_Unbounded_String ("usual.example")],
+                Long_Leaf, Long_Leaf_Key, 397)
+             = CryptoLib.Certificates.Ok,
+             "issues a leaf as usual");
+      Check (not CryptoLib.X509.Is_Not_After
+                   (Expiry (To_String (Long_CA)),
+                    Expiry (To_String (Long_Leaf))),
+             "whose window is its own and shorter than the CA's, not "
+             & "clamped to it");
+   end Check_Validity_Not_Past_Issuer;
 
    procedure Check_X509_Extensions is
       use type CryptoLib.ASN1.Errors.Decode_Status;
@@ -10837,6 +10920,7 @@ begin
    Check_Ed448;
    Check_Ed448_Certificate;
    Check_CSR_Signing;
+   Check_Validity_Not_Past_Issuer;
    Check_Random_Fails_Closed;
    Check_Off_Curve_Key;
    Check_Ed25519_Encoding;

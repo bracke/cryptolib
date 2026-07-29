@@ -450,15 +450,32 @@ package body CryptoLib.Certificates is
    --  valid for anyone running a little behind.
    Clock_Skew_Allowance : constant Duration := 3600.0;
 
-   function Validity_DER (Valid_Days : Positive) return String is
+   --  Not_After_Limit is the issuer's own expiry, when there is an issuer.
+   --
+   --  A certificate must not claim to be valid past the certificate that
+   --  signed it: the moment the issuer expires the chain stops verifying, so
+   --  the extra time is time the certificate says it has and does not. This
+   --  crate already computes the window from the clock rather than writing a
+   --  fixed decade into the source, for the same reason -- a certificate
+   --  should not state a validity it will not have.
+   function Validity_DER
+     (Valid_Days      : Positive;
+      Limit_Present   : Boolean := False;
+      Not_After_Limit : Ada.Calendar.Time := Ada.Calendar.Clock)
+      return String
+   is
       use type Ada.Calendar.Time;
       Now  : constant Ada.Calendar.Time := Ada.Calendar.Clock;
       From : constant Ada.Calendar.Time := Now - Clock_Skew_Allowance;
-      Till : constant Ada.Calendar.Time :=
+      Want : constant Ada.Calendar.Time :=
         Now + Duration (Valid_Days) * 86_400.0;
+      Till : constant Ada.Calendar.Time :=
+        (if Limit_Present and then Not_After_Limit < Want
+         then Not_After_Limit else Want);
    begin
       return Seq (Time_DER (From) & Time_DER (Till));
    end Validity_DER;
+
 
    function SPKI_DER
      (Public_Key : Ada.Streams.Stream_Element_Array;
@@ -1157,7 +1174,10 @@ package body CryptoLib.Certificates is
       Names       : Subject_Alternative_Name_List;
       Algorithm   : Key_Algorithm := Ed25519_Key;
       Subject_Algorithm : Key_Algorithm := Ed25519_Key;
-      Valid_Days  : Positive := Default_Certificate_Days) return String
+      Valid_Days  : Positive := Default_Certificate_Days;
+      Limit_Present   : Boolean := False;
+      Not_After_Limit : Ada.Calendar.Time := Ada.Calendar.Clock)
+      return String
    is
       --  The signer's algorithm and the subject's need not agree: a CSR brings
       --  its own key, and the CA signs whatever it was handed.
@@ -1167,7 +1187,7 @@ package body CryptoLib.Certificates is
            & Integer_From_Bytes (Serial)
            & Signature_Algorithm (Algorithm)
            & Name_DER (Issuer_CN)
-           & Validity_DER (Valid_Days)
+           & Validity_DER (Valid_Days, Limit_Present, Not_After_Limit)
            & Name_DER (Subject_CN)
            & SPKI_DER (Subject_Key, Subject_Algorithm)
            & Extensions_DER (Profile, Names, Subject_Key, Sign_Public));
@@ -1457,6 +1477,65 @@ package body CryptoLib.Certificates is
    --  one structure drift: the parsed one enforces canonical DER, bounds what
    --  it will decode, and refuses trailing data, none of which the walk here
    --  did.
+   --  When the certificate that will sign this one runs out, as a clock
+   --  time. Absent when the PEM does not decode -- the caller is issuing
+   --  under it either way, and a limit that cannot be read is not a licence
+   --  to ignore one.
+   function Issuer_Expiry
+     (CA_Certificate_PEM : String; Found : out Boolean)
+      return Ada.Calendar.Time
+   is
+      DER : constant String := Base64_Decode (CA_Certificate_PEM);
+   begin
+      Found := False;
+      if DER'Length = 0 then
+         return Ada.Calendar.Clock;
+      end if;
+
+      declare
+         Raw : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (DER'Length));
+         Status : CryptoLib.ASN1.Errors.Decode_Status;
+      begin
+         for I in DER'Range loop
+            Raw (Ada.Streams.Stream_Element_Offset (I - DER'First + 1)) :=
+              Character'Pos (DER (I));
+         end loop;
+
+         declare
+            use type CryptoLib.ASN1.Errors.Decode_Status;
+            Item : constant CryptoLib.X509.Certificates.Certificate :=
+              CryptoLib.X509.Certificates.Decode_DER
+                (Raw, CryptoLib.ASN1.Default_Limits, Status);
+         begin
+            if Status /= CryptoLib.ASN1.Errors.Ok
+              or else not CryptoLib.X509.Certificates.Is_Present (Item)
+            then
+               return Ada.Calendar.Clock;
+            end if;
+
+            declare
+               When_Over : constant CryptoLib.X509.Certificate_Time :=
+                 CryptoLib.X509.Certificates.Not_After (Item);
+            begin
+               Found := True;
+               return Ada.Calendar.Formatting.Time_Of
+                        (Year    => When_Over.Year,
+                         Month   => When_Over.Month,
+                         Day     => When_Over.Day,
+                         Hour    => When_Over.Hour,
+                         Minute  => When_Over.Minute,
+                         Second  => Natural'Min (When_Over.Second, 59),
+                         Time_Zone => 0);
+            end;
+         end;
+      end;
+   exception
+      when others =>
+         Found := False;
+         return Ada.Calendar.Clock;
+   end Issuer_Expiry;
+
    function Certificate_Subject_CN
      (Certificate_PEM : String;
       Common_Name     : out Unbounded_String) return Boolean
@@ -1520,6 +1599,14 @@ package body CryptoLib.Certificates is
       Issuer_Name : Unbounded_String;
       Have_Issuer : constant Boolean :=
         Certificate_Subject_CN (CA_Certificate_PEM, Issuer_Name);
+
+      --  What the CA itself runs out of. A certificate issued here must
+      --  not outlast it: past that instant the chain stops verifying, and
+      --  the remaining time is validity the certificate claims and does not
+      --  have.
+      CA_Ends_Known : Boolean;
+      CA_Ends       : constant Ada.Calendar.Time :=
+        Issuer_Expiry (CA_Certificate_PEM, CA_Ends_Known);
 
       --  A leaf is signed by the CA and has to be verifiable by whatever
       --  accepts the CA, so it carries the same kind of key. Nothing asks the
@@ -1651,7 +1738,9 @@ package body CryptoLib.Certificates is
                  Names       => Names,
                  Algorithm   => Algorithm,
                  Subject_Algorithm => Algorithm,
-                 Valid_Days  => Valid_Days));
+                 Valid_Days  => Valid_Days,
+                 Limit_Present   => CA_Ends_Known,
+                 Not_After_Limit => CA_Ends));
       end;
 
       if Length (Cert) = 0 then
@@ -1731,6 +1820,14 @@ package body CryptoLib.Certificates is
    is
       Algorithm : constant Key_Algorithm :=
         Algorithm_Of_Private_Key (CA_Private_Key_PEM);
+
+      --  What the CA itself runs out of. A certificate issued here must
+      --  not outlast it: past that instant the chain stops verifying, and
+      --  the remaining time is validity the certificate claims and does not
+      --  have.
+      CA_Ends_Known : Boolean;
+      CA_Ends       : constant Ada.Calendar.Time :=
+        Issuer_Expiry (CA_Certificate_PEM, CA_Ends_Known);
 
       --  The issuer name must equal the CA's subject name exactly.
       Issuer_Name : Unbounded_String;
@@ -1829,7 +1926,9 @@ package body CryptoLib.Certificates is
                        Names       => [1 => Subject],
                        Algorithm   => Algorithm,
                        Subject_Algorithm => P384_Key,
-                       Valid_Days  => Valid_Days));
+                       Valid_Days  => Valid_Days,
+                 Limit_Present   => CA_Ends_Known,
+                 Not_After_Limit => CA_Ends));
             end;
 
             if Length (Cert) = 0 then
@@ -1873,7 +1972,9 @@ package body CryptoLib.Certificates is
                        Names       => [1 => Subject],
                        Algorithm   => Algorithm,
                        Subject_Algorithm => Ed448_Key,
-                       Valid_Days  => Valid_Days));
+                       Valid_Days  => Valid_Days,
+                 Limit_Present   => CA_Ends_Known,
+                 Not_After_Limit => CA_Ends));
             end;
 
             if Length (Cert) = 0 then
@@ -1912,7 +2013,9 @@ package body CryptoLib.Certificates is
                  Names       => [1 => Subject],
                  Algorithm   => Algorithm,
                  Subject_Algorithm => Ed25519_Key,
-                 Valid_Days  => Valid_Days));
+                 Valid_Days  => Valid_Days,
+                 Limit_Present   => CA_Ends_Known,
+                 Not_After_Limit => CA_Ends));
       end;
 
       if Length (Cert) = 0 then
