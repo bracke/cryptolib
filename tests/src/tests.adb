@@ -318,8 +318,10 @@ procedure Tests is
          procedure Check_Chain (Algorithm : CryptoLib.Certificates.Key_Algorithm)
          is
             Label   : constant String :=
-              (if Algorithm = CryptoLib.Certificates.P384_Key
-               then "p384" else "ed25519");
+              (case Algorithm is
+                  when CryptoLib.Certificates.P384_Key    => "p384",
+                  when CryptoLib.Certificates.Ed448_Key   => "ed448",
+                  when CryptoLib.Certificates.Ed25519_Key => "ed25519");
             Root    : Ada.Strings.Unbounded.Unbounded_String;
             Root_Key : Ada.Strings.Unbounded.Unbounded_String;
             Leaf    : Ada.Strings.Unbounded.Unbounded_String;
@@ -345,10 +347,21 @@ procedure Tests is
                  (Ada.Strings.Unbounded.To_String (Root),
                   Ada.Strings.Unbounded.To_String (Leaf)),
                Label & " issued certificate verifies against its CA in OpenSSL");
+
+            --  The key that comes back with it is the leaf's own. Issuing a
+            --  certificate and a key that do not go together would be caught
+            --  by nothing else here: both halves look well formed alone.
+            Check
+              (CryptoLib.Certificates.Private_Key_Matches_Certificate
+                 (Ada.Strings.Unbounded.To_String (Leaf),
+                  Ada.Strings.Unbounded.To_String (Leaf_K))
+               = CryptoLib.Certificates.Ok,
+               Label & " issued key belongs to the certificate issued with it");
          end Check_Chain;
       begin
          Check_Chain (CryptoLib.Certificates.Ed25519_Key);
          Check_Chain (CryptoLib.Certificates.P384_Key);
+         Check_Chain (CryptoLib.Certificates.Ed448_Key);
       end;
       Check
         (Ada.Strings.Unbounded.Index

@@ -18,7 +18,12 @@ package CryptoLib.Certificates is
    --  nothing that speaks TLS to a person. P-384 is what a certificate meant
    --  for a browser has to be. The default stays Ed25519 so existing callers
    --  keep what they had; a caller that wants to be trusted asks for P-384.
-   type Key_Algorithm is (Ed25519_Key, P384_Key);
+   --
+   --  Ed448 is a larger Edwards curve for a caller who wants one, and it is
+   --  accepted by even less than Ed25519 is -- offered because this crate can
+   --  verify it and check a key against it, and being unable to issue what it
+   --  can verify was the odd part. Nothing about browsers changes here.
+   type Key_Algorithm is (Ed25519_Key, P384_Key, Ed448_Key);
 
    --  How long an issued certificate is valid, in days, counted from the
    --  moment it is issued.

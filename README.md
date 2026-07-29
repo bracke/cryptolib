@@ -62,7 +62,7 @@ Do not run plain system `gnat*`, `gnatmake`, `gnatls`, `gnatprove`,
 | `CryptoLib.OCSP` | OCSP requests and responses, including responder authorisation |
 | `CryptoLib.X509.Revocation` | ask a CRL or an OCSP response about a certificate, freshness included |
 | `CryptoLib.X509.Path_Building` | search for a path to a trust anchor, skipping paths that cannot carry the policies; proposes, never concludes |
-| `CryptoLib.Certificates` | X.509: local CA, server/client/email issuance, CSR signing, PKCS#12, fingerprints; issued certificates carry a random serial, a validity window from the clock, and key identifiers |
+| `CryptoLib.Certificates` | X.509: local CA, server/client/email issuance, CSR signing, PKCS#12, fingerprints; keys are Ed25519, P-384 or Ed448; issued certificates carry a random serial, a validity window from the clock, and key identifiers |
 | `CryptoLib.Errors`, `CryptoLib.Buffers`, `CryptoLib.Fingerprints` | status codes, packet buffers, key fingerprints |
 
 The snippets below are fragments, chosen to show the call rather than a whole
