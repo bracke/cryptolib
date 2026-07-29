@@ -21,6 +21,7 @@ with CryptoLib.PKCS8;
 with CryptoLib.PKCS12;
 with CryptoLib.Identities;
 with CryptoLib.X509.Policies;
+with CryptoLib.HKDF;
 with CryptoLib.Hybrid_PQ_Kex;
 with CryptoLib.Fingerprints;
 with CryptoLib.Constant_Time;
@@ -8163,6 +8164,205 @@ procedure Tests is
              & Natural'Image (CryptoLib.Buffers.Length (Item)));
    end Check_Buffer_Ceiling;
 
+   --  HKDF (RFC 5869).
+   --
+   --  Written from the RFC in Python and checked against pyca before any of
+   --  the Ada existed, which is the order that catches a transcription error
+   --  rather than enshrining it. The SHA-256 vectors are the RFC's own A.1,
+   --  A.2 and A.3 -- basic, long inputs, and the empty salt and info the
+   --  specification treats as meaningful rather than as an error. The
+   --  SHA-384 and SHA-512 ones were produced by the same reference and
+   --  agreed with pyca.
+   procedure Check_HKDF is
+      package HK renames CryptoLib.HKDF;
+
+      V1_IKM : constant String :=
+        "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b";
+      V1_Salt : constant String :=
+        "000102030405060708090a0b0c";
+      V1_Info : constant String :=
+        "f0f1f2f3f4f5f6f7f8f9";
+      V1_PRK : constant String :=
+        "077709362c2e32df0ddc3f0dc47bba6390b6c73bb50f9c3122ec844ad7c2b3e5";
+      V1_OKM : constant String :=
+        "3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865";
+      V2_IKM : constant String :=
+        "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20212223242526272829" &
+        "2a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f";
+      V2_Salt : constant String :=
+        "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f80818283848586878889" &
+        "8a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeaf";
+      V2_Info : constant String :=
+        "b0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9" &
+        "dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff";
+      V2_PRK : constant String :=
+        "06a6b88c5853361a06104c9ceb35b45cef760014904671014a193f40c15fc244";
+      V2_OKM : constant String :=
+        "b11e398dc80327a1c8e7f78c596a49344f012eda2d4efad8a050cc4c19afa97c59045a99cac7827271cb" &
+        "41c65e590e09da3275600c2f09b8367793a9aca3db71cc30c58179ec3e87c14c01d5c1f3434f1d87";
+      V3_IKM : constant String :=
+        "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b";
+      V3_Salt : constant String := "";
+      V3_Info : constant String := "";
+      V3_PRK : constant String :=
+        "19ef24a32c717b167f33a91d6f648bdf96596776afdb6377ac434c1c293ccb04";
+      V3_OKM : constant String :=
+        "8da4e775a563c18f715f802a063c5a31b8a11f5c5ee1879ec3454e5f3c738d2d9d201395faa4b61a96c8";
+      V4_IKM : constant String :=
+        "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b";
+      V4_Salt : constant String :=
+        "000102030405060708090a0b0c";
+      V4_Info : constant String :=
+        "f0f1f2f3f4f5f6f7f8f9";
+      V4_PRK : constant String :=
+        "704b39990779ce1dc548052c7dc39f303570dd13fb39f7acc564680bef80e8dec70ee9a7e1f3e293ef68" &
+        "eceb072a5ade";
+      V4_OKM : constant String :=
+        "9b5097a86038b805309076a44b3a9f38063e25b516dcbf369f394cfab43685f748b6457763e4f0204fc5" &
+        "d95d1da3e625";
+      V5_IKM : constant String :=
+        "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b";
+      V5_Salt : constant String :=
+        "000102030405060708090a0b0c";
+      V5_Info : constant String :=
+        "f0f1f2f3f4f5f6f7f8f9";
+      V5_PRK : constant String :=
+        "665799823737ded04a88e47e54a5890bb2c3d247c7a4254a8e61350723590a26c36238127d8661b88cf8" &
+        "0ef802d57e2f7cebcf1e00e083848be19929c61b4237";
+      V5_OKM : constant String :=
+        "832390086cda71fb47625bb5ceb168e4c8e26a1a16ed34d9fc7fe92c1481579338da362cb8d9f925d7cb" &
+        "cce0dff7098769cf15959867d571c1715450cb530137";
+
+      function From_Hex
+        (Text : String) return Ada.Streams.Stream_Element_Array
+      is
+         Result : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (Text'Length / 2));
+         function Nibble (C : Character) return Natural
+         is (case C is
+                when '0' .. '9' => Character'Pos (C) - Character'Pos ('0'),
+                when others     => Character'Pos (C) - Character'Pos ('a') + 10);
+      begin
+         for I in Result'Range loop
+            Result (I) :=
+              Ada.Streams.Stream_Element
+                (Nibble (Text (Text'First + 2 * Natural (I - 1))) * 16
+                 + Nibble (Text (Text'First + 2 * Natural (I - 1) + 1)));
+         end loop;
+         return Result;
+      end From_Hex;
+
+      procedure One_Vector
+        (Label  : String;
+         Hash   : HK.Hash_Algorithm;
+         IKM, Salt, Info : String;
+         Length : Natural;
+         PRK, OKM : String)
+      is
+         Got_PRK : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (HK.PRK_Length (Hash)));
+         Got_OKM : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (Length));
+         Status  : CryptoLib.Errors.Status;
+      begin
+         Status := HK.Extract (Hash, From_Hex (Salt), From_Hex (IKM), Got_PRK);
+         Check (Status = CryptoLib.Errors.Ok
+                and then Got_PRK = From_Hex (PRK),
+                Label & ": the pseudorandom key");
+
+         --  Expand from that key on its own, which RFC 5869 allows and
+         --  TLS 1.3 does between handshake stages.
+         Status := HK.Expand (Hash, Got_PRK, From_Hex (Info), Got_OKM);
+         Check (Status = CryptoLib.Errors.Ok
+                and then Got_OKM = From_Hex (OKM),
+                Label & ": expanding that key gives the output");
+
+         --  And the two together.
+         Got_OKM := [others => 0];
+         Status := HK.Derive (Hash, From_Hex (Salt), From_Hex (IKM),
+                              From_Hex (Info), Got_OKM);
+         Check (Status = CryptoLib.Errors.Ok
+                and then Got_OKM = From_Hex (OKM),
+                Label & ": and deriving in one step gives the same");
+      end One_Vector;
+   begin
+      One_Vector ("A.1 SHA-256 basic", HK.SHA256,
+                  V1_IKM, V1_Salt, V1_Info, 42,
+                  V1_PRK, V1_OKM);
+      One_Vector ("A.2 SHA-256 long inputs", HK.SHA256,
+                  V2_IKM, V2_Salt, V2_Info, 82,
+                  V2_PRK, V2_OKM);
+      One_Vector ("A.3 SHA-256 empty salt and info", HK.SHA256,
+                  V3_IKM, V3_Salt, V3_Info, 42,
+                  V3_PRK, V3_OKM);
+      One_Vector ("SHA-384", HK.SHA384,
+                  V4_IKM, V4_Salt, V4_Info, 48,
+                  V4_PRK, V4_OKM);
+      One_Vector ("SHA-512", HK.SHA512,
+                  V5_IKM, V5_Salt, V5_Info, 64,
+                  V5_PRK, V5_OKM);
+
+      --  The counter is one octet, so 255 blocks is the ceiling. A 256th
+      --  would repeat the first block's counter and so its output.
+      declare
+         PRK : constant Ada.Streams.Stream_Element_Array (1 .. 32) :=
+           [others => 16#42#];
+         At_Ceiling : Ada.Streams.Stream_Element_Array (1 .. 255 * 32);
+         Past_It    : Ada.Streams.Stream_Element_Array (1 .. 255 * 32 + 1);
+         Nothing    : Ada.Streams.Stream_Element_Array (1 .. 0);
+         Status     : CryptoLib.Errors.Status;
+      begin
+         Check (HK.Maximum_Output (HK.SHA256) = 255 * 32,
+                "the SHA-256 ceiling is 255 blocks");
+
+         Status := HK.Expand (HK.SHA256, PRK, [1 .. 0 => 0], At_Ceiling);
+         Check (Status = CryptoLib.Errors.Ok,
+                "output right up to the ceiling is produced");
+
+         Status := HK.Expand (HK.SHA256, PRK, [1 .. 0 => 0], Past_It);
+         Check (Status /= CryptoLib.Errors.Ok,
+                "and one octet past it is refused rather than wrapped");
+         Check (Past_It = [Past_It'Range => 0],
+                "with nothing left in the buffer to be mistaken for a key");
+
+         Status := HK.Expand (HK.SHA256, PRK, [1 .. 0 => 0], Nothing);
+         Check (Status = CryptoLib.Errors.Ok,
+                "asking for no output at all is not an error");
+
+         --  A pseudorandom key shorter than the hash is not one.
+         declare
+            Short  : constant Ada.Streams.Stream_Element_Array (1 .. 31) :=
+              [others => 16#42#];
+            Some_Out : Ada.Streams.Stream_Element_Array (1 .. 16);
+         begin
+            Check (HK.Expand (HK.SHA256, Short, [1 .. 0 => 0], Some_Out)
+                   /= CryptoLib.Errors.Ok,
+                   "a key shorter than the hash is refused");
+         end;
+      end;
+
+      --  Info is what separates two keys drawn from one exchange. If it did
+      --  not reach the computation, every key a protocol derived would be
+      --  the same key.
+      declare
+         Secret : constant Ada.Streams.Stream_Element_Array (1 .. 32) :=
+           [others => 16#5A#];
+         Salt   : constant Ada.Streams.Stream_Element_Array (1 .. 8) :=
+           [others => 16#11#];
+         Enc, Mac : Ada.Streams.Stream_Element_Array (1 .. 32);
+         Status : CryptoLib.Errors.Status;
+      begin
+         Status := HK.Derive (HK.SHA256, Salt, Secret,
+                              [1 => Character'Pos ('e')], Enc);
+         Check (Status = CryptoLib.Errors.Ok, "one context derives");
+         Status := HK.Derive (HK.SHA256, Salt, Secret,
+                              [1 => Character'Pos ('m')], Mac);
+         Check (Status = CryptoLib.Errors.Ok, "another context derives");
+         Check (Enc /= Mac,
+                "two contexts over one secret give unrelated keys");
+      end;
+   end Check_HKDF;
+
    procedure Check_X509_Extensions is
       use type CryptoLib.ASN1.Errors.Decode_Status;
       use type CryptoLib.PEM.Decode_Status;
@@ -13177,6 +13377,7 @@ begin
    Check_Streaming_SHA256_SHA512;
    Check_SHA1_Fingerprint;
    Check_Buffer_Ceiling;
+   Check_HKDF;
    Check_Cipher_Names;
    Check_X25519_Shared_Secret;
    Check_Chain_Constraint_Bypasses;

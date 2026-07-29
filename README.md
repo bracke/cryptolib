@@ -29,6 +29,7 @@ Do not run plain system `gnat*`, `gnatmake`, `gnatls`, `gnatprove`,
 | `CryptoLib.Checksums` | Adler-32 and CRC-32 |
 | `CryptoLib.SHA3` | SHA3-256/512, SHAKE128/256 |
 | `CryptoLib.Macs` | HMAC-SHA1/256/384/512, PBKDF2, PBKDF1, PKCS12KDF |
+| `CryptoLib.HKDF` | HKDF (RFC 5869) extract-and-expand over HMAC-SHA-256/384/512, for deriving keys from material that is already unguessable |
 | `CryptoLib.UMAC` | UMAC-64/128 (RFC 4418) |
 | `CryptoLib.Bcrypt_PBKDF` | bcrypt-PBKDF (OpenSSH key derivation) |
 | `CryptoLib.Ciphers` | AES-128/192/256 (CTR/CBC/GCM), 3DES, RC2 |
