@@ -7969,6 +7969,86 @@ procedure Tests is
              "a name this does not know has no tag length to give");
    end Check_UMAC_Negotiation_Guard;
 
+   --  Hashing a message in pieces, for the two digests where nothing did.
+   --
+   --  The streaming tests cover MD5, SHA-1 and SHA-384. SHA-256 and SHA-512
+   --  had none, and each digest buffers its own partial block -- 64 octets
+   --  for SHA-256, 128 for SHA-512 -- so a sibling being right says nothing
+   --  about them.
+   --
+   --  The one-shot SHA256 is Initialize, one Update, Finalize, so the NIST
+   --  vectors never cross a chunk boundary. Production does: versionlib
+   --  hashes a file in slices and shaping feeds a glyph at a time. A
+   --  buffering fault there gives a wrong digest for exactly the inputs the
+   --  vectors do not cover.
+   procedure Check_Streaming_SHA256_SHA512 is
+      function Sequence (Length : Natural)
+        return Ada.Streams.Stream_Element_Array
+      is
+         Result : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (Length));
+      begin
+         for I in Result'Range loop
+            Result (I) :=
+              Ada.Streams.Stream_Element (Natural (I) mod 251);
+         end loop;
+         return Result;
+      end Sequence;
+   begin
+      --  Every length across the padding boundary, fed one octet at a time
+      --  and split at a third, against the one-shot answer.
+      for Length in 0 .. 200 loop
+         declare
+            Data  : constant Ada.Streams.Stream_Element_Array :=
+              Sequence (Length);
+            Split : constant Ada.Streams.Stream_Element_Offset :=
+              Data'First + Ada.Streams.Stream_Element_Offset (Length / 3) - 1;
+
+            Byte_256, Split_256 : CryptoLib.Hashes.SHA256_Context;
+            Byte_512, Split_512 : CryptoLib.Hashes.SHA512_Context;
+         begin
+            CryptoLib.Hashes.Initialize_SHA256 (Byte_256);
+            CryptoLib.Hashes.Initialize_SHA512 (Byte_512);
+            for Index in Data'Range loop
+               CryptoLib.Hashes.Update (Byte_256, Data (Index .. Index));
+               CryptoLib.Hashes.Update (Byte_512, Data (Index .. Index));
+            end loop;
+            Check (Ada.Streams.Stream_Element_Array
+                     (CryptoLib.Hashes.Finalize (Byte_256))
+                   = Ada.Streams.Stream_Element_Array
+                       (CryptoLib.Hashes.SHA256 (Data)),
+                   "SHA-256 one octet at a time matches the one-shot at"
+                   & Natural'Image (Length) & " octets");
+            Check (Ada.Streams.Stream_Element_Array
+                     (CryptoLib.Hashes.Finalize (Byte_512))
+                   = Ada.Streams.Stream_Element_Array
+                       (CryptoLib.Hashes.SHA512 (Data)),
+                   "SHA-512 one octet at a time matches the one-shot at"
+                   & Natural'Image (Length) & " octets");
+
+            CryptoLib.Hashes.Initialize_SHA256 (Split_256);
+            CryptoLib.Hashes.Update (Split_256, Data (Data'First .. Split));
+            CryptoLib.Hashes.Update (Split_256, Data (Split + 1 .. Data'Last));
+            Check (Ada.Streams.Stream_Element_Array
+                     (CryptoLib.Hashes.Finalize (Split_256))
+                   = Ada.Streams.Stream_Element_Array
+                       (CryptoLib.Hashes.SHA256 (Data)),
+                   "SHA-256 split update matches the one-shot at"
+                   & Natural'Image (Length) & " octets");
+
+            CryptoLib.Hashes.Initialize_SHA512 (Split_512);
+            CryptoLib.Hashes.Update (Split_512, Data (Data'First .. Split));
+            CryptoLib.Hashes.Update (Split_512, Data (Split + 1 .. Data'Last));
+            Check (Ada.Streams.Stream_Element_Array
+                     (CryptoLib.Hashes.Finalize (Split_512))
+                   = Ada.Streams.Stream_Element_Array
+                       (CryptoLib.Hashes.SHA512 (Data)),
+                   "SHA-512 split update matches the one-shot at"
+                   & Natural'Image (Length) & " octets");
+         end;
+      end loop;
+   end Check_Streaming_SHA256_SHA512;
+
    procedure Check_X509_Extensions is
       use type CryptoLib.ASN1.Errors.Decode_Status;
       use type CryptoLib.PEM.Decode_Status;
@@ -12980,6 +13060,7 @@ begin
    Check_Hybrid_PQ_Names;
    Check_CBC_Paths_Agree;
    Check_UMAC_Negotiation_Guard;
+   Check_Streaming_SHA256_SHA512;
    Check_Cipher_Names;
    Check_X25519_Shared_Secret;
    Check_Chain_Constraint_Bypasses;
