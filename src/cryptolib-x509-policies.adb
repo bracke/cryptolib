@@ -406,6 +406,12 @@ package body CryptoLib.X509.Policies is
             Item.Nodes (I).Parent := Parent;
             Item.Nodes (I).Valid := Valid;
             Item.Nodes (I).Expected_Count := 0;
+            if Count > Maximum_Policies then
+               --  A node that expects more than it can remember will fail to
+               --  match something it should have. Silently keeping the first
+               --  few would reject a chain for a reason nothing recorded.
+               Item.Exhausted := True;
+            end if;
             for J in 1 .. Natural'Min (Count, Maximum_Policies) loop
                Item.Nodes (I).Expected_Count :=
                  Item.Nodes (I).Expected_Count + 1;
@@ -619,11 +625,14 @@ package body CryptoLib.X509.Policies is
                         --  Every subject policy this issuer policy maps to.
                         for K in 1 .. Maps.Count loop
                            if Same (Maps.Values (K).Issuer_Policy, From_P)
-                             and then Count < Maximum_Policies
                            then
-                              Count := Count + 1;
-                              Subjects (Count) :=
-                                Maps.Values (K).Subject_Policy;
+                              if Count = Maximum_Policies then
+                                 Item.Exhausted := True;
+                              else
+                                 Count := Count + 1;
+                                 Subjects (Count) :=
+                                   Maps.Values (K).Subject_Policy;
+                              end if;
                            end if;
                         end loop;
 
@@ -735,6 +744,9 @@ package body CryptoLib.X509.Policies is
       Accepted := not Item.Exhausted;
    end Step;
 
+   function Exhausted (Item : Engine) return Boolean
+   is (Item.Exhausted);
+
    function Finish
      (Item : in out Engine; Wanted : Policy_Array) return Policy_Outcome
    is
@@ -834,13 +846,19 @@ package body CryptoLib.X509.Policies is
          end;
       end if;
 
+      --  The policies the path established. Reporting fewer than there are
+      --  would hand back a list that looks complete and is not, and the
+      --  point of this list is to be acted on.
       for I in Item.Nodes'Range loop
          if Item.Nodes (I).In_Use
            and then Item.Nodes (I).Depth = Depth
-           and then Result.Count < Maximum_Policies
          then
-            Result.Count := Result.Count + 1;
-            Result.Values (Result.Count) := Item.Nodes (I).Valid;
+            if Result.Count = Maximum_Policies then
+               Item.Exhausted := True;
+            else
+               Result.Count := Result.Count + 1;
+               Result.Values (Result.Count) := Item.Nodes (I).Valid;
+            end if;
          end if;
       end loop;
 

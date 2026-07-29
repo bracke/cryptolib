@@ -230,6 +230,16 @@ package CryptoLib.X509.Policies is
       Self_Issued : Boolean;
       Accepted    : out Boolean);
 
+   --  Did the tree outgrow what this can hold?
+   --
+   --  Worth asking separately from the verdict. A path refused because it
+   --  establishes no acceptable policy is the certificates' doing; one
+   --  refused because the tree ran out of room is this implementation's, and
+   --  an operator looking at a rejection needs to know which.
+   --  @param Item the state to inspect
+   --  @return True when a node could not be recorded
+   function Exhausted (Item : Engine) return Boolean;
+
    --  Conclude, intersecting what survived with what the caller accepts.
    --
    --  An empty Wanted means any policy, which is the RFC's

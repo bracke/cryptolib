@@ -281,7 +281,19 @@ package body CryptoLib.X509.Validation is
                pragma Unreferenced (Issuer);
                PP.Step (Engine, Subject, Self_Issued, Ok);
                if not Ok then
-                  return Fail (Policy_Not_Established, I);
+                  --  Carrying the exhaustion flag out with the failure: a
+                  --  path refused for establishing no acceptable policy and
+                  --  one refused because the tree would not fit are both
+                  --  Policy_Not_Established, and they are not the same
+                  --  problem to go and look at.
+                  return (Valid    => False,
+                          Failure  => Policy_Not_Established,
+                          Index    => I,
+                          Policies =>
+                            (Acceptable => False,
+                             Exhausted  => PP.Exhausted (Engine),
+                             Count      => 0,
+                             Values     => [others => <>]));
                end if;
             end;
          end loop;

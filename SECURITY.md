@@ -215,7 +215,11 @@ every status reading `Ok` while every key it produces is predictable.
   chain lacking it fail. The tree is bounded; running out of room makes the
   outcome unacceptable rather than truncating it, because a partial tree is
   missing exactly the nodes that pruning would have removed and can only be
-  too permissive. **Revocation (CRL/OCSP) is not
+  too permissive. That case is reported as `Policies.Exhausted` alongside the
+  failure, so a path refused for establishing no acceptable policy can be told
+  apart from one refused because this implementation would not hold the tree
+  -- the first is the certificates' doing and the second is ours, and they are
+  not the same thing to go and investigate. **Revocation (CRL/OCSP) is not
   consulted** by the validator. There is no path building here: finding a chain
   through
   cross-signed roots is `X509.Path_Building`, kept separate: it searches and
