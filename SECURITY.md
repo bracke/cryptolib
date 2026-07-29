@@ -199,7 +199,10 @@ every status reading `Ok` while every key it produces is predictable.
   in particular is one RFC 5280 §4.2.1.5 says a conforming CA SHOULD mark
   critical, so refusing it was refusing what the specification asks for. Policy qualifiers -- a pointer to the issuer's
   certification practice statement, and a notice meant to be displayed -- are
-  read and reported per policy by `Policies_Of`. They are deliberately not
+  read and reported per policy by `Policies_Of`, clamped at 200 characters
+  with `Truncated` set rather than assumed to fit: the RFC bounds
+  `DisplayText` but says nothing about how long a CPS URI may be, so the
+  bound is this crate's and not a promise about the input. They are deliberately not
   carried through the tree: §6.1 never consults them, a node's qualifiers are
   those of the certificate that created it, and the ones belonging to a
   chain's established policies are the leaf's own, which `Policies_Of` gives
@@ -356,7 +359,12 @@ every status reading `Ok` while every key it produces is predictable.
   than falling back on anything predictable. The width also puts the value
   out of reach of an attacker who would need to predict it to attempt a
   chosen-prefix collision against the signature hash.
-- **Malformed input comes back as a status, not an exception.** The decoders
+- **Malformed input comes back as a status, not an exception.** The policy
+  parsers were run over a further 13,943 inputs mutated from certificates
+  that carry every policy extension and both qualifier kinds; 1,525 of those
+  decoded far enough to run all five parsers and read the qualifier text, and
+  none raised. The earlier corpus predates that code and its seeds carry no
+  policy extensions, so it never reached them. The decoders
   were run over 14,600 hostile inputs -- truncations at every prefix
   boundary, pathological lengths, nesting thousands deep, and structured
   mutations of real certificates, CRLs, OCSP responses, PKCS#8 keys and PEM

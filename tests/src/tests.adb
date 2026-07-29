@@ -2202,6 +2202,25 @@ procedure Tests is
       package XC renames CryptoLib.X509.CRLs;
       package CO renames CryptoLib.OCSP;
 
+      function From_Hex
+        (Text : String) return Ada.Streams.Stream_Element_Array
+      is
+         Result : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (Text'Length / 2));
+         function Nibble (C : Character) return Natural
+         is (case C is
+                when '0' .. '9' => Character'Pos (C) - Character'Pos ('0'),
+                when others     => Character'Pos (C) - Character'Pos ('a') + 10);
+      begin
+         for I in Result'Range loop
+            Result (I) :=
+              Ada.Streams.Stream_Element
+                (Nibble (Text (Text'First + 2 * Natural (I - 1))) * 16
+                 + Nibble (Text (Text'First + 2 * Natural (I - 1) + 1)));
+         end loop;
+         return Result;
+      end From_Hex;
+
       function Decoded_Bytes (Text : String)
         return Ada.Streams.Stream_Element_Array
       is
@@ -2237,6 +2256,26 @@ procedure Tests is
       Raised  : Natural := 0;
       Decoded : Natural := 0;
       Rounds  : constant := 3_000;
+
+      --  A second seed, carrying every policy extension and both qualifier
+      --  kinds. The issued certificate above carries none, so without this
+      --  the policy parsers never see a mutated byte -- and they are five
+      --  readers of attacker-supplied extension values.
+      Policy_Seed_DER : constant String :=
+        "30820249308201cea003020102021457dc68c06a8727f75fca6853854da359d207b6fc300a06082a8648ce3d04" &
+        "030230163114301206035504030c0b706f6c6963792d726f6f74301e170d3236303732393037343631385a170d" &
+        "3237303532353037343631385a30163114301206035504030c0b706f6c6963792d726f6f743076301006072a86" &
+        "48ce3d020106052b8104002203620004fab57ef5a1788133397062176d5925a43cd8595df917f6743c6323355d" &
+        "2658e3173fce28a87905f80b9ba83ee1aab697a7bb599368c751864a56fbaa711e5b2726530bc20c83714e3ce3" &
+        "718536a74005d731b1489eb8e166434548c44d69b0cfa381dc3081d9300f0603551d130101ff040530030101ff" &
+        "300e0603551d0f0101ff0404030201063081960603551d2004818e30818b30818806092b06010401868d1f0130" &
+        "7b302906082b06010505070201161d68747470733a2f2f6578616d706c652e746573742f6370732e68746d6c30" &
+        "4e06082b060105050702023042301a1a104578616d706c652054657374204f726730060201010201021a244973" &
+        "7375656420756e64657220746865206578616d706c65207465737420706f6c696379301d0603551d0e04160414" &
+        "208a7da7f801c4b3c24c5dea13986578cbec0ed6300a06082a8648ce3d0403020369003066023100d3a5eb9ed0" &
+        "6bc532ebf2da5d489183d0d4f082690d1e888f8ea954e0594b77d2a9d2494c620bc7665fec33b9f48809510231" &
+        "00e86ff2b3713b9ba9a632c6a0fa424829c0548fee20becea5932b0f3e759885375e1feb99b0a882cd62789cfe" &
+        "ea02f666";
    begin
       Outcome :=
         CryptoLib.Certificates.Create_Local_CA
@@ -2252,13 +2291,20 @@ procedure Tests is
       Check (Outcome = CryptoLib.Certificates.Ok, "fixture: leaf issued");
 
       declare
-         Seed : constant Ada.Streams.Stream_Element_Array :=
+         Issued : constant Ada.Streams.Stream_Element_Array :=
            Decoded_Bytes (To_String (Leaf_PEM));
+         With_Policies : constant Ada.Streams.Stream_Element_Array :=
+           From_Hex (Policy_Seed_DER);
       begin
-         Check (Seed'Length > 64, "fixture: the seed certificate decoded");
+         Check (Issued'Length > 64, "fixture: the seed certificate decoded");
+         Check (With_Policies'Length > 64,
+                "fixture: the policy-carrying seed decoded");
 
          for Round in 1 .. Rounds loop
             declare
+               --  Alternating, so both shapes are mutated equally.
+               Seed : constant Ada.Streams.Stream_Element_Array :=
+                 (if Round mod 2 = 0 then Issued else With_Policies);
                Work : Ada.Streams.Stream_Element_Array := Seed;
                Cuts : constant Natural := 1 + Next mod 6;
                Last : Ada.Streams.Stream_Element_Offset := Work'Last;
@@ -2313,6 +2359,39 @@ procedure Tests is
                   begin
                      if X509C.Is_Present (C) then
                         Decoded := Decoded + 1;
+
+                        --  Read every policy extension and the qualifier
+                        --  text: a parser that returns a status and then
+                        --  hands back a span that blows up on use has not
+                        --  failed safely.
+                        declare
+                           package PP renames CryptoLib.X509.Policies;
+                           Named : constant PP.Policy_Set :=
+                             PP.Policies_Of (C);
+                           Maps  : constant PP.Mapping_Set :=
+                             PP.Mappings_Of (C);
+                           Cons  : constant PP.Policy_Constraints :=
+                             PP.Constraints_Of (C);
+                           Inh   : constant PP.Inhibit_Any_Policy :=
+                             PP.Inhibit_Of (C);
+                        begin
+                           for P in 1 .. Named.Count loop
+                              for Q in 1 ..
+                                Named.Entries (P).Qualifier_Count
+                              loop
+                                 declare
+                                    Text : constant String :=
+                                      Named.Entries (P).Qualifiers (Q).Text
+                                        (1 .. Named.Entries (P).Qualifiers (Q)
+                                                .Length);
+                                 begin
+                                    pragma Unreferenced (Text);
+                                 end;
+                              end loop;
+                           end loop;
+                           pragma Unreferenced (Maps, Cons, Inh);
+                        end;
+
                         for I in 1 .. X509C.Extension_Count (C) loop
                            declare
                               Ignore : constant CryptoLib.ASN1.Octets :=
@@ -3642,6 +3721,26 @@ procedure Tests is
       package X509C renames CryptoLib.X509.Certificates;
       package PP renames CryptoLib.X509.Policies;
 
+      Long_Qualifier_DER : constant String :=
+        "308203083082028fa00302010202147772a1c377955a4de366da5b5b9c5d8ecc91244a300a06082a8648ce3d04" &
+        "030230163114301206035504030c0b706f6c6963792d726f6f74301e170d3236303732393038303635335a170d" &
+        "3237303532353038303635335a30163114301206035504030c0b706f6c6963792d726f6f743076301006072a86" &
+        "48ce3d020106052b8104002203620004fab57ef5a1788133397062176d5925a43cd8595df917f6743c6323355d" &
+        "2658e3173fce28a87905f80b9ba83ee1aab697a7bb599368c751864a56fbaa711e5b2726530bc20c83714e3ce3" &
+        "718536a74005d731b1489eb8e166434548c44d69b0cfa382019c30820198300f0603551d130101ff0405300301" &
+        "01ff300e0603551d0f0101ff040403020106308201540603551d200482014b308201473082014306092b060104" &
+        "01868d1f01308201343082013006082b060105050702011682012268747470733a2f2f6578616d706c652e7465" &
+        "73742f6370732f6161616161616161616161616161616161616161616161616161616161616161616161616161" &
+        "616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161" &
+        "616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161" &
+        "616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161" &
+        "616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161" &
+        "6161616161616161616161616161616161616161616161616161616161616161616161616161616161612e6874" &
+        "6d6c301d0603551d0e04160414208a7da7f801c4b3c24c5dea13986578cbec0ed6300a06082a8648ce3d040302" &
+        "0367003064023060ce4e4b4f493390e21e8e77d05a9860bd3ffd028886b585b10c6b39ddced4e8f20d3d19b9fe" &
+        "d21c19c041fe9f3bcda202307bccdcf85917ebc87ebdbcbfa60266b0604aa61ea0bbd8af9035b72e6d3e1b9996" &
+        "2e1a61953c62a96fdbd0d07dbaf9f2";
+
       Qualified_DER : constant String :=
         "30820249308201cea003020102021457dc68c06a8727f75fca6853854da359d207b6fc300a06082a8648ce3d04" &
         "030230163114301206035504030c0b706f6c6963792d726f6f74301e170d3236303732393037343631385a170d" &
@@ -3719,6 +3818,29 @@ procedure Tests is
       Check (not Named.Entries (1).Qualifiers (1).Truncated
              and then not Named.Entries (1).Qualifiers (2).Truncated,
              "neither was truncated");
+
+      --  A qualifier longer than this can hold. RFC 5280 bounds DisplayText
+      --  at 200 characters and says nothing about the length of a CPS URI,
+      --  so a certificate carrying a long one is not malformed and must not
+      --  be read as though the bound were a promise about the input.
+      declare
+         Long_Item : constant X509C.Certificate :=
+           X509C.Decode_DER
+             (From_Hex (Long_Qualifier_DER), CryptoLib.ASN1.Default_Limits,
+              Status);
+         Long_Set  : constant PP.Policy_Set := PP.Policies_Of (Long_Item);
+      begin
+         Check (Status = CryptoLib.ASN1.Errors.Ok
+                and then Long_Set.Well_Formed
+                and then Long_Set.Entries (1).Qualifier_Count = 1,
+                "a certificate with an over-long qualifier still decodes");
+         Check (Long_Set.Entries (1).Qualifiers (1).Truncated,
+                "and says the text was cut rather than pretending it fit");
+         Check (Long_Set.Entries (1).Qualifiers (1).Length
+                = PP.Maximum_Qualifier_Text,
+                "keeping what it can, got"
+                & Natural'Image (Long_Set.Entries (1).Qualifiers (1).Length));
+      end;
    end Check_Policy_Qualifiers;
 
    --  The search skips a path that cannot carry the policies.
