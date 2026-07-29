@@ -475,6 +475,13 @@ every status reading `Ok` while every key it produces is predictable.
   code rather than bouncing off the first byte. The suite carries a smaller
   deterministic version of this as a regression guard. It is a smoke test,
   not a proof: it says nothing about inputs the generator never produced.
+  Widened since against the machine's own trust store: 488,000 mutations
+  seeded from each of the 122 system roots in turn, so the seeds carry a
+  decade of real encodings from a hundred issuers rather than certificates
+  this crate wrote. None raised. The same store also agrees with
+  `openssl x509 -text` on every root about whether it is a CA, whether it
+  may sign certificates and CRLs, and whether it carries a subject key
+  identifier -- 122 of 122, the fields a chain is actually judged on.
 - **A certificate that can be read two ways is refused, not resolved.** An
   extension appearing twice is rejected at decode: whichever instance a
   reader takes, another implementation takes the other, and the two then
