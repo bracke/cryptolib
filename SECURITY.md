@@ -178,7 +178,11 @@ The RNG **fails closed**: if no OS source is available it returns
   processing is not implemented**: `certificatePolicies` is recognised because
   it restricts nothing without a caller-supplied policy set, while a critical
   `policyConstraints` or `inhibitAnyPolicy` makes a chain fail, since honouring
-  those needs processing this does not do. **Revocation (CRL/OCSP) is not
+  those needs processing this does not do. That refusal is the
+  security-relevant half of not implementing RFC 5280 §6.1 -- honouring the
+  extension is a capability, but appearing to honour it while ignoring it is a
+  bypass -- and it is pinned by a test built from four CAs that share one key
+  and sign one leaf, so the only variable is the extension. **Revocation (CRL/OCSP) is not
   consulted** by the validator. There is no path building here: finding a chain
   through
   cross-signed roots is `X509.Path_Building`, kept separate: it searches and

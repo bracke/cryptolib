@@ -3169,6 +3169,166 @@ procedure Tests is
       end;
    end Check_PKCS12_Work_Ceiling;
 
+   --  Certificate policy extensions, which this crate does not process.
+   --
+   --  A critical policyConstraints or inhibitAnyPolicy makes a chain fail,
+   --  and that refusal is the security-relevant half of not implementing RFC
+   --  5280 section 6.1: honouring the extension is a capability, but
+   --  *appearing* to honour it while ignoring it is a bypass. Nothing tested
+   --  it, so adding those identifiers to the recognised list -- the obvious
+   --  response to an interop complaint -- would have quietly started
+   --  accepting the chains they exist to restrict.
+   --
+   --  All four CAs here share one key and sign the same leaf, so the chain
+   --  is cryptographically identical in every case and the only variable is
+   --  the extension.
+   procedure Check_Policy_Extensions is
+      package X509C renames CryptoLib.X509.Certificates;
+      package XV renames CryptoLib.X509.Validation;
+      use type XV.Validation_Failure;
+
+      Policy_Leaf_DER : constant String :=
+        "308201cf30820154a00302010202024001300a06082a8648ce3d04030230143112301006035504030c09706f6c" &
+        "6963792d6361301e170d3236303732393033313134365a170d3237303532353033313134365a30143112301006" &
+        "035504030c09706f6c6963792d63613076301006072a8648ce3d020106052b8104002203620004a1967d334891" &
+        "b110f021344ee5d651655a8c6d0465bf170f282e8006dcf00f30114e57ecc014cc595c922a5bdcaf016e1676da" &
+        "e9869435680420cd42f9b0eff70ad214fefe80921f9568631086373cbba32fee5439c4a95f83a9aa23363e62d5" &
+        "a3793077300c0603551d130101ff04023000300e0603551d0f0101ff04040302078030170603551d110410300e" &
+        "820c686f73742e6578616d706c65301d0603551d0e0416041423729900983e966fc4ba6c9bd8092045f7646dd5" &
+        "301f0603551d230418301680142e76caae95c3a26581130162cb4eb48d4ff1d100300a06082a8648ce3d040302" &
+        "0369003066023100c30bda2ca3117efafe124dd9544600f6a5002462d026879d20445caa6ed6f63f5b2568df27" &
+        "16dccf0e220d79c1f8484702310087948c37084b6f42f1986d4551abd620a205f0cdfd6a2dd2e91e30a3ff56d7" &
+        "c14b51d95efdbf36e3252cae3ea76634f5";
+
+      Policy_Plain_CA_DER : constant String :=
+        "308201a93082012fa0030201020214057e9a886d757780bd3a89748ce4e2f6d1e28b8b300a06082a8648ce3d04" &
+        "030230143112301006035504030c09706f6c6963792d6361301e170d3236303732393033313134365a170d3237" &
+        "303532353033313134365a30143112301006035504030c09706f6c6963792d63613076301006072a8648ce3d02" &
+        "0106052b8104002203620004312c61766dee795a8898bf6cba0d8fcaab009608ae94d2537f110b0ad525dc4f75" &
+        "4b1b1d3ce1251b6ffc3782ba4edfd3dddf22a92292a1b38c524aedfc669135be5caadfa621c1896e334c70efd0" &
+        "3e8e41baff588dc33daea0c006d7bbc2b5f8a3423040300f0603551d130101ff040530030101ff300e0603551d" &
+        "0f0101ff040403020106301d0603551d0e041604142e76caae95c3a26581130162cb4eb48d4ff1d100300a0608" &
+        "2a8648ce3d0403020368003065023100819fdb26a9703040b6c75fb08da9117487d1163ed8ae6d051211fc63e4" &
+        "20cc91fdd8c18c72ed3f5f4dcfbf8fa116fe0d02303ecf826d5ce41299ed289410b77ca79edb69494f855b2059" &
+        "d94de41bca0b35f48f1c5bc0d3d43a00e416b5c399f6d894";
+
+      Policy_Constraints_CA_DER : constant String :=
+        "308201b930820140a00302010202144f96f3a4e0b7825c280016312ca549afb6325e4a300a06082a8648ce3d04" &
+        "030230143112301006035504030c09706f6c6963792d6361301e170d3236303732393033313134365a170d3237" &
+        "303532353033313134365a30143112301006035504030c09706f6c6963792d63613076301006072a8648ce3d02" &
+        "0106052b8104002203620004312c61766dee795a8898bf6cba0d8fcaab009608ae94d2537f110b0ad525dc4f75" &
+        "4b1b1d3ce1251b6ffc3782ba4edfd3dddf22a92292a1b38c524aedfc669135be5caadfa621c1896e334c70efd0" &
+        "3e8e41baff588dc33daea0c006d7bbc2b5f8a3533051300f0603551d130101ff040530030101ff300e0603551d" &
+        "0f0101ff040403020106300f0603551d240101ff04053003800100301d0603551d0e041604142e76caae95c3a2" &
+        "6581130162cb4eb48d4ff1d100300a06082a8648ce3d040302036700306402305dc07a4bee839688763c7a556a" &
+        "96c8d094fe9b0161e44118c11c457713e18bf793a9dbb3431444795ddf67a6f9425dbc02307f029f67db083f34" &
+        "6d205cc458858c28c563296a0daccf940ddf14844e2d71188639ce1b01217afed1b166c8f0550abd";
+
+      Policy_Inhibit_CA_DER : constant String :=
+        "308201b93082013ea0030201020214567caf02a99294df5cd2268e913f8daa359d4b20300a06082a8648ce3d04" &
+        "030230143112301006035504030c09706f6c6963792d6361301e170d3236303732393033313134365a170d3237" &
+        "303532353033313134365a30143112301006035504030c09706f6c6963792d63613076301006072a8648ce3d02" &
+        "0106052b8104002203620004312c61766dee795a8898bf6cba0d8fcaab009608ae94d2537f110b0ad525dc4f75" &
+        "4b1b1d3ce1251b6ffc3782ba4edfd3dddf22a92292a1b38c524aedfc669135be5caadfa621c1896e334c70efd0" &
+        "3e8e41baff588dc33daea0c006d7bbc2b5f8a351304f300f0603551d130101ff040530030101ff300e0603551d" &
+        "0f0101ff040403020106300d0603551d360101ff0403020100301d0603551d0e041604142e76caae95c3a26581" &
+        "130162cb4eb48d4ff1d100300a06082a8648ce3d0403020369003066023100d4e4decf2c5e64f8d9a377b7f14b" &
+        "2e9d369e3d034b8d0f0be890eb3995b09054fe8bd66f50f6656213ee0c769fe1a1d7023100e9d499a18a92f0b4" &
+        "b90911c98578a60419ecec13711973526f6e12f00b12c886ca7cc783c45d8fa12dcb5c066c1b2fac";
+
+      Policy_Certpolicies_CA_DER : constant String :=
+        "308201c130820147a00302010202142c665bea393ad78d3b663b6d4bd44e93fc622b28300a06082a8648ce3d04" &
+        "030230143112301006035504030c09706f6c6963792d6361301e170d3236303732393033313230385a170d3237" &
+        "303532353033313230385a30143112301006035504030c09706f6c6963792d63613076301006072a8648ce3d02" &
+        "0106052b8104002203620004312c61766dee795a8898bf6cba0d8fcaab009608ae94d2537f110b0ad525dc4f75" &
+        "4b1b1d3ce1251b6ffc3782ba4edfd3dddf22a92292a1b38c524aedfc669135be5caadfa621c1896e334c70efd0" &
+        "3e8e41baff588dc33daea0c006d7bbc2b5f8a35a3058300f0603551d130101ff040530030101ff300e0603551d" &
+        "0f0101ff04040302010630160603551d20040f300d300b06092b06010401868d1f01301d0603551d0e04160414" &
+        "2e76caae95c3a26581130162cb4eb48d4ff1d100300a06082a8648ce3d0403020368003065023100fb30bb4889" &
+        "ae0d45ca345c0925fbaf2a22a059dc2dbdfddbb04c8945a070389b7a1fe2233668a008544598f067f32ec00230" &
+        "20318d9d6745d334aa19d58eaa6ef632e8ebbf0327cd0a4a51deff0aaf3fcbd286fc6fdf4abb354bc22d6c24f1" &
+        "a70027";
+
+      function From_Hex
+        (Text : String) return Ada.Streams.Stream_Element_Array
+      is
+         Result : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (Text'Length / 2));
+         function Nibble (C : Character) return Natural
+         is (case C is
+                when '0' .. '9' => Character'Pos (C) - Character'Pos ('0'),
+                when others     => Character'Pos (C) - Character'Pos ('a') + 10);
+      begin
+         for I in Result'Range loop
+            Result (I) :=
+              Ada.Streams.Stream_Element
+                (Nibble (Text (Text'First + 2 * Natural (I - 1))) * 16
+                 + Nibble (Text (Text'First + 2 * Natural (I - 1) + 1)));
+         end loop;
+         return Result;
+      end From_Hex;
+
+      Status : CryptoLib.ASN1.Errors.Decode_Status;
+
+      function Decoded (Hex : String) return X509C.Certificate
+      is (X509C.Decode_DER
+            (From_Hex (Hex), CryptoLib.ASN1.Default_Limits, Status));
+
+      type Which_CA is (Plain, Constraints, Inhibit, Policies);
+
+      type Policy_Path (Kind : Which_CA) is limited new XV.Path_Source
+        with null record;
+
+      overriding function Length (Source : Policy_Path) return Positive
+      is (2);
+
+      overriding function Certificate_At
+        (Source : Policy_Path; Index : Positive) return X509C.Certificate
+      is (if Index = 1 then Decoded (Policy_Leaf_DER)
+          else (case Source.Kind is
+                   when Plain       => Decoded (Policy_Plain_CA_DER),
+                   when Constraints => Decoded (Policy_Constraints_CA_DER),
+                   when Inhibit     => Decoded (Policy_Inhibit_CA_DER),
+                   when Policies    => Decoded (Policy_Certpolicies_CA_DER)));
+
+      overriding function Is_Trust_Anchor
+        (Source : Policy_Path; Item : X509C.Certificate) return Boolean
+      is (X509C.Subject_Bytes (Item)
+          = X509C.Subject_Bytes (Certificate_At (Source, 2)));
+
+      At_Time : constant CryptoLib.X509.Certificate_Time :=
+        (Year => 2026, Month => 9, Day => 1,
+         Hour => 12, Minute => 0, Second => 0);
+
+      function Verdict (Kind : Which_CA) return XV.Validation_Result
+      is (XV.Validate_Path (Policy_Path'(Kind => Kind), At_Time));
+   begin
+      --  The control. Without it the refusals below could be about anything.
+      Check (Verdict (Plain).Valid,
+             "the same leaf under a CA with no policy extension validates: "
+             & XV.Failure_Image (Verdict (Plain).Failure));
+
+      --  certificatePolicies restricts nothing by itself -- it says under
+      --  which policies a certificate was issued, and it takes a caller
+      --  asking for a policy to make that mean anything. So it is
+      --  recognised, and a chain carrying it still validates.
+      Check (Verdict (Policies).Valid,
+             "a CA stating its certificate policies still validates: "
+             & XV.Failure_Image (Verdict (Policies).Failure));
+
+      --  These two demand processing this crate does not do.
+      Check (not Verdict (Constraints).Valid
+             and then Verdict (Constraints).Failure
+                      = XV.Unknown_Critical_Extension,
+             "a critical policyConstraints makes the chain fail, got "
+             & XV.Failure_Image (Verdict (Constraints).Failure));
+      Check (not Verdict (Inhibit).Valid
+             and then Verdict (Inhibit).Failure
+                      = XV.Unknown_Critical_Extension,
+             "and so does a critical inhibitAnyPolicy, got "
+             & XV.Failure_Image (Verdict (Inhibit).Failure));
+   end Check_Policy_Extensions;
+
    procedure Check_X509_Extensions is
       use type CryptoLib.ASN1.Errors.Decode_Status;
       use type CryptoLib.PEM.Decode_Status;
@@ -8013,6 +8173,7 @@ begin
    Check_X509_Decode;
    Check_X509_Verify;
    Check_X509_Extensions;
+   Check_Policy_Extensions;
    Check_Off_Curve_Key;
    Check_Ed25519_Encoding;
    Check_Serial_Numbers;
