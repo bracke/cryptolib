@@ -10,6 +10,7 @@ with CryptoLib.Errors;
 with CryptoLib.Hashes;
 with CryptoLib.Macs;
 with CryptoLib.ASN1;
+with CryptoLib.ASN1.DER;
 with CryptoLib.ASN1.Errors;
 with CryptoLib.PEM;
 with CryptoLib.PKCS10;
@@ -2829,6 +2830,70 @@ package body CryptoLib.Certificates is
          return Internal_Error;
    end Create_CA_For_Key;
 
+   --  Is this a SubjectPublicKeyInfo?
+   --
+   --  Issue_*_For_Key takes the subject's key as bytes and does not ask whether
+   --  it is a key this crate could have produced -- a token's key, or one made
+   --  elsewhere, is the point of that entry point. It does ask whether it is a
+   --  key at all. Certifying four octets of nothing produces a certificate that
+   --  parses as broken and is useless to everyone, while telling the caller it
+   --  worked; this crate already declines to certify a name that is not a name,
+   --  and a public key deserves the same answer.
+   --
+   --  The shape checked is the whole of RFC 5280's definition: a SEQUENCE
+   --  spanning exactly these octets, holding an AlgorithmIdentifier SEQUENCE
+   --  and then a BIT STRING, with nothing after either. What algorithm the
+   --  identifier names is deliberately not checked.
+   function Valid_Public_Key_Info
+     (Info : Ada.Streams.Stream_Element_Array) return Boolean
+   is
+      package DER_Reader renames CryptoLib.ASN1.DER;
+      use type CryptoLib.ASN1.Errors.Decode_Status;
+
+      Limits : constant CryptoLib.ASN1.Decode_Limits :=
+        CryptoLib.ASN1.Default_Limits;
+      Cursor : CryptoLib.ASN1.Offset := Info'First;
+      Outer, Algorithm_Item, Key_Item : CryptoLib.ASN1.Element;
+      Unused : Natural;
+      Status : CryptoLib.ASN1.Errors.Decode_Status;
+   begin
+      if Info'Length = 0 then
+         return False;
+      end if;
+
+      DER_Reader.Read_Sequence
+        (Info, Cursor, Info'Last, 0, Limits, Outer, Status);
+      if Status /= CryptoLib.ASN1.Errors.Ok
+        or else not DER_Reader.At_End (Cursor, Info'Last)
+      then
+         --  Either it is not a SEQUENCE, or there are octets after it: a
+         --  SubjectPublicKeyInfo is the whole of what it is given.
+         return False;
+      end if;
+
+      Cursor := Outer.First;
+      DER_Reader.Read_Sequence
+        (Info, Cursor, Outer.Last, 1, Limits,
+         Algorithm_Item, Status);
+      if Status /= CryptoLib.ASN1.Errors.Ok then
+         return False;
+      end if;
+
+      Cursor := Algorithm_Item.Last + 1;
+      DER_Reader.Read_Bit_String
+        (Info, Cursor, Outer.Last, 1, Limits,
+         Key_Item, Unused, Status);
+      if Status /= CryptoLib.ASN1.Errors.Ok then
+         return False;
+      end if;
+
+      return DER_Reader.At_End
+               (Cursor, Outer.Last);
+   exception
+      when others =>
+         return False;
+   end Valid_Public_Key_Info;
+
    function Issue_For_Supplied_Key
      (CA_Certificate_PEM : String;
       CA_Private_Key_PEM : String;
@@ -2868,7 +2933,7 @@ package body CryptoLib.Certificates is
 
       if not Have_Issuer
         or else CA_Private_Key_PEM = ""
-        or else Subject_SPKI'Length = 0
+        or else not Valid_Public_Key_Info (Subject_SPKI)
         or else not Valid_Profile_Name (Profile, Common_Name)
         or else Names'Length = 0
         or else Profile = CA_Profile

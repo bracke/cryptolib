@@ -698,6 +698,68 @@ procedure Tests is
                --  other.
             end;
 
+            --  A supplied key that is not a key is refused rather than
+            --  certified. This crate already declines to certify a name that
+            --  is not a name; a public key it cannot recognise as one deserves
+            --  the same answer, because the certificate that comes out is
+            --  useless and the caller was told it succeeded.
+            declare
+               Garbage : constant Ada.Streams.Stream_Element_Array :=
+                 [16#DE#, 16#AD#, 16#BE#, 16#EF#];
+               Truncated : constant Ada.Streams.Stream_Element_Array :=
+                 [16#30#, 16#82#, 16#01#, 16#22#];   --  a SEQUENCE header only
+               Ignored : Ada.Strings.Unbounded.Unbounded_String;
+            begin
+               Check (CryptoLib.Certificates.Issue_Server_Certificate_For_Key
+                        (Ada.Strings.Unbounded.To_String (Root),
+                         Ada.Strings.Unbounded.To_String (Root_Key),
+                         "not-a-key.example",
+                         [1 => Ada.Strings.Unbounded.To_Unbounded_String
+                                 ("not-a-key.example")],
+                         Garbage, Ignored)
+                        /= CryptoLib.Certificates.Ok,
+                      "a subject key that is not DER at all is refused");
+               Check (CryptoLib.Certificates.Issue_Server_Certificate_For_Key
+                        (Ada.Strings.Unbounded.To_String (Root),
+                         Ada.Strings.Unbounded.To_String (Root_Key),
+                         "not-a-key.example",
+                         [1 => Ada.Strings.Unbounded.To_Unbounded_String
+                                 ("not-a-key.example")],
+                         Truncated, Ignored)
+                        /= CryptoLib.Certificates.Ok,
+                      "and one whose length runs past what it carries");
+
+               --  A real key with an octet stuck on the end. The SEQUENCE
+               --  parses; what makes this wrong is that it is not the whole of
+               --  what was handed over, and only the spans-exactly check
+               --  notices -- neither case above has anything trailing.
+               declare
+                  Good : constant String :=
+                    CryptoLib.Certificates.RSA_Public_Key_Info (N, E);
+                  Trailing : Ada.Streams.Stream_Element_Array
+                    (1 .. Ada.Streams.Stream_Element_Offset (Good'Length) + 1);
+               begin
+                  for I in 1 .. Ada.Streams.Stream_Element_Offset
+                                  (Good'Length)
+                  loop
+                     Trailing (I) :=
+                       Character'Pos (Good (Good'First + Natural (I - 1)));
+                  end loop;
+                  Trailing (Trailing'Last) := 16#00#;
+                  Check (CryptoLib.Certificates
+                           .Issue_Server_Certificate_For_Key
+                             (Ada.Strings.Unbounded.To_String (Root),
+                              Ada.Strings.Unbounded.To_String (Root_Key),
+                              "not-a-key.example",
+                              [1 => Ada.Strings.Unbounded
+                                      .To_Unbounded_String
+                                        ("not-a-key.example")],
+                              Trailing, Ignored)
+                           /= CryptoLib.Certificates.Ok,
+                         "and a valid key with an octet after it is refused");
+               end;
+            end;
+
             --  A supplied key with an empty SPKI is refused rather than
             --  certified as nothing.
             declare
