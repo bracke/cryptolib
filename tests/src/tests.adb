@@ -7208,6 +7208,69 @@ procedure Tests is
              "the wrong passphrase does not open it");
    end Check_OpenSSH_Key_Unlock;
 
+   --  A signature OpenSSH made, checked here.
+   --
+   --  The Ed25519 vectors prove this computes what RFC 8032 says. They do
+   --  not prove it agrees with what another implementation actually emits
+   --  over bytes that implementation chose to frame its own way. This is
+   --  ssh-keygen -Y sign: the signature is over the SSHSIG structure --
+   --  a magic string, the namespace, the hash name and the SHA-512 of the
+   --  file -- none of which this crate assembled.
+   procedure Check_OpenSSH_Signature is
+      SSHSIG_Public : constant String :=
+        "b91b800e2174fc90ce2ef7f072a481cde08ef64e57a829ad260f9afd19f9199c";
+      SSHSIG_Signature : constant String :=
+        "6d79e9ebdc4545ab74b5070c58e910d0f39d0b66deac7415f8adb55e6fd77a718ffcf1ee5b1f56a2097e" &
+        "57a347521d03af7a1e93e8414dae6682571f86f45108";
+      SSHSIG_Signed : constant String :=
+        "5353485349470000000963727970746f6c6962000000000000000673686135313200000040c91009ba89" &
+        "2e18933ebd13f0d3228cde25b72da75dae9195ab38b62e46f6290f157b8f0dd6fa25e0fe25499b55f6b5" &
+        "02158d23818827c7652194a69fe938d1c6";
+
+      function From_Hex
+        (Text : String) return Ada.Streams.Stream_Element_Array
+      is
+         Result : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (Text'Length / 2));
+         function Nibble (C : Character) return Natural
+         is (case C is
+                when '0' .. '9' => Character'Pos (C) - Character'Pos ('0'),
+                when others     => Character'Pos (C) - Character'Pos ('a') + 10);
+      begin
+         for I in Result'Range loop
+            Result (I) :=
+              Ada.Streams.Stream_Element
+                (Nibble (Text (Text'First + 2 * Natural (I - 1))) * 16
+                 + Nibble (Text (Text'First + 2 * Natural (I - 1) + 1)));
+         end loop;
+         return Result;
+      end From_Hex;
+
+      Signature : Ada.Streams.Stream_Element_Array (1 .. 64) :=
+        From_Hex (SSHSIG_Signature);
+      Signed    : Ada.Streams.Stream_Element_Array
+        (1 .. Ada.Streams.Stream_Element_Offset (SSHSIG_Signed'Length / 2)) :=
+        From_Hex (SSHSIG_Signed);
+   begin
+      Check (CryptoLib.Ed25519.Verify
+               (From_Hex (SSHSIG_Public), Signature, Signed)
+             = CryptoLib.Errors.Ok,
+             "a signature written by ssh-keygen verifies here");
+
+      Signature (11) := Signature (11) xor 1;
+      Check (CryptoLib.Ed25519.Verify
+               (From_Hex (SSHSIG_Public), Signature, Signed)
+             /= CryptoLib.Errors.Ok,
+             "and one bit of it is enough to break it");
+      Signature (11) := Signature (11) xor 1;
+
+      Signed (Signed'Last) := Signed (Signed'Last) xor 1;
+      Check (CryptoLib.Ed25519.Verify
+               (From_Hex (SSHSIG_Public), Signature, Signed)
+             /= CryptoLib.Errors.Ok,
+             "as is one bit of what was signed");
+   end Check_OpenSSH_Signature;
+
    procedure Check_X509_Extensions is
       use type CryptoLib.ASN1.Errors.Decode_Status;
       use type CryptoLib.PEM.Decode_Status;
@@ -12205,6 +12268,7 @@ begin
    Check_Undated_Statement_Ages;
    Check_Bcrypt_PBKDF;
    Check_OpenSSH_Key_Unlock;
+   Check_OpenSSH_Signature;
    Check_Constant_Time_Equal;
    Check_DH_Peer_Validation;
    Check_OpenSSH_Fingerprints;
