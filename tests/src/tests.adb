@@ -2184,6 +2184,181 @@ procedure Tests is
       end;
    end Check_Certificate_Ambiguity;
 
+   --  Malformed input must come back as a status, never as an exception.
+   --
+   --  A library that parses what an attacker sends and lets an exception out
+   --  has turned a malformed message into a denial of service, which is a
+   --  vulnerability in a component whose whole contract is to fail closed.
+   --  The seed is a real certificate; the mutations are deterministic, so a
+   --  failure here reproduces exactly rather than once in a while.
+   procedure Check_Decoder_Robustness is
+      use type CryptoLib.ASN1.Errors.Decode_Status;
+
+      package X509C renames CryptoLib.X509.Certificates;
+      package XC renames CryptoLib.X509.CRLs;
+      package CO renames CryptoLib.OCSP;
+
+      function Decoded_Bytes (Text : String)
+        return Ada.Streams.Stream_Element_Array
+      is
+         Buffer : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset
+                   (CryptoLib.PEM.Maximum_Decoded_Length (Text)));
+         Last   : Ada.Streams.Stream_Element_Offset;
+         From   : Positive := Text'First;
+         P      : CryptoLib.PEM.Decode_Status;
+      begin
+         CryptoLib.PEM.Decode_Block
+           (Text, CryptoLib.PEM.Certificate_Label, From, Buffer, Last, P);
+         return Buffer (Buffer'First .. Last);
+      end Decoded_Bytes;
+
+      CA_PEM   : Unbounded_String;
+      CA_Key   : Unbounded_String;
+      Leaf_PEM : Unbounded_String;
+      Leaf_Key : Unbounded_String;
+      Outcome  : CryptoLib.Certificates.Certificate_Status;
+
+      --  A deterministic generator: the suite must fail the same way twice.
+      State : Interfaces.Unsigned_64 := 16#2545F4914F6CDD1D#;
+      function Next return Natural is
+         use type Interfaces.Unsigned_64;
+      begin
+         State := State xor Interfaces.Shift_Left (State, 13);
+         State := State xor Interfaces.Shift_Right (State, 7);
+         State := State xor Interfaces.Shift_Left (State, 17);
+         return Natural (State mod 65_536);
+      end Next;
+
+      Raised  : Natural := 0;
+      Decoded : Natural := 0;
+      Rounds  : constant := 3_000;
+   begin
+      Outcome :=
+        CryptoLib.Certificates.Create_Local_CA
+          ("robustness-ca", CA_PEM, CA_Key,
+           CryptoLib.Certificates.P384_Key);
+      Check (Outcome = CryptoLib.Certificates.Ok, "fixture: CA created");
+
+      Outcome :=
+        CryptoLib.Certificates.Issue_Server_Certificate
+          (To_String (CA_PEM), To_String (CA_Key), "host.example",
+           [1 => To_Unbounded_String ("host.example")],
+           Leaf_PEM, Leaf_Key);
+      Check (Outcome = CryptoLib.Certificates.Ok, "fixture: leaf issued");
+
+      declare
+         Seed : constant Ada.Streams.Stream_Element_Array :=
+           Decoded_Bytes (To_String (Leaf_PEM));
+      begin
+         Check (Seed'Length > 64, "fixture: the seed certificate decoded");
+
+         for Round in 1 .. Rounds loop
+            declare
+               Work : Ada.Streams.Stream_Element_Array := Seed;
+               Cuts : constant Natural := 1 + Next mod 6;
+               Last : Ada.Streams.Stream_Element_Offset := Work'Last;
+            begin
+               for Edit in 1 .. Cuts loop
+                  declare
+                     Where : constant Ada.Streams.Stream_Element_Offset :=
+                       Work'First
+                       + Ada.Streams.Stream_Element_Offset
+                           (Next mod Natural (Work'Length));
+                  begin
+                     case Next mod 3 is
+                        when 0 =>
+                           --  A byte anywhere.
+                           Work (Where) :=
+                             Ada.Streams.Stream_Element (Next mod 256);
+                        when 1 =>
+                           --  Something that looks like a length, which is
+                           --  where a reader is most likely to be led astray.
+                           Work (Where) :=
+                             (case Next mod 6 is
+                                 when 0 => 16#80#,
+                                 when 1 => 16#81#,
+                                 when 2 => 16#82#,
+                                 when 3 => 16#84#,
+                                 when 4 => 16#FF#,
+                                 when others => 16#00#);
+                        when others =>
+                           --  Truncation.
+                           if Where > Work'First then
+                              Last :=
+                                Ada.Streams.Stream_Element_Offset'Min
+                                  (Last, Where);
+                           end if;
+                     end case;
+                  end;
+               end loop;
+
+               --  Every decoder sees every input. A mutated certificate is
+               --  not a CRL, but the CRL reader still walks into it, and
+               --  walking into the wrong thing is exactly the case that has
+               --  to stay safe.
+               declare
+                  Input  : Ada.Streams.Stream_Element_Array
+                    renames Work (Work'First .. Last);
+                  Status : CryptoLib.ASN1.Errors.Decode_Status;
+               begin
+                  declare
+                     C : constant X509C.Certificate :=
+                       X509C.Decode_DER
+                         (Input, CryptoLib.ASN1.Default_Limits, Status);
+                  begin
+                     if X509C.Is_Present (C) then
+                        Decoded := Decoded + 1;
+                        for I in 1 .. X509C.Extension_Count (C) loop
+                           declare
+                              Ignore : constant CryptoLib.ASN1.Octets :=
+                                X509C.Extension_Value (C, I);
+                           begin
+                              pragma Unreferenced (Ignore);
+                           end;
+                        end loop;
+                     end if;
+                  end;
+
+                  declare
+                     L : constant XC.Revocation_List :=
+                       XC.Decode_DER
+                         (Input, CryptoLib.ASN1.Default_Limits, Status);
+                     N : constant Natural := XC.Entry_Count (L);
+                     B : constant Boolean :=
+                       XC.Has_Unsupported_Critical_Extension (L);
+                  begin
+                     pragma Unreferenced (N, B);
+                  end;
+
+                  declare
+                     R : constant CO.Response :=
+                       CO.Decode_Response
+                         (Input, CryptoLib.ASN1.Default_Limits, Status);
+                     B : constant Boolean :=
+                       CO.Has_Unsupported_Critical_Extension (R);
+                  begin
+                     pragma Unreferenced (B);
+                  end;
+               end;
+            exception
+               when others =>
+                  Raised := Raised + 1;
+            end;
+         end loop;
+
+         Check (Raised = 0,
+                "no malformed input escaped as an exception, got"
+                & Natural'Image (Raised) & " of" & Natural'Image (Rounds));
+
+         --  Without this the check above passes trivially on input that
+         --  never reaches the decoder at all.
+         Check (Decoded > Rounds / 100,
+                "and enough mutations still decoded to reach real code, got"
+                & Natural'Image (Decoded));
+      end;
+   end Check_Decoder_Robustness;
+
    procedure Check_X509_Extensions is
       use type CryptoLib.ASN1.Errors.Decode_Status;
       use type CryptoLib.PEM.Decode_Status;
@@ -7028,6 +7203,7 @@ begin
    Check_X509_Decode;
    Check_X509_Verify;
    Check_X509_Extensions;
+   Check_Decoder_Robustness;
    Check_Certificate_Ambiguity;
    Check_X509_Access_Locations;
    Check_RSA_Verify;

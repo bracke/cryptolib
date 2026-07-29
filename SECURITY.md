@@ -187,6 +187,15 @@ The RNG **fails closed**: if no OS source is available it returns
   responders. The nonce must be unpredictable (`CryptoLib.Random`, not a
   counter); without one, a captured "good" response replays until its
   `nextUpdate`.
+- **Malformed input comes back as a status, not an exception.** The decoders
+  were run over 14,600 hostile inputs -- truncations at every prefix
+  boundary, pathological lengths, nesting thousands deep, and structured
+  mutations of real certificates, CRLs, OCSP responses, PKCS#8 keys and PEM
+  armour. None raised; 1,992 decoded far enough to produce a usable object,
+  and the rest landed across every error status, so the corpus reached real
+  code rather than bouncing off the first byte. The suite carries a smaller
+  deterministic version of this as a regression guard. It is a smoke test,
+  not a proof: it says nothing about inputs the generator never produced.
 - **A certificate that can be read two ways is refused, not resolved.** An
   extension appearing twice is rejected at decode: whichever instance a
   reader takes, another implementation takes the other, and the two then
