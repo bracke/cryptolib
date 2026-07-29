@@ -15,6 +15,8 @@ with CryptoLib.PKCS10;
 with CryptoLib.PKCS8;
 with CryptoLib.X509.Signatures;
 with CryptoLib.X509.Certificates;
+with Ada.Calendar;
+with Ada.Calendar.Formatting;
 with CryptoLib.Random;
 
 with CryptoLib.Secure_Wipe;
@@ -328,9 +330,71 @@ package body CryptoLib.Certificates is
                & UTF8 (Common_Name))));
    end Name_DER;
 
-   function Validity_DER return String is
+   --  A time as X.509 writes it.
+   --
+   --  UTCTime carries a two-digit year and is only unambiguous through 2049,
+   --  so anything at or beyond 2050 goes out as GeneralizedTime. RFC 5280
+   --  requires exactly that switch, and hardcoding one form is how a
+   --  certificate generator acquires an expiry date of its own.
+   function Time_DER (Value : Ada.Calendar.Time) return String is
+      Year   : Ada.Calendar.Year_Number;
+      Month  : Ada.Calendar.Month_Number;
+      Day    : Ada.Calendar.Day_Number;
+      Hour   : Ada.Calendar.Formatting.Hour_Number;
+      Minute : Ada.Calendar.Formatting.Minute_Number;
+      Second : Ada.Calendar.Formatting.Second_Number;
+      Sub    : Ada.Calendar.Formatting.Second_Duration;
+      Leap   : Boolean;
+
+      function Pair (Number : Natural) return String is
+         Text : constant String := Natural'Image (Number mod 100);
+      begin
+         return
+           (if Number mod 100 < 10 then "0" & Text (Text'Last)
+            else Text (Text'Last - 1 .. Text'Last));
+      end Pair;
    begin
-      return Seq (UTC ("260101000000Z") & UTC ("360101000000Z"));
+      --  Split in UTC: a certificate's times carry no zone, so writing local
+      --  time would state an instant the certificate does not mean.
+      Ada.Calendar.Formatting.Split
+        (Value, Year, Month, Day, Hour, Minute, Second, Sub, Leap,
+         Time_Zone => 0);
+
+      declare
+         Body_Text : constant String :=
+           Pair (Month) & Pair (Day) & Pair (Hour) & Pair (Minute)
+           & Pair (Second) & "Z";
+      begin
+         if Year < 2050 then
+            return UTC (Pair (Year) & Body_Text);
+         end if;
+
+         --  GeneralizedTime, tag 24, with the full year.
+         declare
+            Full : constant String := Natural'Image (Year);
+         begin
+            return TLV
+              (16#18#,
+               Full (Full'Last - 3 .. Full'Last) & Body_Text);
+         end;
+      end;
+   end Time_DER;
+
+   --  The validity window of a certificate being issued now.
+   --
+   --  Backdated slightly because the issuer's clock and the verifier's are
+   --  not the same clock: a certificate stamped to the second is not yet
+   --  valid for anyone running a little behind.
+   Clock_Skew_Allowance : constant Duration := 3600.0;
+
+   function Validity_DER (Valid_Days : Positive) return String is
+      use type Ada.Calendar.Time;
+      Now  : constant Ada.Calendar.Time := Ada.Calendar.Clock;
+      From : constant Ada.Calendar.Time := Now - Clock_Skew_Allowance;
+      Till : constant Ada.Calendar.Time :=
+        Now + Duration (Valid_Days) * 86_400.0;
+   begin
+      return Seq (Time_DER (From) & Time_DER (Till));
    end Validity_DER;
 
    function SPKI_DER
@@ -984,7 +1048,8 @@ package body CryptoLib.Certificates is
       Profile     : Certificate_Profile;
       Names       : Subject_Alternative_Name_List;
       Algorithm   : Key_Algorithm := Ed25519_Key;
-      Subject_Algorithm : Key_Algorithm := Ed25519_Key) return String
+      Subject_Algorithm : Key_Algorithm := Ed25519_Key;
+      Valid_Days  : Positive := Default_Certificate_Days) return String
    is
       --  The signer's algorithm and the subject's need not agree: a CSR brings
       --  its own key, and the CA signs whatever it was handed.
@@ -994,7 +1059,7 @@ package body CryptoLib.Certificates is
            & Integer_From_Bytes (Serial)
            & Signature_Algorithm (Algorithm)
            & Name_DER (Issuer_CN)
-           & Validity_DER
+           & Validity_DER (Valid_Days)
            & Name_DER (Subject_CN)
            & SPKI_DER (Subject_Key, Subject_Algorithm)
            & Extensions_DER (Profile, Names));
@@ -1159,7 +1224,9 @@ package body CryptoLib.Certificates is
      (Common_Name     : String;
       Certificate_PEM : out Unbounded_String;
       Private_Key_PEM : out Unbounded_String;
-      Algorithm       : Key_Algorithm := Ed25519_Key) return Certificate_Status
+      Algorithm       : Key_Algorithm := Ed25519_Key;
+      Valid_Days      : Positive := Default_CA_Days)
+      return Certificate_Status
    is
       Rng  : CryptoLib.Random.Random_Source;
       Cert : Unbounded_String;
@@ -1227,7 +1294,8 @@ package body CryptoLib.Certificates is
                  Profile     => CA_Profile,
                  Names       => [1 => To_Unbounded_String (Common_Name)],
                  Algorithm   => Algorithm,
-                 Subject_Algorithm => Algorithm));
+                 Subject_Algorithm => Algorithm,
+                 Valid_Days  => Valid_Days));
       end;
 
       if Length (Cert) = 0 then
@@ -1314,7 +1382,9 @@ package body CryptoLib.Certificates is
       Names              : Subject_Alternative_Name_List;
       Profile            : Certificate_Profile;
       Certificate_PEM    : out Unbounded_String;
-      Private_Key_PEM    : out Unbounded_String) return Certificate_Status
+      Private_Key_PEM    : out Unbounded_String;
+      Valid_Days         : Positive := Default_Certificate_Days)
+      return Certificate_Status
    is
       Rng : CryptoLib.Random.Random_Source;
 
@@ -1430,7 +1500,8 @@ package body CryptoLib.Certificates is
                  Profile     => Profile,
                  Names       => Names,
                  Algorithm   => Algorithm,
-                 Subject_Algorithm => Algorithm));
+                 Subject_Algorithm => Algorithm,
+                 Valid_Days  => Valid_Days));
       end;
 
       if Length (Cert) = 0 then
@@ -1459,11 +1530,13 @@ package body CryptoLib.Certificates is
       Common_Name        : String;
       Names              : Subject_Alternative_Name_List;
       Certificate_PEM    : out Unbounded_String;
-      Private_Key_PEM    : out Unbounded_String) return Certificate_Status is
+      Private_Key_PEM    : out Unbounded_String;
+      Valid_Days         : Positive := Default_Certificate_Days)
+      return Certificate_Status is
    begin
       return Issue_Profile_Certificate
         (CA_Certificate_PEM, CA_Private_Key_PEM, Common_Name, Names,
-         Server_Profile, Certificate_PEM, Private_Key_PEM);
+         Server_Profile, Certificate_PEM, Private_Key_PEM, Valid_Days);
    end Issue_Server_Certificate;
 
    function Issue_Client_Certificate
@@ -1472,11 +1545,13 @@ package body CryptoLib.Certificates is
       Common_Name        : String;
       Names              : Subject_Alternative_Name_List;
       Certificate_PEM    : out Unbounded_String;
-      Private_Key_PEM    : out Unbounded_String) return Certificate_Status is
+      Private_Key_PEM    : out Unbounded_String;
+      Valid_Days         : Positive := Default_Certificate_Days)
+      return Certificate_Status is
    begin
       return Issue_Profile_Certificate
         (CA_Certificate_PEM, CA_Private_Key_PEM, Common_Name, Names,
-         Client_Profile, Certificate_PEM, Private_Key_PEM);
+         Client_Profile, Certificate_PEM, Private_Key_PEM, Valid_Days);
    end Issue_Client_Certificate;
 
    function Issue_Email_Certificate
@@ -1485,18 +1560,22 @@ package body CryptoLib.Certificates is
       Common_Name        : String;
       Emails             : Subject_Alternative_Name_List;
       Certificate_PEM    : out Unbounded_String;
-      Private_Key_PEM    : out Unbounded_String) return Certificate_Status is
+      Private_Key_PEM    : out Unbounded_String;
+      Valid_Days         : Positive := Default_Certificate_Days)
+      return Certificate_Status is
    begin
       return Issue_Profile_Certificate
         (CA_Certificate_PEM, CA_Private_Key_PEM, Common_Name, Emails,
-         Email_Profile, Certificate_PEM, Private_Key_PEM);
+         Email_Profile, Certificate_PEM, Private_Key_PEM, Valid_Days);
    end Issue_Email_Certificate;
 
    function Sign_CSR
      (CA_Certificate_PEM : String;
       CA_Private_Key_PEM : String;
       CSR_PEM            : String;
-      Certificate_PEM    : out Unbounded_String) return Certificate_Status
+      Certificate_PEM    : out Unbounded_String;
+      Valid_Days         : Positive := Default_Certificate_Days)
+      return Certificate_Status
    is
       Algorithm : constant Key_Algorithm :=
         Algorithm_Of_Private_Key (CA_Private_Key_PEM);
@@ -1582,7 +1661,8 @@ package body CryptoLib.Certificates is
                        Profile     => Server_Profile,
                        Names       => [1 => Subject],
                        Algorithm   => Algorithm,
-                       Subject_Algorithm => P384_Key));
+                       Subject_Algorithm => P384_Key,
+                       Valid_Days  => Valid_Days));
             end;
 
             if Length (Cert) = 0 then
@@ -1620,7 +1700,8 @@ package body CryptoLib.Certificates is
                  Profile     => Server_Profile,
                  Names       => [1 => Subject],
                  Algorithm   => Algorithm,
-                 Subject_Algorithm => Ed25519_Key));
+                 Subject_Algorithm => Ed25519_Key,
+                 Valid_Days  => Valid_Days));
       end;
 
       if Length (Cert) = 0 then

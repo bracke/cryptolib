@@ -20,6 +20,22 @@ package CryptoLib.Certificates is
    --  keep what they had; a caller that wants to be trusted asks for P-384.
    type Key_Algorithm is (Ed25519_Key, P384_Key);
 
+   --  How long an issued certificate is valid, in days, counted from the
+   --  moment it is issued.
+   --
+   --  The window used to be a pair of literals in the source, which meant
+   --  every certificate this crate ever issued claimed the same ten years
+   --  and that issuing would silently start producing already-expired
+   --  certificates once that decade ran out. It is computed from the clock
+   --  now, and the caller says how long.
+   --
+   --  The leaf default is the CA/Browser Forum's ceiling for a TLS server
+   --  certificate. A long-lived leaf is a long window in which a compromised
+   --  key stays usable and nothing forces a rotation; a CA is granted longer
+   --  because replacing one means redistributing trust.
+   Default_Certificate_Days : constant := 397;
+   Default_CA_Days          : constant := 3652;
+
    --  Render a status as short diagnostic text.
    --  @param Status the status to describe
    --  @return lower-case text naming the status
@@ -31,12 +47,15 @@ package CryptoLib.Certificates is
    --  @param Private_Key_PEM receives the CA private key in PEM form
    --  @param Algorithm the key to issue the CA with; P384_Key for a CA a
    --  browser can be made to trust
+   --  @param Valid_Days how long the CA is valid, counted from now
    --  @return Ok on success, otherwise a deterministic failure status
    function Create_Local_CA
      (Common_Name     : String;
       Certificate_PEM : out Unbounded_String;
       Private_Key_PEM : out Unbounded_String;
-      Algorithm       : Key_Algorithm := Ed25519_Key) return Certificate_Status;
+      Algorithm       : Key_Algorithm := Ed25519_Key;
+      Valid_Days      : Positive := Default_CA_Days)
+      return Certificate_Status;
 
    --  Issue a server certificate under a CA, with a TLS server profile.
    --  @param CA_Certificate_PEM the issuing CA certificate in PEM form
@@ -45,6 +64,7 @@ package CryptoLib.Certificates is
    --  @param Names subject alternative names; DNS names and IP addresses
    --  @param Certificate_PEM receives the issued certificate in PEM form
    --  @param Private_Key_PEM receives the issued private key in PEM form
+   --  @param Valid_Days how long the certificate is valid, counted from now
    --  @return Ok on success, otherwise a deterministic failure status
    function Issue_Server_Certificate
      (CA_Certificate_PEM : String;
@@ -52,7 +72,9 @@ package CryptoLib.Certificates is
       Common_Name        : String;
       Names              : Subject_Alternative_Name_List;
       Certificate_PEM    : out Unbounded_String;
-      Private_Key_PEM    : out Unbounded_String) return Certificate_Status;
+      Private_Key_PEM    : out Unbounded_String;
+      Valid_Days         : Positive := Default_Certificate_Days)
+      return Certificate_Status;
 
    --  Issue a client certificate under a CA, with a TLS client profile.
    --  @param CA_Certificate_PEM the issuing CA certificate in PEM form
@@ -61,6 +83,7 @@ package CryptoLib.Certificates is
    --  @param Names subject alternative names; DNS names and IP addresses
    --  @param Certificate_PEM receives the issued certificate in PEM form
    --  @param Private_Key_PEM receives the issued private key in PEM form
+   --  @param Valid_Days how long the certificate is valid, counted from now
    --  @return Ok on success, otherwise a deterministic failure status
    function Issue_Client_Certificate
      (CA_Certificate_PEM : String;
@@ -68,7 +91,9 @@ package CryptoLib.Certificates is
       Common_Name        : String;
       Names              : Subject_Alternative_Name_List;
       Certificate_PEM    : out Unbounded_String;
-      Private_Key_PEM    : out Unbounded_String) return Certificate_Status;
+      Private_Key_PEM    : out Unbounded_String;
+      Valid_Days         : Positive := Default_Certificate_Days)
+      return Certificate_Status;
 
    --  Issue an email certificate under a CA, with an S/MIME profile.
    --  @param CA_Certificate_PEM the issuing CA certificate in PEM form
@@ -77,6 +102,7 @@ package CryptoLib.Certificates is
    --  @param Emails subject alternative names; email addresses
    --  @param Certificate_PEM receives the issued certificate in PEM form
    --  @param Private_Key_PEM receives the issued private key in PEM form
+   --  @param Valid_Days how long the certificate is valid, counted from now
    --  @return Ok on success, otherwise a deterministic failure status
    function Issue_Email_Certificate
      (CA_Certificate_PEM : String;
@@ -84,19 +110,24 @@ package CryptoLib.Certificates is
       Common_Name        : String;
       Emails             : Subject_Alternative_Name_List;
       Certificate_PEM    : out Unbounded_String;
-      Private_Key_PEM    : out Unbounded_String) return Certificate_Status;
+      Private_Key_PEM    : out Unbounded_String;
+      Valid_Days         : Positive := Default_Certificate_Days)
+      return Certificate_Status;
 
    --  Sign a certificate signing request under a CA.
    --  @param CA_Certificate_PEM the issuing CA certificate in PEM form
    --  @param CA_Private_Key_PEM the issuing CA private key in PEM form
    --  @param CSR_PEM the certificate signing request in PEM form
    --  @param Certificate_PEM receives the issued certificate in PEM form
+   --  @param Valid_Days how long the certificate is valid, counted from now
    --  @return Ok on success, otherwise a deterministic failure status
    function Sign_CSR
      (CA_Certificate_PEM : String;
       CA_Private_Key_PEM : String;
       CSR_PEM            : String;
-      Certificate_PEM    : out Unbounded_String) return Certificate_Status;
+      Certificate_PEM    : out Unbounded_String;
+      Valid_Days         : Positive := Default_Certificate_Days)
+      return Certificate_Status;
 
    --  Is this a DNS name, an IP address, an email address that may stand as a
    --  subject alternative name?

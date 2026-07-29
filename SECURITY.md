@@ -187,6 +187,18 @@ The RNG **fails closed**: if no OS source is available it returns
   responders. The nonce must be unpredictable (`CryptoLib.Random`, not a
   counter); without one, a captured "good" response replays until its
   `nextUpdate`.
+- **An issued certificate's validity window is computed, not compiled in.**
+  It used to be two literals -- `260101000000Z` to `360101000000Z` -- so every
+  certificate this crate issued claimed the same ten years, and once that
+  decade ran out issuing would have gone on producing certificates that were
+  expired the moment they were signed. `notBefore` is now the issuing clock
+  (backdated an hour, because the issuer's clock and the verifier's are not
+  the same clock) and `notAfter` is `Valid_Days` later: 397 days by default
+  for a leaf, the CA/Browser Forum's ceiling, and ten years for a CA.
+  A long-lived leaf is a long window in which a compromised key stays usable
+  with nothing forcing a rotation. Times at or beyond 2050 are written as
+  `GeneralizedTime` rather than `UTCTime`, as RFC 5280 requires -- a
+  two-digit year `53` would otherwise read back as 1953.
 - **An issued serial number is 128 bits of randomness, drawn per
   certificate.** A revocation names a certificate by issuer and serial and by
   nothing else -- both a CRL entry and an OCSP `CertID` key on it -- so two

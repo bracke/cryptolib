@@ -2448,6 +2448,93 @@ procedure Tests is
       end;
    end Check_Serial_Numbers;
 
+   --  A certificate is valid from when it was issued, for as long as the
+   --  caller asked. The window used to be two literals in the source, so
+   --  every certificate ever issued claimed the same decade and issuing
+   --  would have started producing already-expired certificates once it ran
+   --  out.
+   procedure Check_Validity_Window is
+      use type CryptoLib.ASN1.Errors.Decode_Status;
+      use type CryptoLib.X509.Certificate_Time;
+
+      package X509C renames CryptoLib.X509.Certificates;
+
+      function Decoded (Text : String) return X509C.Certificate is
+         Buffer : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset
+                   (CryptoLib.PEM.Maximum_Decoded_Length (Text)));
+         Last   : Ada.Streams.Stream_Element_Offset;
+         From   : Positive := Text'First;
+         P      : CryptoLib.PEM.Decode_Status;
+         D      : CryptoLib.ASN1.Errors.Decode_Status;
+      begin
+         CryptoLib.PEM.Decode_Block
+           (Text, CryptoLib.PEM.Certificate_Label, From, Buffer, Last, P);
+         return X509C.Decode_DER
+           (Buffer (Buffer'First .. Last), CryptoLib.ASN1.Default_Limits, D);
+      end Decoded;
+
+      CA_PEM, CA_Key, Short_PEM, Short_Key, Long_PEM, Long_Key :
+        Unbounded_String;
+      Outcome : CryptoLib.Certificates.Certificate_Status;
+   begin
+      Outcome :=
+        CryptoLib.Certificates.Create_Local_CA
+          ("validity-ca", CA_PEM, CA_Key, CryptoLib.Certificates.P384_Key);
+      Check (Outcome = CryptoLib.Certificates.Ok, "fixture: CA created");
+
+      Outcome :=
+        CryptoLib.Certificates.Issue_Server_Certificate
+          (To_String (CA_PEM), To_String (CA_Key), "short.example",
+           [1 => To_Unbounded_String ("short.example")], Short_PEM, Short_Key,
+           Valid_Days => 1);
+      Check (Outcome = CryptoLib.Certificates.Ok, "fixture: short issued");
+
+      --  Long enough that notAfter lands past 2049, where UTCTime stops
+      --  being unambiguous and the encoding has to change.
+      Outcome :=
+        CryptoLib.Certificates.Issue_Server_Certificate
+          (To_String (CA_PEM), To_String (CA_Key), "long.example",
+           [1 => To_Unbounded_String ("long.example")], Long_PEM, Long_Key,
+           Valid_Days => 10_000);
+      Check (Outcome = CryptoLib.Certificates.Ok, "fixture: long issued");
+
+      declare
+         Short : constant X509C.Certificate := Decoded (To_String (Short_PEM));
+         Long  : constant X509C.Certificate := Decoded (To_String (Long_PEM));
+      begin
+         Check (X509C.Is_Present (Short) and then X509C.Is_Present (Long),
+                "both certificates decode");
+
+         --  The lifetime the caller asked for is the lifetime it got: a
+         --  one-day certificate and a 10,000-day one cannot share a notAfter.
+         Check (X509C.Not_After (Short) /= X509C.Not_After (Long),
+                "the requested lifetime decides the expiry");
+         Check (CryptoLib.X509.Is_Not_After
+                  (X509C.Not_After (Short), X509C.Not_After (Long)),
+                "and a shorter one expires first");
+
+         --  Valid at the moment of issue, which a fixed window stops being.
+         Check (CryptoLib.X509.Is_Not_After
+                  (X509C.Not_Before (Short), X509C.Not_After (Short)),
+                "the window is not inverted");
+         Check (X509C.Not_Before (Short).Year >= 2026,
+                "and starts no earlier than this crate was written, got"
+                & Natural'Image (X509C.Not_Before (Short).Year));
+
+         --  Past 2049 a two-digit year stops being unambiguous, so the
+         --  encoding has to switch. Reading it back at all proves it did:
+         --  a UTCTime carrying "53" would decode as 1953.
+         Check (X509C.Not_After (Long).Year > 2049,
+                "a long-lived certificate expires past 2049, got"
+                & Natural'Image (X509C.Not_After (Long).Year));
+         Check (CryptoLib.X509.Is_Not_After
+                  (X509C.Not_Before (Long), X509C.Not_After (Long)),
+                "and its window is still the right way round, which a "
+                & "two-digit year would not have been");
+      end;
+   end Check_Validity_Window;
+
    procedure Check_X509_Extensions is
       use type CryptoLib.ASN1.Errors.Decode_Status;
       use type CryptoLib.PEM.Decode_Status;
@@ -7293,6 +7380,7 @@ begin
    Check_X509_Verify;
    Check_X509_Extensions;
    Check_Serial_Numbers;
+   Check_Validity_Window;
    Check_Decoder_Robustness;
    Check_Certificate_Ambiguity;
    Check_X509_Access_Locations;
