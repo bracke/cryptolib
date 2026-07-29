@@ -281,6 +281,25 @@ package CryptoLib.Certificates is
       Valid_Days         : Positive := Default_Certificate_Days)
       return Certificate_Status;
 
+   --  As Issue_Server_Certificate_For_Key, with the email profile.
+   --  @param CA_Certificate_PEM the issuing CA certificate in PEM form
+   --  @param CA_Private_Key_PEM the issuing CA private key in PEM form
+   --  @param Common_Name        the subject common name
+   --  @param Names              subject alternative names
+   --  @param Subject_SPKI       the subject's SubjectPublicKeyInfo, DER
+   --  @param Certificate_PEM    receives the issued certificate in PEM form
+   --  @param Valid_Days         how long the certificate is valid, from now
+   --  @return Ok on success, otherwise a deterministic failure status
+   function Issue_Email_Certificate_For_Key
+     (CA_Certificate_PEM : String;
+      CA_Private_Key_PEM : String;
+      Common_Name        : String;
+      Names              : Subject_Alternative_Name_List;
+      Subject_SPKI       : Ada.Streams.Stream_Element_Array;
+      Certificate_PEM    : out Unbounded_String;
+      Valid_Days         : Positive := Default_Certificate_Days)
+      return Certificate_Status;
+
    --  Is this a DNS name, an IP address, an email address that may stand as a
    --  subject alternative name?
    --

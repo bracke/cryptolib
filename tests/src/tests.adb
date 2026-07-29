@@ -580,6 +580,74 @@ procedure Tests is
                       "and it chains carrying the same 2048-bit RSA key");
             end;
 
+            --  The key issued alongside an RSA certificate belongs to it.
+            --  This used to be refused for RSA while CryptoLib.Identities
+            --  matched RSA keys perfectly well -- two answers to one question.
+            declare
+               CA_Key : constant String :=
+                 CryptoLib.Certificates.RSA_Private_Key_PEM
+                   (N, E, D, P, Q, DP, DQ, QI);
+               Own_CA : Ada.Strings.Unbounded.Unbounded_String;
+            begin
+               Check (CryptoLib.Certificates.Create_CA_For_Key
+                        ("cryptolib-rsa-match", CA_Key, Own_CA)
+                        = CryptoLib.Certificates.Ok,
+                      "a CA certificate for the RSA key");
+               Check (CryptoLib.Certificates.Private_Key_Matches_Certificate
+                        (Ada.Strings.Unbounded.To_String (Own_CA), CA_Key)
+                        = CryptoLib.Certificates.Ok,
+                      "an RSA key is matched to its own certificate");
+
+               --  And a different RSA key is not matched to it, which is the
+               --  half that would pass if the check simply always said yes.
+               declare
+                  N2 : Ada.Streams.Stream_Element_Array (1 .. 256);
+                  E2 : Ada.Streams.Stream_Element_Array (1 .. 3);
+                  D2 : Ada.Streams.Stream_Element_Array (1 .. 256);
+                  P2, Q2, DP2, DQ2, QI2 :
+                    Ada.Streams.Stream_Element_Array (1 .. 128);
+               begin
+                  Check (CryptoLib.RSA.Generate_Keypair_With_Primes
+                           (CryptoLib.RSA.RSA_2048, Rng, N2, E2, D2, P2, Q2,
+                            DP2, DQ2, QI2) = CryptoLib.Errors.Ok,
+                         "a second RSA key");
+                  Check (CryptoLib.Certificates.Private_Key_Matches_Certificate
+                           (Ada.Strings.Unbounded.To_String (Own_CA),
+                            CryptoLib.Certificates.RSA_Private_Key_PEM
+                              (N2, E2, D2, P2, Q2, DP2, DQ2, QI2))
+                           /= CryptoLib.Certificates.Ok,
+                         "and it is not matched to the first key's certificate");
+               end;
+            end;
+
+            --  The email profile, so all three supplied-key entry points are
+            --  exercised rather than two of them.
+            declare
+               SPKI : constant String :=
+                 CryptoLib.Certificates.RSA_Public_Key_Info (N, E);
+               SPKI_Bytes : Ada.Streams.Stream_Element_Array
+                 (1 .. Ada.Streams.Stream_Element_Offset (SPKI'Length));
+               Mail : Ada.Strings.Unbounded.Unbounded_String;
+            begin
+               for I in SPKI_Bytes'Range loop
+                  SPKI_Bytes (I) :=
+                    Character'Pos (SPKI (SPKI'First + Natural (I - 1)));
+               end loop;
+               Check (CryptoLib.Certificates.Issue_Email_Certificate_For_Key
+                        (Ada.Strings.Unbounded.To_String (Root),
+                         Ada.Strings.Unbounded.To_String (Root_Key),
+                         "rsa@example.com",
+                         [1 => Ada.Strings.Unbounded.To_Unbounded_String
+                                 ("rsa@example.com")],
+                         SPKI_Bytes, Mail)
+                        = CryptoLib.Certificates.Ok,
+                      "an RSA email certificate is issued for a supplied key");
+               Check (OpenSSL_Interop.Chain_Verifies
+                        (Ada.Strings.Unbounded.To_String (Root),
+                         Ada.Strings.Unbounded.To_String (Mail)),
+                      "and it chains");
+            end;
+
             --  A supplied key with an empty SPKI is refused rather than
             --  certified as nothing.
             declare

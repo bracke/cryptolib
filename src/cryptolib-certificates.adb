@@ -2502,11 +2502,15 @@ package body CryptoLib.Certificates is
       DER       : constant String := Base64_Decode (Certificate_PEM);
       Algorithm : constant Key_Algorithm :=
         Algorithm_Of_Private_Key (Private_Key_PEM);
-      Seed      : Ada.Streams.Stream_Element_Array
-        (1 .. Ada.Streams.Stream_Element_Offset (Seed_Length_For (Algorithm)));
-      Public    : Ada.Streams.Stream_Element_Array
-        (1 .. Ada.Streams.Stream_Element_Offset
-                (Public_Length_For (Algorithm)));
+
+      Priv : CA_Private_Material;
+      Pub  : CA_Public_Material;
+      N, E : CA_Public_Material;
+
+      procedure Scrub is
+      begin
+         CryptoLib.Secure_Wipe.Wipe (Priv.Slot'Address, Priv.Slot'Length);
+      end Scrub;
    begin
       if DER = "" or else Private_Key_PEM = "" then
          return Invalid_Input;
@@ -2515,58 +2519,30 @@ package body CryptoLib.Certificates is
       --  Derive the public key the private one implies and look for it in the
       --  certificate: a key that belongs to another certificate cannot produce
       --  a subject public key that matches this one.
-      case Algorithm is
-         when RSA_Key =>
-            --  An RSA key is matched by its modulus rather than by deriving a
-            --  public point from a scalar, which is what every other arm here
-            --  does. Not implemented on this path: a caller holding an RSA key
-            --  compares CryptoLib.PKCS8.RSA_Modulus with the modulus in the
-            --  certificate directly.
-            return Unsupported_Key_Algorithm;
-         when P256_Key =>
-            if not Scalar_From_Private_Key_PEM
-                     (Private_Key_PEM, Seed, P256_Key)
-            then
-               return Invalid_Input;
-            elsif CryptoLib.ECDSA.Public_Key_Raw
-                    (CryptoLib.ECDSA.Nistp256, Seed, Public)
-              /= CryptoLib.Errors.Ok
-            then
-               return Internal_Error;
-            end if;
-         when P384_Key =>
-            if not Scalar_From_Private_Key_PEM (Private_Key_PEM, Seed) then
-               return Invalid_Input;
-            elsif CryptoLib.ECDSA.Public_Nistp384_Raw (Seed, Public)
-              /= CryptoLib.Errors.Ok
-            then
-               return Internal_Error;
-            end if;
-         when Ed448_Key =>
-            if not Seed_From_Private_Key_PEM
-                     (Private_Key_PEM, Seed, Ed448_Key)
-            then
-               return Invalid_Input;
-            elsif CryptoLib.Ed448.Public_Key_From_Seed (Seed, Public)
-              /= CryptoLib.Errors.Ok
-            then
-               return Internal_Error;
-            end if;
-         when Ed25519_Key =>
-            if not Seed_From_Private_Key_PEM (Private_Key_PEM, Seed) then
-               return Invalid_Input;
-            elsif CryptoLib.Ed25519.Public_Key_From_Seed (Seed, Public)
-              /= CryptoLib.Errors.Ok
-            then
-               return Internal_Error;
-            end if;
-      end case;
+      --
+      --  This used to be a case over four algorithms that each derived a
+      --  public value its own way, with RSA refused because it is matched by
+      --  its modulus rather than by a point derived from a scalar. Read_CA_
+      --  Material already produces the public half of every kind of key,
+      --  including RSA, so there is one path and RSA is no longer the
+      --  exception. CryptoLib.Identities has always matched RSA keys; this
+      --  refusing them was the two answering the same question differently.
+      if not Read_CA_Material (Private_Key_PEM, Algorithm, Priv, Pub, N, E)
+      then
+         Scrub;
+         return Invalid_Input;
+      end if;
+      Scrub;
 
-      if Contains (DER, SPKI_DER (Public, Algorithm)) then
+      if Contains (DER, SPKI_DER (Value (Pub), Algorithm)) then
          return Ok;
       else
          return Invalid_Input;
       end if;
+   exception
+      when others =>
+         Scrub;
+         return Internal_Error;
    end Private_Key_Matches_Certificate;
 
    function Generate_PKCS12
@@ -2909,6 +2885,21 @@ package body CryptoLib.Certificates is
         (CA_Certificate_PEM, CA_Private_Key_PEM, Common_Name, Names,
          Subject_SPKI, Server_Profile, Certificate_PEM, Valid_Days);
    end Issue_Server_Certificate_For_Key;
+
+   function Issue_Email_Certificate_For_Key
+     (CA_Certificate_PEM : String;
+      CA_Private_Key_PEM : String;
+      Common_Name        : String;
+      Names              : Subject_Alternative_Name_List;
+      Subject_SPKI       : Ada.Streams.Stream_Element_Array;
+      Certificate_PEM    : out Unbounded_String;
+      Valid_Days         : Positive := Default_Certificate_Days)
+      return Certificate_Status is
+   begin
+      return Issue_For_Supplied_Key
+        (CA_Certificate_PEM, CA_Private_Key_PEM, Common_Name, Names,
+         Subject_SPKI, Email_Profile, Certificate_PEM, Valid_Days);
+   end Issue_Email_Certificate_For_Key;
 
    function Issue_Client_Certificate_For_Key
      (CA_Certificate_PEM : String;
