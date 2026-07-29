@@ -266,7 +266,9 @@ every status reading `Ok` while every key it produces is predictable.
   is reported rather than enforced. That is the RFC's behaviour and OpenSSL's,
   and it surprises people -- asking for a policy does not by itself make a
   chain lacking it fail. The tree is bounded -- 64 nodes, 16 policies and 16
-  mappings per certificate -- and running out of room makes the outcome
+  mappings per certificate, a relationship the compiler holds to, since the
+  alternative to a truncation guard that cannot fire is not one that can but
+  a truncation path no test covers -- and running out of room makes the outcome
   unacceptable rather than truncating it, because a partial tree is missing
   exactly the nodes that pruning would have removed and can only be too
   permissive. That case is reported as `Policies.Exhausted` alongside the

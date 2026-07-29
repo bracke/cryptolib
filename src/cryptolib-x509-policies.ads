@@ -32,13 +32,29 @@ package CryptoLib.X509.Policies is
    --  certificate naming a longer one is naming a policy this cannot hold.
    Maximum_Policy_Length : constant := 40;
 
-   --  How many policies one certificate may asserta, how many mappings it may
+   --  How many policies one certificate may assert, how many mappings it may
    --  declare, and how wide the tree may grow. A certificate in the wild
    --  carries one or two policies; the tree is bounded because it is built
    --  from attacker-supplied input and must not be able to grow without end.
    Maximum_Policies : constant := 16;
    Maximum_Mappings : constant := 16;
    Maximum_Nodes    : constant := 64;
+
+   --  Running out of room is reported rather than truncated, and the engine
+   --  carries guards that say so wherever a set could overflow. Most of them
+   --  cannot fire while these bounds stand: no certificate contributes more
+   --  policies than a mapping set can name, so the gathering steps reach
+   --  their limit exactly and never pass it. That is worth having the
+   --  compiler hold to, because the alternative to an unreachable guard is
+   --  not a reachable one -- it is a truncation path that no test covers,
+   --  arrived at by changing a number here.
+   pragma Compile_Time_Error
+     (Maximum_Mappings > Maximum_Policies,
+      "a certificate could map more policies than a policy set can hold, "
+      & "which reaches truncation guards the suite does not exercise");
+   pragma Compile_Time_Error
+     (Maximum_Nodes < Maximum_Policies,
+      "the tree could not hold one node per policy of a single certificate");
 
    --  One policy identifier, held as the OID's content octets.
    type Policy_Value is private;
