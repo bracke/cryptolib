@@ -23,7 +23,13 @@ package CryptoLib.Certificates is
    --  accepted by even less than Ed25519 is -- offered because this crate can
    --  verify it and check a key against it, and being unable to issue what it
    --  can verify was the odd part. Nothing about browsers changes here.
-   type Key_Algorithm is (Ed25519_Key, P384_Key, Ed448_Key);
+   --
+   --  P-256 is the curve most TLS certificates in the world actually use, and
+   --  it is here for the same reason Ed448 is: this crate could already verify
+   --  a P-256 certificate and match a key to one, and not being able to issue
+   --  one was the remaining half of that oddity. It is a smaller curve than
+   --  P-384, which is the trade a caller makes for the wider deployment.
+   type Key_Algorithm is (Ed25519_Key, P256_Key, P384_Key, Ed448_Key);
 
    --  How long an issued certificate is valid, in days, counted from the
    --  moment it is issued.

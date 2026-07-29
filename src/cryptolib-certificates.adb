@@ -288,6 +288,25 @@ package body CryptoLib.Certificates is
               & Byte (16#3D#) & Byte (16#04#) & Byte (16#03#) & Byte (16#03#)));
    end P384_Signature_Algorithm;
 
+   --  1.2.840.10045.2.1 id-ecPublicKey with 1.2.840.10045.3.1.7 prime256v1.
+   function P256_Algorithm return String is
+   begin
+      return Seq
+        (OID (Byte (16#2A#) & Byte (16#86#) & Byte (16#48#) & Byte (16#CE#)
+              & Byte (16#3D#) & Byte (16#02#) & Byte (16#01#))
+         & OID (Byte (16#2A#) & Byte (16#86#) & Byte (16#48#) & Byte (16#CE#)
+                & Byte (16#3D#) & Byte (16#03#) & Byte (16#01#)
+                & Byte (16#07#)));
+   end P256_Algorithm;
+
+   --  1.2.840.10045.4.3.2 ecdsa-with-SHA256.
+   function P256_Signature_Algorithm return String is
+   begin
+      return Seq
+        (OID (Byte (16#2A#) & Byte (16#86#) & Byte (16#48#) & Byte (16#CE#)
+              & Byte (16#3D#) & Byte (16#04#) & Byte (16#03#) & Byte (16#02#)));
+   end P256_Signature_Algorithm;
+
    --  1.3.101.113 id-Ed448. Like Ed25519 it names the hash inside the
    --  scheme, so the key and the signature share one identifier.
    function Ed448_Algorithm return String is
@@ -300,6 +319,7 @@ package body CryptoLib.Certificates is
    begin
       return (case Algorithm is
                  when Ed25519_Key => Ed25519_Algorithm,
+                 when P256_Key    => P256_Algorithm,
                  when P384_Key    => P384_Algorithm,
                  when Ed448_Key   => Ed448_Algorithm);
    end Algorithm_Identifier;
@@ -308,6 +328,7 @@ package body CryptoLib.Certificates is
    begin
       return (case Algorithm is
                  when Ed25519_Key => Ed25519_Algorithm,
+                 when P256_Key    => P256_Signature_Algorithm,
                  when P384_Key    => P384_Signature_Algorithm,
                  when Ed448_Key   => Ed448_Algorithm);
    end Signature_Algorithm;
@@ -318,12 +339,14 @@ package body CryptoLib.Certificates is
    function Seed_Length_For (Algorithm : Key_Algorithm) return Positive
    is (case Algorithm is
           when Ed25519_Key => 32,
+          when P256_Key    => 32,
           when P384_Key    => 48,
           when Ed448_Key   => 57);
 
    function Public_Length_For (Algorithm : Key_Algorithm) return Positive
    is (case Algorithm is
           when Ed25519_Key => 32,
+          when P256_Key    => 65,
           when P384_Key    => 97,
           when Ed448_Key   => 57);
 
@@ -499,9 +522,10 @@ package body CryptoLib.Certificates is
    --  PKCS#8 around an RFC 5915 ECPrivateKey. The inner structure carries the
    --  public point as well: a reader that has only the scalar would otherwise
    --  have to multiply to learn the key it belongs to.
-   function P384_Private_Key_DER
-     (Scalar : Ada.Streams.Stream_Element_Array;
-      Public : Ada.Streams.Stream_Element_Array) return String
+   function EC_Private_Key_DER
+     (Scalar       : Ada.Streams.Stream_Element_Array;
+      Public       : Ada.Streams.Stream_Element_Array;
+      Algorithm_ID : String) return String
    is
       Inner : constant String :=
         Seq
@@ -510,8 +534,8 @@ package body CryptoLib.Certificates is
            & Explicit (1, Bits (To_String (Public))));
    begin
       return Seq
-        (Integer_DER (0) & P384_Algorithm & Octets (Inner));
-   end P384_Private_Key_DER;
+        (Integer_DER (0) & Algorithm_ID & Octets (Inner));
+   end EC_Private_Key_DER;
 
    function Mac_Data
      (Authenticated_Safe : String;
@@ -772,6 +796,9 @@ package body CryptoLib.Certificates is
       end if;
 
       return (if CryptoLib.PKCS8.Algorithm_Of (Item)
+                   = CryptoLib.X509.ECDSA_P256
+              then P256_Key
+              elsif CryptoLib.PKCS8.Algorithm_Of (Item)
                    = CryptoLib.X509.ECDSA_P384
               then P384_Key
               elsif CryptoLib.PKCS8.Algorithm_Of (Item)
@@ -809,11 +836,18 @@ package body CryptoLib.Certificates is
       end;
    end Value_From_Private_Key_PEM;
 
+   --  Which curve the scalar is expected to be on. Reading a P-256 key as a
+   --  P-384 one would take a 32-octet scalar for a 48-octet one.
    function Scalar_From_Private_Key_PEM
      (Private_Key_PEM : String;
-      Scalar          : out Ada.Streams.Stream_Element_Array) return Boolean
+      Scalar          : out Ada.Streams.Stream_Element_Array;
+      Algorithm       : Key_Algorithm := P384_Key) return Boolean
    is (Value_From_Private_Key_PEM
-         (Private_Key_PEM, CryptoLib.X509.ECDSA_P384, Scalar));
+         (Private_Key_PEM,
+          (if Algorithm = P256_Key
+           then CryptoLib.X509.ECDSA_P256
+           else CryptoLib.X509.ECDSA_P384),
+          Scalar));
 
    function Seed_From_Private_Key_PEM
      (Private_Key_PEM : String;
@@ -821,9 +855,11 @@ package body CryptoLib.Certificates is
       Algorithm       : Key_Algorithm := Ed25519_Key) return Boolean
    is (Value_From_Private_Key_PEM
          (Private_Key_PEM,
-          (if Algorithm = Ed448_Key
-           then CryptoLib.X509.Ed448
-           else CryptoLib.X509.Ed25519),
+          (case Algorithm is
+              when Ed448_Key   => CryptoLib.X509.Ed448,
+              when Ed25519_Key => CryptoLib.X509.Ed25519,
+              when P256_Key    => CryptoLib.X509.ECDSA_P256,
+              when P384_Key    => CryptoLib.X509.ECDSA_P384),
           Seed));
 
    function Valid_Name (Text : String) return Boolean is
@@ -1225,6 +1261,23 @@ package body CryptoLib.Certificates is
                   & Bits (To_String (Sig)));
             end;
 
+         when P256_Key =>
+            declare
+               R  : Ada.Streams.Stream_Element_Array (1 .. 32);
+               S2 : Ada.Streams.Stream_Element_Array (1 .. 32);
+               St : constant CryptoLib.Errors.Status :=
+                 CryptoLib.ECDSA.Sign_Nistp256_Raw
+                   (Sign_Seed, To_Bytes (TBS), R, S2);
+            begin
+               if St /= CryptoLib.Errors.Ok then
+                  return "";
+               end if;
+               return Seq
+                 (TBS & Signature_Algorithm (Algorithm)
+                  & Bits (Seq (Integer_From_Bytes (To_String (R))
+                               & Integer_From_Bytes (To_String (S2)))));
+            end;
+
          when P384_Key =>
             --  ECDSA signs as two integers, not one fixed block, and DER wants
             --  each of them minimally encoded.
@@ -1487,6 +1540,13 @@ package body CryptoLib.Certificates is
                Scrub;
                return Internal_Error;
             end if;
+         when P256_Key =>
+            if CryptoLib.ECDSA.Generate_Nistp256_Keypair (Rng, Seed, Public)
+              /= CryptoLib.Errors.Ok
+            then
+               Scrub;
+               return Internal_Error;
+            end if;
          when P384_Key =>
             if CryptoLib.ECDSA.Generate_Nistp384_Keypair (Rng, Seed, Public)
               /= CryptoLib.Errors.Ok
@@ -1538,7 +1598,10 @@ package body CryptoLib.Certificates is
              (case Algorithm is
                  when Ed25519_Key => Private_Key_DER (Seed),
                  when Ed448_Key   => Private_Key_DER (Seed, Ed448_Key),
-                 when P384_Key    => P384_Private_Key_DER (Seed, Public)));
+                 when P256_Key    =>
+                   EC_Private_Key_DER (Seed, Public, P256_Algorithm),
+                 when P384_Key    =>
+                   EC_Private_Key_DER (Seed, Public, P384_Algorithm)));
       Scrub;
       return Ok;
    end Create_Local_CA;
@@ -1739,6 +1802,20 @@ package body CryptoLib.Certificates is
       end loop;
 
       case Algorithm is
+         when P256_Key =>
+            if not Scalar_From_Private_Key_PEM
+                     (CA_Private_Key_PEM, CA_Seed, P256_Key)
+            then
+               Scrub;
+               return Invalid_Input;
+            end if;
+            if CryptoLib.ECDSA.Public_Key_Raw
+                 (CryptoLib.ECDSA.Nistp256, CA_Seed, CA_Public)
+              /= CryptoLib.Errors.Ok
+            then
+               Scrub;
+               return Internal_Error;
+            end if;
          when P384_Key =>
             if not Scalar_From_Private_Key_PEM (CA_Private_Key_PEM, CA_Seed)
             then
@@ -1778,26 +1855,41 @@ package body CryptoLib.Certificates is
       end case;
 
       CryptoLib.Random.Initialize_Production (Rng);
-      if Algorithm = P384_Key then
-         if CryptoLib.ECDSA.Generate_Nistp384_Keypair (Rng, Seed, Public)
-           /= CryptoLib.Errors.Ok
-         then
-            Scrub;
-            return Internal_Error;
-         end if;
-      elsif Algorithm = Ed448_Key then
-         if CryptoLib.Ed448.Generate_Keypair (Rng, Seed, Public)
-           /= CryptoLib.Errors.Ok
-         then
-            Scrub;
-            return Internal_Error;
-         end if;
-      elsif CryptoLib.Ed25519.Generate_Keypair (Rng, Seed, Public)
-        /= CryptoLib.Errors.Ok
-      then
-         Scrub;
-         return Internal_Error;
-      end if;
+      --  A case rather than an if-chain, so the compiler names every
+      --  algorithm. This was an if-chain whose else branch generated an
+      --  Ed25519 key: adding P-256 made it issue a certificate that said
+      --  P-256 and carried an Ed25519 key, and nothing in the type system
+      --  objected. A case cannot acquire that kind of silent default.
+      case Algorithm is
+         when P256_Key =>
+            if CryptoLib.ECDSA.Generate_Nistp256_Keypair (Rng, Seed, Public)
+              /= CryptoLib.Errors.Ok
+            then
+               Scrub;
+               return Internal_Error;
+            end if;
+         when P384_Key =>
+            if CryptoLib.ECDSA.Generate_Nistp384_Keypair (Rng, Seed, Public)
+              /= CryptoLib.Errors.Ok
+            then
+               Scrub;
+               return Internal_Error;
+            end if;
+         when Ed448_Key =>
+            if CryptoLib.Ed448.Generate_Keypair (Rng, Seed, Public)
+              /= CryptoLib.Errors.Ok
+            then
+               Scrub;
+               return Internal_Error;
+            end if;
+         when Ed25519_Key =>
+            if CryptoLib.Ed25519.Generate_Keypair (Rng, Seed, Public)
+              /= CryptoLib.Errors.Ok
+            then
+               Scrub;
+               return Internal_Error;
+            end if;
+      end case;
 
       declare
          Serial_Value : constant String := Random_Serial (Rng);
@@ -1834,7 +1926,10 @@ package body CryptoLib.Certificates is
       Private_Key_PEM :=
         PEM ("PRIVATE KEY",
              (case Algorithm is
-                 when P384_Key    => P384_Private_Key_DER (Seed, Public),
+                 when P256_Key    =>
+                   EC_Private_Key_DER (Seed, Public, P256_Algorithm),
+                 when P384_Key    =>
+                   EC_Private_Key_DER (Seed, Public, P384_Algorithm),
                  when Ed448_Key   => Private_Key_DER (Seed, Ed448_Key),
                  when Ed25519_Key => Private_Key_DER (Seed)));
       Scrub;
@@ -1942,6 +2037,20 @@ package body CryptoLib.Certificates is
          return Invalid_Input;
       end if;
       case Algorithm is
+         when P256_Key =>
+            if not Scalar_From_Private_Key_PEM
+                     (CA_Private_Key_PEM, CA_Seed, P256_Key)
+            then
+               Scrub;
+               return Invalid_Input;
+            end if;
+            if CryptoLib.ECDSA.Public_Key_Raw
+                 (CryptoLib.ECDSA.Nistp256, CA_Seed, CA_Public)
+              /= CryptoLib.Errors.Ok
+            then
+               Scrub;
+               return Internal_Error;
+            end if;
          when P384_Key =>
             if not Scalar_From_Private_Key_PEM (CA_Private_Key_PEM, CA_Seed)
             then
@@ -2195,6 +2304,17 @@ package body CryptoLib.Certificates is
       --  certificate: a key that belongs to another certificate cannot produce
       --  a subject public key that matches this one.
       case Algorithm is
+         when P256_Key =>
+            if not Scalar_From_Private_Key_PEM
+                     (Private_Key_PEM, Seed, P256_Key)
+            then
+               return Invalid_Input;
+            elsif CryptoLib.ECDSA.Public_Key_Raw
+                    (CryptoLib.ECDSA.Nistp256, Seed, Public)
+              /= CryptoLib.Errors.Ok
+            then
+               return Internal_Error;
+            end if;
          when P384_Key =>
             if not Scalar_From_Private_Key_PEM (Private_Key_PEM, Seed) then
                return Invalid_Input;

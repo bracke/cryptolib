@@ -332,6 +332,7 @@ procedure Tests is
          is
             Label   : constant String :=
               (case Algorithm is
+                  when CryptoLib.Certificates.P256_Key    => "p256",
                   when CryptoLib.Certificates.P384_Key    => "p384",
                   when CryptoLib.Certificates.Ed448_Key   => "ed448",
                   when CryptoLib.Certificates.Ed25519_Key => "ed25519");
@@ -373,6 +374,12 @@ procedure Tests is
          end Check_Chain;
       begin
          Check_Chain (CryptoLib.Certificates.Ed25519_Key);
+         --  P-256 last of the curves to arrive, and the one most certificates
+         --  in the world actually use. OpenSSL verifying the chain is what
+         --  says the curve OID, the signature OID, the scalar width and the
+         --  point encoding all agree with the rest of the world rather than
+         --  only with each other.
+         Check_Chain (CryptoLib.Certificates.P256_Key);
          Check_Chain (CryptoLib.Certificates.P384_Key);
          Check_Chain (CryptoLib.Certificates.Ed448_Key);
       end;
