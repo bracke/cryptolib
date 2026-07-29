@@ -143,6 +143,18 @@ by the project file (`src-linux` / `src-windows`):
 - **Linux** — `getrandom(2)` (blocks until the kernel CSPRNG is seeded),
   `/dev/urandom` fallback.
 - **Windows** — `BCryptGenRandom` with `BCRYPT_USE_SYSTEM_PREFERRED_RNG`.
+  **Never run.** There is no Windows toolchain or emulator on the machines
+  this has been developed on, so the binding has been read against the
+  documented API rather than exercised: a null algorithm handle, which is
+  what that flag requires; only `STATUS_SUCCESS` accepted, so a warning
+  status is a failure rather than randomness; the buffer zeroed before the
+  call and again if it fails; `ULONG` and `NTSTATUS` written as
+  `Interfaces.Unsigned_32` and `Integer_32` rather than the C long types,
+  because Windows fixes both at 32 bits whatever the word size and the C
+  types would follow the target compiler instead. The release preflight
+  compiles it for semantics on every run, which catches it rotting against
+  a changed spec but says nothing about whether the call is right. Treat it
+  as unproven until somebody runs it on Windows.
 
 The RNG **fails closed**: if no OS source is available it returns
 `Internal_Error` and zeroes the buffer rather than emitting weak randomness.

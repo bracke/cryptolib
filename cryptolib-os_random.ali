@@ -1,0 +1,68 @@
+V "GNAT Lib v15"
+A -gnatc
+A -gnat2022
+A -gnatwa
+A -mtune=generic
+A -march=x86-64
+P NO
+
+RN
+RV NO_DYNAMIC_SIZED_OBJECTS
+RV NO_ELABORATION_CODE
+
+U cryptolib.os_random%b	cryptolib-os_random.adb	dd3bed6c OO PK
+Z ada.strings.text_buffers%s  a-sttebu.adb	a-sttebu.ali
+W cryptolib%s		cryptolib.ads		cryptolib.ali
+W interfaces%s		interfac.ads		interfac.ali
+W system%s		system.ads		system.ali
+
+U cryptolib.os_random%s	cryptolib-os_random.ads	8e98744f EE OO PK
+W ada%s			ada.ads			ada.ali
+W ada.streams%s		a-stream.adb		a-stream.ali
+W cryptolib%s		cryptolib.ads		cryptolib.ali
+
+D ada.ads		20250808065140 76789da1 ada%s
+D a-stream.ads		20250808065140 17477cbd ada.streams%s
+D a-string.ads		20250808065140 90ac6797 ada.strings%s
+D a-sttebu.ads		20250808065140 f1ad67a2 ada.strings.text_buffers%s
+D a-stuten.ads		20250808065140 c6ced0ae ada.strings.utf_encoding%s
+D a-unccon.ads		20250808065140 0e9b276f ada.unchecked_conversion%s
+D cryptolib.ads		20260704123248 574063d9 cryptolib%s
+D cryptolib-os_random.ads  20260713162423 ce9f6b2b cryptolib.os_random%s
+D cryptolib-os_random.adb  20260729124220 969d1489 cryptolib.os_random%b
+D interfac.ads		20250808065140 9111f9c1 interfaces%s
+D system.ads		20250808065140 14286b0f system%s
+G a e
+G c Z s b [fill_os cryptolib__os_random 16 14 none]
+G c Z b b [bcrypt_gen_random cryptolib__os_random 23 13 none]
+X 1 ada.ads
+18K9*Ada 22e8 8|1r6 17r21 9|31r21
+X 2 a-stream.ads
+36K13*Streams 90e16 8|1w10 17r25 9|31r25
+42M9*Stream_Element
+54A9*Stream_Element_Array(42M9)<44I9> 8|17r33 9|31r33
+X 7 cryptolib.ads
+4K9*CryptoLib 6e14 8|11r9 20r5 9|9r14 55r5
+X 8 cryptolib-os_random.ads
+11K19*OS_Random 7|4k9 8|20l15 20e24 9|9b24 55l15 55t24
+16U14*Fill_OS 17<7 18<7 9|30b14 53l8 53t15
+17a7 Buffer{2|54A9} 9|31b7 38m7 39r10 46m25 46r25 47r49 51m10
+18b7 Success{boolean} 9|32b7 37m7 40m10 49m7 50r14
+X 9 cryptolib-os_random.adb
+13N4 BCRYPT_USE_SYSTEM_PREFERRED_RNG 48r25
+14N4 STATUS_SUCCESS 49r27
+23V13 BCrypt_Gen_Random{10|65I9} 24>7 25>7 26>7 27>7 44s9
+24m7 Algorithm{11|67M9} 45r12
+25m7 Buffer{11|67M9} 46r12
+26m7 Count{10|92M9} 47r12
+27m7 Flags{10|92M9} 48r12
+35i7 Status{10|65I9} 43m7 49r18
+X 10 interfac.ads
+47K9*Interfaces 9|1w6 26r19 27r19 27r50 34r16 35r16 47r25 10|247e15
+65I9*Integer_32<integer> 9|27r61 34r27 35r27
+92M9*Unsigned_32 9|26r30 27r30 47r36
+X 11 system.ads
+37K9*System 9|2w6 24r19 25r19 45r25 11|155e11
+67M9*Address 9|24r26 25r26
+69m4*Null_Address{67M9} 9|45r32
+

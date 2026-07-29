@@ -67,6 +67,17 @@ begin
    Step ("build cryptolib for inspection", "alr build --release -- -f");
    Step ("check constant-time properties", "tools/bin/check_constant_time");
 
+   --  The per-OS backend that this host does not build. Source_Dirs picks
+   --  src-linux or src-windows by host, so whichever is not chosen is
+   --  compiled by nothing and can rot without anyone noticing until somebody
+   --  builds on the other platform. A semantic check is not a test -- it
+   --  cannot say BCryptGenRandom was called correctly -- but it does say the
+   --  file still compiles against the spec it implements, which is the part
+   --  that quietly breaks when a shared declaration changes.
+   Step ("check the other platform's backend",
+         "alr exec -- gcc -c -gnatc -gnat2022 -gnatwa -Isrc -Iconfig "
+         & "src-windows/cryptolib-os_random.adb");
+
    Step ("build cryptolib", "alr build -- -f");
    Step ("build test suite", "cd tests && alr build -- -f");
    Step ("run test suite", "./tests/bin/tests");

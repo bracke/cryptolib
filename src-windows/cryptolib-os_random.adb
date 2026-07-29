@@ -1,4 +1,4 @@
-with Interfaces.C;
+with Interfaces;
 with System;
 
 --  Windows OS CSPRNG: BCryptGenRandom (bcrypt.dll) with a null algorithm handle
@@ -15,19 +15,24 @@ package body CryptoLib.OS_Random is
 
    --  NTSTATUS BCryptGenRandom(BCRYPT_ALG_HANDLE hAlgorithm, PUCHAR pbBuffer,
    --                           ULONG cbBuffer, ULONG dwFlags);
+   --
+   --  ULONG and NTSTATUS are 32 bits on Windows whatever the word size, that
+   --  being what LLP64 means. Interfaces.C.unsigned_long would follow the
+   --  target's C compiler instead and happens to agree there -- these say so
+   --  outright, so the binding does not rest on that agreeing.
    function BCrypt_Gen_Random
      (Algorithm : System.Address;
       Buffer    : System.Address;
-      Count     : Interfaces.C.unsigned_long;
-      Flags     : Interfaces.C.unsigned_long) return Interfaces.C.long
+      Count     : Interfaces.Unsigned_32;
+      Flags     : Interfaces.Unsigned_32) return Interfaces.Integer_32
      with Import, Convention => C, External_Name => "BCryptGenRandom";
 
    procedure Fill_OS
      (Buffer  : out Ada.Streams.Stream_Element_Array;
       Success : out Boolean)
    is
-      use type Interfaces.C.long;
-      Status : Interfaces.C.long;
+      use type Interfaces.Integer_32;
+      Status : Interfaces.Integer_32;
    begin
       Success := False;
       Buffer  := [others => 0];
@@ -39,7 +44,7 @@ package body CryptoLib.OS_Random is
         BCrypt_Gen_Random
           (Algorithm => System.Null_Address,
            Buffer    => Buffer'Address,
-           Count     => Interfaces.C.unsigned_long (Buffer'Length),
+           Count     => Interfaces.Unsigned_32 (Buffer'Length),
            Flags     => BCRYPT_USE_SYSTEM_PREFERRED_RNG);
       Success := Status = STATUS_SUCCESS;
       if not Success then
