@@ -22,7 +22,7 @@ The reference sources are:
 | AEAD / ciphers | AES-128/192/256 (CTR/CBC/GCM), ChaCha20-Poly1305, 3DES, RC2 | FIPS-197; AES-256-GCM and chacha20-poly1305@openssh.com cross-checked vs pyca/OpenSSL |
 | GHASH | GF(2¹²⁸) for AES-GCM | via the GCM KAT |
 | X25519 | Curve25519 ECDH | RFC 7748 §5.2 |
-| Ed25519 | sign / verify | RFC 8032 |
+| Ed25519 | sign / verify | RFC 8032; a public key has one encoding -- the decoder refuses a non-canonical `y`, requires a real square root, and refuses `x = 0` with the sign bit set (RFC 8032 5.1.3) |
 | ECDSA | P-256 (in `ssh_lib`), P-384 / P-521 sign; P-256 / P-384 / P-521 verify; the public point is checked to be on the curve and within the field before use | **RFC 6979 A.2.5** (P-384, byte-exact) + P-521 (pyca cross-verified); verification against OpenSSL signatures on all three curves, including curve/digest pairings that differ (P-521 with SHA-256, P-384 with SHA-512) |
 | Finite-field DH | groups 1 / 14 / 16 / 18 | live vs OpenSSH; group16/18 pin the exact RFC 3526 primes |
 | Post-quantum | ML-KEM-768, sntrup761 (+ hybrid x25519 KEX) | NIST / live vs OpenSSH sntrup761x25519 |
@@ -132,6 +132,14 @@ The RNG **fails closed**: if no OS source is available it returns
 - GNAT `Ada.Numerics.Big_Numbers.Big_Integers` caps at ~6400 bits, which is why
   DH group16/18 use `Modexp` (fixed-width Montgomery) rather than `Big_Integers`.
 - CT holds at the source level only; there is no formal or automated guarantee.
+- **A low-order Ed25519 public key is accepted.** RFC 8032 does not require
+  refusing one, and this does not go beyond it. The consequence is worth
+  knowing: for the identity key the verification equation reduces to
+  `[S]B = R`, so `S = 0` with `R` the identity verifies against *any*
+  message. A caller that treats "the signature verified" as authentication
+  without having established whose key it is gets nothing from that
+  signature. Establishing whose key it is is `X509.Validation`'s job, not
+  this one's.
 - **A configured identity is checked, not trusted.** `CryptoLib.Identities`
   confirms a chain decodes, hangs together by issuer and subject name, and
   that the private key belongs to the leaf. It says nothing about whether the
