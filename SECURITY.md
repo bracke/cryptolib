@@ -269,7 +269,18 @@ every status reading `Ok` while every key it produces is predictable.
   -- the first is the certificates' doing and the second is ours, and they are
   not the same thing to go and investigate. This is a real divergence and not
   only a theoretical one: the suite builds a chain whose tree needs 65 nodes,
-  `openssl verify -policy_check` accepts it, and this refuses it. **Revocation (CRL/OCSP) is not
+  `openssl verify -policy_check` accepts it, and this refuses it. **An RSA key
+  below 2048 bits fails the path**, and every certificate in it is measured
+  rather than only the leaf, because a chain is no stronger than the weakest
+  key that signed a link of it. RSA is the only algorithm this bears on: the
+  curves are named and Ed25519 is one size, so their strength arrives with
+  the algorithm, while a certificate may carry any modulus at all. The
+  signature under a small modulus verifies perfectly well, which is the
+  reason to refuse the key rather than wait for the signature to fail --
+  a modulus that can be factored is one anyone can sign with. OpenSSL refuses
+  the same chain at its default security level (error 66). The floor is
+  `Minimum_RSA_Bits` on the validation policy, and zero lifts it.
+  **Revocation (CRL/OCSP) is not
   consulted** by the validator. There is no path building here: finding a chain
   through
   cross-signed roots is `X509.Path_Building`, kept separate: it searches and

@@ -564,4 +564,44 @@ package body CryptoLib.X509.Signatures is
          Parameters => X509C.Signature_Parameters (Item));
    end Verify_Certificate_Signature;
 
+   function RSA_Modulus_Bits
+     (Key : CryptoLib.ASN1.Octets) return Natural
+   is
+      Mod_First : Ada.Streams.Stream_Element_Offset;
+      Mod_Last  : Ada.Streams.Stream_Element_Offset;
+      Exp_First : Ada.Streams.Stream_Element_Offset;
+      Exp_Last  : Ada.Streams.Stream_Element_Offset;
+      Ok        : Boolean;
+   begin
+      Split_RSA_Key (Key, Mod_First, Mod_Last, Exp_First, Exp_Last, Ok);
+      if not Ok then
+         return 0;
+      end if;
+
+      --  Past any leading zeros, so that the INTEGER's sign octet does not
+      --  read as eight bits of modulus.
+      while Mod_First <= Mod_Last and then Key (Mod_First) = 0 loop
+         Mod_First := Mod_First + 1;
+      end loop;
+
+      if Mod_First > Mod_Last then
+         return 0;
+      end if;
+
+      declare
+         Whole : constant Natural :=
+           Natural (Mod_Last - Mod_First) * 8;
+         Top   : Natural := 0;
+         Lead  : constant Ada.Streams.Stream_Element := Key (Mod_First);
+      begin
+         for Bit in reverse 0 .. 7 loop
+            if (Lead / (2 ** Bit)) mod 2 = 1 then
+               Top := Bit + 1;
+               exit;
+            end if;
+         end loop;
+         return Whole + Top;
+      end;
+   end RSA_Modulus_Bits;
+
 end CryptoLib.X509.Signatures;

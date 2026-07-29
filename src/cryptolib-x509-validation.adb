@@ -34,6 +34,7 @@ package body CryptoLib.X509.Validation is
          when Path_Length_Exceeded       => return "path length exceeded";
          when Invalid_Key_Usage          => return "invalid key usage";
          when Policy_Not_Established     => return "policy not established";
+         when Weak_Key                   => return "key too weak";
          when Name_Constraint_Violation  =>
             return "name constraint violation";
          when Unsupported_Name_Constraint =>
@@ -119,6 +120,18 @@ package body CryptoLib.X509.Validation is
 
             if not Is_Not_After (Validation_Time, X509C.Not_After (Item)) then
                return Fail (Certificate_Expired, I);
+            end if;
+
+            --  Every certificate, not only the leaf: a chain is no stronger
+            --  than the weakest key that signed a link of it, and a CA whose
+            --  modulus can be factored is a CA anyone can sign as.
+            if Policy.Minimum_RSA_Bits > 0
+              and then X509C.Public_Key_Algorithm_Of (Item) = RSA
+              and then CryptoLib.X509.Signatures.RSA_Modulus_Bits
+                         (X509C.Public_Key (Item))
+                       < Policy.Minimum_RSA_Bits
+            then
+               return Fail (Weak_Key, I);
             end if;
          end;
       end loop;

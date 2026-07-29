@@ -3567,12 +3567,8 @@ procedure Tests is
            return XV.Validation_Result
          is (XV.Validate_Path
                (Chain'(Inter => Req, Leaf => Leaf), At_Time,
-                (Maximum_Path_Length       => 8,
-                 Require_Basic_Constraints => True,
-                 Require_Key_Cert_Sign     => True,
-                 Reject_Unknown_Critical   => True,
-                 Policy_Options            => PP.Default_Options,
-                 Accepted_Policies         => Only (Encoded))));
+                (XV.Default_Policy with delta
+                   Accepted_Policies => Only (Encoded))));
 
          Wanted : constant String := "2b06010401868d1f01";
          Other  : constant String := "2b0601040184df5109";
@@ -3605,12 +3601,8 @@ procedure Tests is
               return XV.Validation_Result
             is (XV.Validate_Path
                   (Chain'(Inter => Map, Leaf => Mapped), At_Time,
-                   (Maximum_Path_Length       => 8,
-                    Require_Basic_Constraints => True,
-                    Require_Key_Cert_Sign     => True,
-                    Reject_Unknown_Critical   => True,
-                    Policy_Options            => PP.Default_Options,
-                    Accepted_Policies         => Only (Encoded))));
+                   (XV.Default_Policy with delta
+                      Accepted_Policies => Only (Encoded))));
 
             Anchor_Policy  : constant String := "2b06010401868d1f01";
             Subject_Policy : constant String := "2b0601040185b63801";
@@ -5121,6 +5113,131 @@ procedure Tests is
       end;
    end Check_Name_Constraint_Depth_Fields;
 
+   --  A key too small to be worth checking the signature of.
+   --
+   --  RSA is the one key algorithm here whose strength does not come with
+   --  the algorithm: the curves are named and Ed25519 is one size, but a
+   --  certificate may carry any modulus at all and nothing refused a small
+   --  one. The signature over a 512-bit modulus verifies perfectly well --
+   --  that is the whole problem, since a modulus that can be factored is
+   --  one anyone can sign with.
+   --
+   --  Applied to every certificate rather than only the leaf: a chain is no
+   --  stronger than the weakest key that signed a link of it. OpenSSL
+   --  refuses this chain at its default security level (error 66, "EE
+   --  certificate key too weak"); before this it was accepted here.
+   procedure Check_Weak_RSA_Key is
+      package X509C renames CryptoLib.X509.Certificates;
+      package XV renames CryptoLib.X509.Validation;
+      package XS renames CryptoLib.X509.Signatures;
+      use type XV.Validation_Failure;
+
+      Weak_Root_DER : constant String :=
+        "3082016e30820118a0030201020214255e0cbefa30a554023c49086e7bd8d50d30e3cc300d06092a864886f70d" &
+        "01010b050030143112301006035504030c095765616b20526f6f74301e170d3236303732393039323034345a17" &
+        "0d3334313031353039323034345a30143112301006035504030c095765616b20526f6f74305c300d06092a8648" &
+        "86f70d0101010500034b00304802410098bfdd9b654f2ca70ec248d2202d67d571ff02c74cd0f05466252ea9dd" &
+        "66b98c0e424d4eee92c1e87fa98440180f6583f844b383b9422e761e8c3139fe39bcbb0203010001a342304030" &
+        "0f0603551d130101ff040530030101ff300e0603551d0f0101ff040403020204301d0603551d0e04160414a8ed" &
+        "953af6ad5f47cdf5d572baa02ca424dd243e300d06092a864886f70d01010b05000341001213acb161bdaf2606" &
+        "88dabe334e04f60e27b081630a00da544ec778c8f78239c3a12a2681848adcc43144c0aba74100ead0b283469c" &
+        "f39c594e7d6757ecbfb7";
+
+      Weak_Leaf_DER : constant String :=
+        "3082019830820142a00302010202145b733aeb636206a4199b89aae41add3c72156d05300d06092a864886f70d" &
+        "01010b050030143112301006035504030c095765616b20526f6f74301e170d3236303732393039323034345a17" &
+        "0d3332303131393039323034345a30173115301306035504030c0c7765616b2e6578616d706c65305c300d0609" &
+        "2a864886f70d0101010500034b003048024100cc65b5c45a320be757f2e41166c98c631ef14e24f5508e788b53" &
+        "20989381716396a8101d70d4c5d284a2c0b18d0539dc8aac39212afa023eb814521a9646a3610203010001a369" &
+        "3067300c0603551d130101ff0402300030170603551d110410300e820c7765616b2e6578616d706c65301d0603" &
+        "551d0e04160414fb2e08b1e99d078247bf45072df3e6274f518812301f0603551d23041830168014a8ed953af6" &
+        "ad5f47cdf5d572baa02ca424dd243e300d06092a864886f70d01010b05000341005b8b8b4b5b77184b1fc69c48" &
+        "8b0e776ac7f4cb2853f862998b2d07389d6512c6f7de2a64e2617ec06d2efe9f8ee5edf626d4acc66239855058" &
+        "5dd2fb0b684ec2";
+
+      Status : CryptoLib.ASN1.Errors.Decode_Status;
+
+      function From_Hex
+        (Text : String) return Ada.Streams.Stream_Element_Array
+      is
+         Result : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (Text'Length / 2));
+         function Nibble (C : Character) return Natural
+         is (case C is
+                when '0' .. '9' => Character'Pos (C) - Character'Pos ('0'),
+                when others     => Character'Pos (C) - Character'Pos ('a') + 10);
+      begin
+         for I in Result'Range loop
+            Result (I) :=
+              Ada.Streams.Stream_Element
+                (Nibble (Text (Text'First + 2 * Natural (I - 1))) * 16
+                 + Nibble (Text (Text'First + 2 * Natural (I - 1) + 1)));
+         end loop;
+         return Result;
+      end From_Hex;
+
+      function Decoded (Hex : String) return X509C.Certificate
+      is (X509C.Decode_DER
+            (From_Hex (Hex), CryptoLib.ASN1.Default_Limits, Status));
+
+      type Weak is limited new XV.Path_Source with null record;
+
+      overriding function Length (Source : Weak) return Positive is (2);
+
+      overriding function Certificate_At
+        (Source : Weak; Index : Positive) return X509C.Certificate
+      is (if Index = 1 then Decoded (Weak_Leaf_DER)
+          else Decoded (Weak_Root_DER));
+
+      overriding function Is_Trust_Anchor
+        (Source : Weak; Item : X509C.Certificate) return Boolean
+      is (X509C.Subject_Bytes (Item)
+          = X509C.Subject_Bytes (Decoded (Weak_Root_DER)));
+
+      At_Time : constant CryptoLib.X509.Certificate_Time :=
+        (Year => 2026, Month => 9, Day => 1,
+         Hour => 12, Minute => 0, Second => 0);
+   begin
+      --  The size is read off the modulus, not guessed from the encoding's
+      --  length, so a leading zero holding the INTEGER positive does not
+      --  read as eight more bits of key.
+      Check (XS.RSA_Modulus_Bits (X509C.Public_Key (Decoded (Weak_Root_DER)))
+             = 512,
+             "the modulus is measured in significant bits, got"
+             & Natural'Image
+                 (XS.RSA_Modulus_Bits
+                    (X509C.Public_Key (Decoded (Weak_Root_DER)))));
+      Check (XS.RSA_Modulus_Bits (From_Hex ("3003020101")) = 0,
+             "and something that is not an RSA key measures zero rather "
+             & "than passing for a large one");
+
+      --  Refused by default.
+      declare
+         Verdict : constant XV.Validation_Result :=
+           XV.Validate_Path (Weak'(null record), At_Time);
+      begin
+         Check (not Verdict.Valid,
+                "a 512-bit chain is refused out of the box");
+         Check (Verdict.Failure = XV.Weak_Key,
+                "and says the key was the problem rather than the "
+                & "signature, got " & XV.Failure_Image (Verdict.Failure));
+      end;
+
+      --  And the floor is the only thing refusing it: the signatures
+      --  themselves are perfectly good, which is what makes a weak key
+      --  worth refusing in the first place.
+      declare
+         Verdict : constant XV.Validation_Result :=
+           XV.Validate_Path
+             (Weak'(null record), At_Time,
+              (XV.Default_Policy with delta Minimum_RSA_Bits => 0));
+      begin
+         Check (Verdict.Valid,
+                "with the floor lifted the same chain verifies, got "
+                & XV.Failure_Image (Verdict.Failure));
+      end;
+   end Check_Weak_RSA_Key;
+
    procedure Check_X509_Extensions is
       use type CryptoLib.ASN1.Errors.Decode_Status;
       use type CryptoLib.PEM.Decode_Status;
@@ -5658,14 +5775,7 @@ procedure Tests is
          Result :=
            XV.Validate_Path
              (Path, Now_Time,
-              (Maximum_Path_Length       => 1,
-               Require_Basic_Constraints => True,
-               Require_Key_Cert_Sign     => True,
-               Reject_Unknown_Critical   => True,
-               Policy_Options            =>
-                 CryptoLib.X509.Policies.Default_Options,
-               Accepted_Policies         =>
-                 CryptoLib.X509.Policies.Accept_Any));
+              (XV.Default_Policy with delta Maximum_Path_Length => 1));
          Check (not Result.Valid and then Result.Failure = XV.Path_Too_Long,
                 "a path longer than policy allows is refused, got "
                 & XV.Failure_Image (Result.Failure));
@@ -10037,6 +10147,7 @@ begin
    Check_Policy_Set_Is_A_Set;
    Check_Policy_Constraint_Skipcerts;
    Check_Name_Constraint_Depth_Fields;
+   Check_Weak_RSA_Key;
    Check_Random_Fails_Closed;
    Check_Off_Curve_Key;
    Check_Ed25519_Encoding;

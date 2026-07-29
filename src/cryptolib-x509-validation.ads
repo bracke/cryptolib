@@ -69,7 +69,13 @@ package CryptoLib.X509.Validation is
       --  The path is well formed and ends somewhere the caller does not
       --  trust. This is the failure that means "correct but not trusted",
       --  and it is deliberately not the same as a bad signature.
-      Policy_Not_Established);
+      Policy_Not_Established,
+
+      --  A certificate in the path carries an RSA key smaller than the
+      --  caller's policy allows. The signature may well verify -- that is
+      --  the problem, since a modulus small enough to factor lets anyone
+      --  produce one.
+      Weak_Key);
       --  RFC 5280 section 6.1 policy processing rejected the path: some
       --  certificate demanded an explicit policy that nothing below it
       --  provides. Only reachable when a certificate asks for it, or when
@@ -95,6 +101,18 @@ package CryptoLib.X509.Validation is
       --  says why that is less than it sounds.
       Accepted_Policies         : CryptoLib.X509.Policies.Accepted_Policies :=
         CryptoLib.X509.Policies.Accept_Any;
+
+      --  The smallest RSA modulus the caller will accept, in bits, applied
+      --  to every certificate in the path rather than only the leaf: a
+      --  chain is no stronger than the weakest key that signed a link of
+      --  it. Zero accepts any size.
+      --
+      --  RSA is the only algorithm this bears on. The curves are named and
+      --  Ed25519 is one size, so their strength comes with the algorithm;
+      --  an RSA key is as strong as its modulus and a certificate may carry
+      --  any modulus at all. 2048 is what OpenSSL refuses below at its
+      --  default security level, and a 512-bit modulus is factorable.
+      Minimum_RSA_Bits          : Natural := 2048;
    end record;
 
    Default_Policy : constant Validation_Policy :=
@@ -105,7 +123,8 @@ package CryptoLib.X509.Validation is
       Policy_Options            =>
         CryptoLib.X509.Policies.Default_Options,
       Accepted_Policies         =>
-        CryptoLib.X509.Policies.Accept_Any);
+        CryptoLib.X509.Policies.Accept_Any,
+      Minimum_RSA_Bits          => 2048);
 
    --  Why a path failed, and where.
    --

@@ -116,4 +116,20 @@ package CryptoLib.X509.Signatures is
    --  @return True when Verify_Certificate_Signature can decide it
    function Is_Supported (Algorithm : Signature_Algorithm) return Boolean;
 
+   --  How big the modulus of an RSA public key is.
+   --
+   --  RSA is the one key algorithm here whose strength is not fixed by which
+   --  algorithm it is: the curves are named and Ed25519 is one size, but an
+   --  RSA key is as strong as its modulus and a certificate may carry any
+   --  size at all. A caller that wants to refuse a weak one has to be able
+   --  to ask how weak it is.
+   --
+   --  The count is of significant bits, so it does not depend on whether the
+   --  encoding carries a leading zero to keep the INTEGER positive.
+   --  @param Key the subjectPublicKey bits of an RSA key
+   --  @return the modulus size in bits, or zero if this is not an RSA key
+   --    that parses
+   function RSA_Modulus_Bits
+     (Key : CryptoLib.ASN1.Octets) return Natural;
+
 end CryptoLib.X509.Signatures;
