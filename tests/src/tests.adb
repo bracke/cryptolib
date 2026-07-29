@@ -14246,6 +14246,110 @@ begin
              "ECDSA P-521 RFC 6979 deterministic KAT");
    end;
 
+   --  P-256 signing, against RFC 6979 A.2.5's own published r and s.
+   --
+   --  Two messages rather than one. The DRBG state width is the paired
+   --  digest's, and the first version of this curve's wiring inherited a
+   --  64-byte state meant for P-521 -- so a vector that only asked "did a
+   --  signature come out" would have passed on a curve that could not sign
+   --  at all. An exact r and s cannot.
+   declare
+      D_256 : constant Ada.Streams.Stream_Element_Array :=
+        Bytes_From_Hex
+          ("c9afa9d845ba75166b5c215767b1d6934e50c3db36e89b127b8a622b120f6721");
+      Pub_256 : constant Ada.Streams.Stream_Element_Array :=
+        Bytes_From_Hex
+          ("0460fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29f"
+           & "b67903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d446"
+           & "2299");
+      Sample_R : constant Ada.Streams.Stream_Element_Array :=
+        Bytes_From_Hex
+          ("efd48b2aacb6a8fd1140dd9cd45e81d69d2c877b56aaf991c34d0ea84eaf3716");
+      Sample_S : constant Ada.Streams.Stream_Element_Array :=
+        Bytes_From_Hex
+          ("f7cb1c942d657c41d436c7a1b6e29f65f3e900dbb9aff4064dc4ab2f843acda8");
+      Test_R : constant Ada.Streams.Stream_Element_Array :=
+        Bytes_From_Hex
+          ("f1abb023518351cd71d881567b1ea663ed3efcf6c5132b354f28d3b0b7d38367");
+      Test_S : constant Ada.Streams.Stream_Element_Array :=
+        Bytes_From_Hex
+          ("019f4113742a2b14bd25926b49c649155f267e60d3814b4c0cc84250e46f0083");
+      Test_Msg : constant Ada.Streams.Stream_Element_Array :=
+        Bytes_From_String ("test");
+      Sample_Msg : constant Ada.Streams.Stream_Element_Array :=
+        Bytes_From_String ("sample");
+      R_256, S_256 : Ada.Streams.Stream_Element_Array (1 .. 32);
+      Derived      : Ada.Streams.Stream_Element_Array (1 .. 65);
+      St_256       : CryptoLib.Errors.Status;
+   begin
+      St_256 := CryptoLib.ECDSA.Public_Key_Raw
+        (CryptoLib.ECDSA.Nistp256, D_256, Derived);
+      Check (St_256 = CryptoLib.Errors.Ok and then Derived = Pub_256,
+             "ECDSA P-256 derives RFC 6979 A.2.5's public key");
+
+      St_256 := CryptoLib.ECDSA.Sign_Nistp256_Raw
+        (D_256, Sample_Msg, R_256, S_256);
+      Check (St_256 = CryptoLib.Errors.Ok, "ECDSA P-256 sign status");
+      Check (R_256 = Sample_R and then S_256 = Sample_S,
+             "ECDSA P-256 RFC 6979 A.2.5 KAT (sample)");
+      Check (CryptoLib.ECDSA.Verify_Nistp256_Raw
+               (Pub_256, Sample_Msg, R_256, S_256) = CryptoLib.Errors.Ok,
+             "ECDSA P-256 verifies what it signed");
+
+      St_256 := CryptoLib.ECDSA.Sign_Nistp256_Raw
+        (D_256, Test_Msg, R_256, S_256);
+      Check (St_256 = CryptoLib.Errors.Ok and then R_256 = Test_R
+             and then S_256 = Test_S,
+             "ECDSA P-256 RFC 6979 A.2.5 KAT (test)");
+
+      --  The signature must not verify over a message it does not cover.
+      Check (CryptoLib.ECDSA.Verify_Nistp256_Raw
+               (Pub_256, Sample_Msg, R_256, S_256) /= CryptoLib.Errors.Ok,
+             "ECDSA P-256 refuses a signature over another message");
+
+      --  The generic entry point must agree with the fixed-curve one, and
+      --  must not pair the curve with the wrong digest.
+      Check (CryptoLib.ECDSA.Verify_Signature
+               (CryptoLib.ECDSA.Nistp256, CryptoLib.ECDSA.SHA256,
+                Pub_256, Test_Msg, R_256, S_256) = CryptoLib.Errors.Ok,
+             "ECDSA P-256 verifies through Verify_Signature");
+      Check (CryptoLib.ECDSA.Verify_Signature
+               (CryptoLib.ECDSA.Nistp256, CryptoLib.ECDSA.SHA384,
+                Pub_256, Test_Msg, R_256, S_256) /= CryptoLib.Errors.Ok,
+             "ECDSA P-256 refuses the signature under the wrong digest");
+   end;
+
+   --  P-256 key generation: the pair it returns must actually be a pair, and
+   --  must be usable by the signer.
+   declare
+      Rng     : CryptoLib.Random.Random_Source;
+      Scalar  : Ada.Streams.Stream_Element_Array (1 .. 32);
+      Point   : Ada.Streams.Stream_Element_Array (1 .. 65);
+      Derived : Ada.Streams.Stream_Element_Array (1 .. 65);
+      R_G, S_G : Ada.Streams.Stream_Element_Array (1 .. 32);
+      Msg_G   : constant Ada.Streams.Stream_Element_Array :=
+        Bytes_From_String ("cryptolib p-256 generated key");
+      St_G    : CryptoLib.Errors.Status;
+   begin
+      CryptoLib.Random.Initialize_Production (Rng);
+      St_G := CryptoLib.ECDSA.Generate_Nistp256_Keypair (Rng, Scalar, Point);
+      Check (St_G = CryptoLib.Errors.Ok, "ECDSA P-256 keygen status");
+      Check (Point (Point'First) = 16#04#,
+             "ECDSA P-256 keygen emits an uncompressed point");
+
+      --  The point must be the one the scalar implies, not merely a point.
+      St_G := CryptoLib.ECDSA.Public_Key_Raw
+        (CryptoLib.ECDSA.Nistp256, Scalar, Derived);
+      Check (St_G = CryptoLib.Errors.Ok and then Derived = Point,
+             "ECDSA P-256 keygen returns a matching pair");
+
+      St_G := CryptoLib.ECDSA.Sign_Nistp256_Raw (Scalar, Msg_G, R_G, S_G);
+      Check (St_G = CryptoLib.Errors.Ok, "ECDSA P-256 signs with a fresh key");
+      Check (CryptoLib.ECDSA.Verify_Nistp256_Raw (Point, Msg_G, R_G, S_G)
+               = CryptoLib.Errors.Ok,
+             "ECDSA P-256 fresh keypair round-trips");
+   end;
+
    --  Direct SHA-1/2 known-answer vectors ("abc"), previously only exercised
    --  transitively through PBKDF2 / ML-KEM.
    Check

@@ -2,10 +2,11 @@ with Ada.Streams;
 with CryptoLib.Errors;
 with CryptoLib.Random;
 
---  @summary Constant-time RFC 6979 deterministic ECDSA for NIST P-384 and
---  P-521: signing, and for P-384 also keys.
+--  @summary Constant-time RFC 6979 deterministic ECDSA for NIST P-256,
+--  P-384 and P-521: signing, verification, and for P-256 and P-384 also keys.
 --
---  Nonces are derived deterministically (RFC 6979 HMAC-DRBG, SHA-384/SHA-512);
+--  Nonces are derived deterministically (RFC 6979 HMAC-DRBG, under the digest
+--  each curve pairs with -- SHA-256/384/512);
 --  all curve arithmetic is fixed-width, branchless Montgomery (see
 --  CryptoLib.EC_Arith).  Signatures are returned as fixed-width big-endian
 --  r and s octet strings.
@@ -27,6 +28,27 @@ package CryptoLib.ECDSA is
    --          invalid or no valid nonce is found, Handshake_Failed on a
    --          wrong-length output buffer, Internal_Error on a fault
    function Sign_Nistp384_Raw
+     (Private_Scalar_Mpint : Ada.Streams.Stream_Element_Array;
+      Message_Bytes        : Ada.Streams.Stream_Element_Array;
+      R_Bytes              : out Ada.Streams.Stream_Element_Array;
+      S_Bytes              : out Ada.Streams.Stream_Element_Array)
+      return CryptoLib.Errors.Status;
+
+   --  Deterministically sign a pre-formed message over NIST P-256 (SHA-256).
+   --
+   --  The curve arithmetic, the RFC 6979 nonce derivation and the scrubbing
+   --  are the same code the other two curves run; only the curve constants
+   --  and the paired digest differ.
+   --  @param Private_Scalar_Mpint the private scalar d, as an SSH mpint or
+   --  as the curve's width in big-endian bytes; both are read, and the name
+   --  is kept for the callers that pass an mpint
+   --  @param Message_Bytes the message to sign (hashed internally with SHA-256)
+   --  @param R_Bytes the signature component r as 32 big-endian bytes
+   --  @param S_Bytes the signature component s as 32 big-endian bytes
+   --  @return Ok on success, Authentication_Failed if the private scalar is
+   --          invalid or no valid nonce is found, Handshake_Failed on a
+   --          wrong-length output buffer, Internal_Error on a fault
+   function Sign_Nistp256_Raw
      (Private_Scalar_Mpint : Ada.Streams.Stream_Element_Array;
       Message_Bytes        : Ada.Streams.Stream_Element_Array;
       R_Bytes              : out Ada.Streams.Stream_Element_Array;
@@ -75,6 +97,22 @@ package CryptoLib.ECDSA is
    --  @return Ok, Handshake_Failed on a wrong-length output buffer,
    --          Internal_Error if the source will not yield a usable scalar
    function Generate_Nistp384_Keypair
+     (Rng            : in out CryptoLib.Random.Random_Source;
+      Private_Scalar : out Ada.Streams.Stream_Element_Array;
+      Public_Point   : out Ada.Streams.Stream_Element_Array)
+      return CryptoLib.Errors.Status;
+
+   --  Generate a P-256 keypair.
+   --
+   --  Offered because a signing curve a caller cannot make a key for is only
+   --  half a curve. Public_Key_Raw already derives the point from a scalar
+   --  that came from somewhere else.
+   --  @param Rng the random source
+   --  @param Private_Scalar the scalar d as 32 big-endian bytes
+   --  @param Public_Point 65 bytes: 16#04#, then X and Y as 32 bytes each
+   --  @return Ok, Handshake_Failed on a wrong-length output buffer,
+   --          Internal_Error if the source will not yield a usable scalar
+   function Generate_Nistp256_Keypair
      (Rng            : in out CryptoLib.Random.Random_Source;
       Private_Scalar : out Ada.Streams.Stream_Element_Array;
       Public_Point   : out Ada.Streams.Stream_Element_Array)

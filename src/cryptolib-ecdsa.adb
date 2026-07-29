@@ -6,7 +6,7 @@ with CryptoLib.Modexp;
 with CryptoLib.Secure_Wipe;
 with System;
 
---  Constant-time ECDSA signer for NIST P-384 / P-521.  All arithmetic is
+--  Constant-time ECDSA signer for NIST P-256 / P-384 / P-521.  All arithmetic is
 --  fixed-width and branchless (CryptoLib.EC_Arith Montgomery field/order
 --  arithmetic; Renes-Costello-Batina complete projective point addition, which
 --  has no exceptional cases; a fixed-length double-and-add-always ladder with
@@ -446,7 +446,19 @@ package body CryptoLib.ECDSA is
       Counter_Value  : Natural;
       Found          : out Boolean) return Element
    is
-      DL : constant Natural := (if Cv.Kind = Nistp384 then 48 else 64);
+      --  The DRBG runs under the digest the curve pairs with, so its state is
+      --  exactly that digest's width. Spelled as a case over the digest rather
+      --  than as a two-way test on the curve: the earlier "P-384 or else 64"
+      --  read correctly while P-384 and P-521 were the only curves, and gave
+      --  P-256 a 64-byte state the moment it was added -- HMAC-SHA-256 returns
+      --  32, and every P-256 signature died in the size check and came back
+      --  Internal_Error. A case over Digest_Id cannot acquire a wrong default,
+      --  because a new digest fails to compile until it is answered for.
+      DL : constant Natural :=
+        (case Matching_Digest (Cv) is
+            when SHA256 => 32,
+            when SHA384 => 48,
+            when SHA512 => 64);
       V_Data : Stream_Element_Array (1 .. Stream_Element_Offset (DL)) :=
         [others => 1];
       K_Data : Stream_Element_Array (1 .. Stream_Element_Offset (DL)) :=
@@ -673,6 +685,16 @@ package body CryptoLib.ECDSA is
         (P384_Curve, Private_Scalar_Mpint, Message_Bytes, R_Bytes, S_Bytes);
    end Sign_Nistp384_Raw;
 
+   function Sign_Nistp256_Raw
+     (Private_Scalar_Mpint : Stream_Element_Array;
+      Message_Bytes        : Stream_Element_Array;
+      R_Bytes              : out Stream_Element_Array;
+      S_Bytes              : out Stream_Element_Array) return Status is
+   begin
+      return Sign_Raw
+        (P256_Curve, Private_Scalar_Mpint, Message_Bytes, R_Bytes, S_Bytes);
+   end Sign_Nistp256_Raw;
+
    function Sign_Nistp521_Raw
      (Private_Scalar_Mpint : Stream_Element_Array;
       Message_Bytes        : Stream_Element_Array;
@@ -757,13 +779,15 @@ package body CryptoLib.ECDSA is
       return Public_Key_Raw (Nistp384, Private_Scalar_Mpint, Public_Point);
    end Public_Nistp384_Raw;
 
-   function Generate_Nistp384_Keypair
-     (Rng            : in out CryptoLib.Random.Random_Source;
+   --  One body for both curves, so the rejection-sampling argument below
+   --  cannot be right for one and quietly wrong for the other.
+   function Generate_Keypair
+     (Cv             : Curve_Data;
+      Rng            : in out CryptoLib.Random.Random_Source;
       Private_Scalar : out Stream_Element_Array;
       Public_Point   : out Stream_Element_Array)
       return Status
    is
-      Cv       : constant Curve_Data := P384_Curve;
       Attempts : constant := 64;
       D        : Element;
    begin
@@ -790,7 +814,27 @@ package body CryptoLib.ECDSA is
 
       Private_Scalar := [others => 0];
       return CryptoLib.Errors.Internal_Error;
+   end Generate_Keypair;
+
+   function Generate_Nistp384_Keypair
+     (Rng            : in out CryptoLib.Random.Random_Source;
+      Private_Scalar : out Stream_Element_Array;
+      Public_Point   : out Stream_Element_Array)
+      return Status
+   is
+   begin
+      return Generate_Keypair (P384_Curve, Rng, Private_Scalar, Public_Point);
    end Generate_Nistp384_Keypair;
+
+   function Generate_Nistp256_Keypair
+     (Rng            : in out CryptoLib.Random.Random_Source;
+      Private_Scalar : out Stream_Element_Array;
+      Public_Point   : out Stream_Element_Array)
+      return Status
+   is
+   begin
+      return Generate_Keypair (P256_Curve, Rng, Private_Scalar, Public_Point);
+   end Generate_Nistp256_Keypair;
 
    --  Verification is public arithmetic: r and s are on the wire and the key is
    --  published, so nothing here is secret and the constant-time discipline the
