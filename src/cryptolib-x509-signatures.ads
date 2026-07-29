@@ -34,8 +34,11 @@ package CryptoLib.X509.Signatures is
       Unsupported_Algorithm,
       --  A signature algorithm this crate cannot verify. Also not a bad
       --  signature. The certificate may be perfectly good; this cannot say.
-      --  RSA-PSS lands here today. RSA PKCS#1 v1.5 and ECDSA on P-256,
-      --  P-384 and P-521 no longer do.
+      --  RSA PKCS#1 v1.5, RSA-PSS and ECDSA on P-256, P-384 and P-521 are
+      --  all verified and do not land here. What still does: anything under
+      --  SHA-1, and RSA-PSS whose parameters name a hash this crate does
+      --  not implement -- the parameters are read, so the refusal is on
+      --  what they say rather than on failing to read them.
       Malformed_Signature,
       --  The signature is not shaped like one for its algorithm: an ECDSA
       --  signature that is not a SEQUENCE of two integers, a component wider

@@ -219,8 +219,9 @@ every status reading `Ok` while every key it produces is predictable.
   certificate, say, which is not a signing key at all -- reports
   `Unsupported_Key` rather than `Ok`, so an unchecked identity is never
   mistaken for a checked one.
-- **RSA is verification only** — there is no RSA signing, key generation, or
-  private-key operation, and no RSA-PSS. `X509.Signatures` reports
+- **RSA is verification only** — both PKCS#1 v1.5 and PSS are verified, but
+  there is no RSA signing, key generation, or private-key operation of any
+  kind. `X509.Signatures` reports
   `Unsupported_Algorithm` rather than a failure whenever it cannot check a
   signature, so "we did not check" is never mistaken for "the signature was
   bad". It distinguishes four such answers, and each is now held to
