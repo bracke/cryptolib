@@ -304,7 +304,24 @@ every status reading `Ok` while every key it produces is predictable.
 
   The remainder CRT needs -- the padded block modulo each prime -- is
   shift-and-subtract in `CryptoLib.Bignum`: compare, subtract and shift, so the
-  claim that this crate has no big division still holds.
+  claim that this crate has no big division still holds. `Mod_Reduce`,
+  `Divide_Small` and `Bit_Length` are checked directly rather than only through
+  the signing that calls them, and against each other rather than against
+  restated constants: shift-and-subtract must agree with Horner's remainder
+  where a small modulus lets both run, and a quotient times its divisor plus
+  its remainder must be the value again. Subtracting only on a strict
+  greater-than, dropping the zero-modulus guard, and walking the bits the wrong
+  way round each fail.
+
+  Where the time goes was measured rather than guessed, and the answer is not
+  the exponentiation. Of a 14-millisecond CRT signature, the blinding factor's
+  modular inverse is about 7 -- half of it. The binary extended Euclid runs a
+  full-width pass per bit, and nothing else comes close: the check against the
+  public exponent is 0.45 milliseconds, each `Mod_Reduce` 0.39, the unblinding
+  multiply 0.22. Cutting it means keeping a blinding pair between signatures
+  and refreshing it by squaring, which is what OpenSSL does and which needs
+  state the signing calls here do not have; it is a larger lever than CRT was
+  and a change to the shape of the API, so it is recorded rather than done.
 
   The CRT parameters in a PKCS#8 key are still not surfaced, so CRT is
   available to a caller who kept what key generation returned and not to one

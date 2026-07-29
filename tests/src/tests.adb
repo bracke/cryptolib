@@ -9816,6 +9816,130 @@ procedure Tests is
          end;
       end;
 
+      --  The numeric primitives that only the library reached.
+      --
+      --  Mod_Reduce, Divide_Small and Bit_Length are hand-written arithmetic
+      --  called from CryptoLib.RSA and from each other, which is exactly the
+      --  shape the coverage audit excuses: named nowhere in this suite because
+      --  something in the library names them. They are checked here against
+      --  each other rather than against restated answers, because two
+      --  algorithms agreeing is evidence and a repeated constant is not.
+      declare
+         package BN renames CryptoLib.Bignum;
+         Rng2 : CryptoLib.Random.Random_Source;
+      begin
+         CryptoLib.Random.Initialize_Production (Rng2);
+
+         --  Mod_Reduce is the shift-and-subtract remainder for a modulus as
+         --  wide as the value; Mod_Small is Horner's for one that fits a
+         --  machine integer. Where the two overlap -- a small modulus written
+         --  wide -- they must agree, and they share no code at all.
+         for Trial in 1 .. 40 loop
+            declare
+               Value : Ada.Streams.Stream_Element_Array (1 .. 33);
+               Small : constant Positive := 65_537;
+               Wide  : Ada.Streams.Stream_Element_Array (1 .. 33) :=
+                 [others => 0];
+               Got   : Ada.Streams.Stream_Element_Array (1 .. 33);
+               Fine  : Boolean;
+            begin
+               Check (CryptoLib.Random.Fill (Rng2, Value)
+                        = CryptoLib.Errors.Ok,
+                      "a value to reduce");
+               Wide (Wide'Last - 2) := 1;          --  65537 = 01 00 01
+               Wide (Wide'Last) := 1;
+               BN.Mod_Reduce (Value, Wide, Got, Fine);
+               Check (Fine, "the reduction succeeds");
+               Check (BN.Mod_Small (Got, Small) = BN.Mod_Small (Value, Small)
+                      and then BN.Compare (Got, Wide) < 0,
+                      "shift-and-subtract agrees with Horner on a small "
+                      & "modulus, and lands below it");
+            end;
+         end loop;
+
+         --  The edges, where an off-by-one lives.
+         declare
+            M    : constant Ada.Streams.Stream_Element_Array (1 .. 4) :=
+              [0, 0, 1, 7];                        --  263
+            Same : constant Ada.Streams.Stream_Element_Array := M;
+            Less : constant Ada.Streams.Stream_Element_Array (1 .. 4) :=
+              [0, 0, 0, 9];
+            Zero : constant Ada.Streams.Stream_Element_Array (1 .. 4) :=
+              [others => 0];
+            Got  : Ada.Streams.Stream_Element_Array (1 .. 4);
+            Fine : Boolean;
+         begin
+            BN.Mod_Reduce (Less, M, Got, Fine);
+            Check (Fine and then Got = Less,
+                   "a value below the modulus is returned unchanged");
+            BN.Mod_Reduce (Same, M, Got, Fine);
+            Check (Fine and then BN.Is_Zero (Got),
+                   "a value equal to the modulus reduces to zero");
+            BN.Mod_Reduce (Zero, M, Got, Fine);
+            Check (Fine and then BN.Is_Zero (Got), "and zero stays zero");
+            BN.Mod_Reduce (Less, Zero, Got, Fine);
+            Check (not Fine, "a zero modulus is refused, not divided by");
+         end;
+
+         --  Divide_Small against the multiply that undoes it: quotient times
+         --  divisor plus remainder is the value again.
+         for Trial in 1 .. 20 loop
+            declare
+               Value : Ada.Streams.Stream_Element_Array (1 .. 24);
+               Divisor  : constant Positive := 65_537;
+               Quotient : Ada.Streams.Stream_Element_Array (1 .. 24);
+               Remainder : Natural;
+               Rebuilt   : Ada.Streams.Stream_Element_Array (1 .. 24);
+               Fine      : Boolean;
+            begin
+               Check (CryptoLib.Random.Fill (Rng2, Value)
+                        = CryptoLib.Errors.Ok, "a value to divide");
+               BN.Divide_Small (Value, Divisor, Quotient, Remainder);
+               declare
+                  Product : constant Ada.Streams.Stream_Element_Array :=
+                    BN.Multiply_Small (Quotient, Divisor);
+                  Small   : Ada.Streams.Stream_Element_Array (1 .. 24) :=
+                    [others => 0];
+                  Work    : Natural := Remainder;
+               begin
+                  for I in reverse Small'Range loop
+                     exit when Work = 0;
+                     Small (I) := Ada.Streams.Stream_Element (Work mod 256);
+                     Work := Work / 256;
+                  end loop;
+                  BN.Resize (BN.Add (Product, Small), Rebuilt'Length, Rebuilt,
+                             Fine);
+                  Check (Fine and then Rebuilt = Value,
+                         "quotient times divisor plus remainder is the value");
+                  Check (Remainder < Divisor,
+                         "and the remainder is below the divisor");
+               end;
+            end;
+         end loop;
+
+         --  Bit_Length, which decides whether a private exponent is out of
+         --  Wiener's reach during key generation.
+         declare
+            Zero  : constant Ada.Streams.Stream_Element_Array (1 .. 3) :=
+              [others => 0];
+            One   : constant Ada.Streams.Stream_Element_Array (1 .. 3) :=
+              [0, 0, 1];
+            Eight : constant Ada.Streams.Stream_Element_Array (1 .. 3) :=
+              [0, 0, 16#FF#];
+            Nine  : constant Ada.Streams.Stream_Element_Array (1 .. 3) :=
+              [0, 1, 0];
+            Padded : constant Ada.Streams.Stream_Element_Array (1 .. 8) :=
+              [0, 0, 0, 0, 0, 0, 1, 0];
+         begin
+            Check (BN.Bit_Length (Zero) = 0, "zero has no bits");
+            Check (BN.Bit_Length (One) = 1, "one has one");
+            Check (BN.Bit_Length (Eight) = 8, "255 has eight");
+            Check (BN.Bit_Length (Nine) = 9, "256 has nine");
+            Check (BN.Bit_Length (Padded) = 9,
+                   "and leading zero octets are not bits");
+         end;
+      end;
+
       --  Bignum's own operations, against answers this test computes a
       --  different way. Multiply_Small is the one key generation leans on for
       --  the large-by-small step in the inverse.
