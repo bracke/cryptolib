@@ -790,15 +790,11 @@ package body CryptoLib.X509.Extensions is
          --  refusing the certificate, so a change that stops applying any of
          --  them has to take the identifier out of this list at the same
          --  time.
-         --
-         --  policyMappings is deliberately not here. It is not defined as a
-         --  critical extension by RFC 5280 and nothing in the wild marks it
-         --  so; a certificate that did would be asking for something this
-         --  list cannot promise.
          Consider (OID_Table.Name_Constraints);
          Consider (OID_Table.Certificate_Policies);
          Consider (OID_Table.Policy_Constraints);
          Consider (OID_Table.Inhibit_Any_Policy);
+         Consider (OID_Table.Policy_Mappings);
          return Known;
       end Understood;
    begin

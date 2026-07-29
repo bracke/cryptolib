@@ -3255,6 +3255,20 @@ procedure Tests is
         "3cee4921af808dbe73a7661d0a5f668e02f1ff650d68cc319d023071f25589438e722d60ebddc7d72430ebc2fe" &
         "aa6719b84bc9929fdeb215be9168a99e4421eab72e6dd4de561b20532856";
 
+      Pol_Inter_Map_Crit_DER : constant String :=
+        "3082020c30820192a003020102020116300a06082a8648ce3d04030230163114301206035504030c0b706f6c69" &
+        "63792d726f6f74301e170d3236303732393037333131365a170d3237303532353037333131365a301631143012" &
+        "06035504030c0b706f6c6963792d726f6f743076301006072a8648ce3d020106052b8104002203620004e15b58" &
+        "46a5c5aa4118c74841b2a4d1cac4c19fcf8b7a326c793b925c6b3e812064cfc41d80da3fe58efa95f36268c9e4" &
+        "92ce3f8cd6ad4c07c73320b34b892361a8182b17e63dbc1f53b9b51c559e6730b855011c68eeaa084cac7a4ed5" &
+        "2fd898a381b33081b0300f0603551d130101ff040530030101ff300e0603551d0f0101ff040403020106301606" &
+        "03551d20040f300d300b06092b06010401868d1f01300f0603551d240101ff0405300380010030240603551d21" &
+        "0101ff041a3018301606092b06010401868d1f0106092b0601040185b63801301d0603551d0e041604144a9746" &
+        "1dd73c54c4d02a3f0b416a6afc6d0f8e32301f0603551d23041830168014208a7da7f801c4b3c24c5dea139865" &
+        "78cbec0ed6300a06082a8648ce3d0403020368003065023100a076113b47ae93935aa562ab406922d6abed781f" &
+        "f0a9ae4c1e2f3d60b23918186f034cba5cbae52ef78df2ace923903b023072e20017edaaa6a03f68413faf7639" &
+        "5e4feb6edd171fe0b30f75d112a2fbbd552cd293496d4cb53b5416643392c50c98";
+
       Pol_Leaf_Policy_DER : constant String :=
         "308201c130820146a003020102020121300a06082a8648ce3d04030230163114301206035504030c0b706f6c69" &
         "63792d726f6f74301e170d3236303732393033343234335a170d3237303532353033343234335a301631143012" &
@@ -3355,7 +3369,7 @@ procedure Tests is
       is (X509C.Decode_DER
             (From_Hex (Hex), CryptoLib.ASN1.Default_Limits, Status));
 
-      type Which_Inter is (Req, Plain, Inhibit, Map);
+      type Which_Inter is (Req, Plain, Inhibit, Map, Map_Critical);
       type Which_Leaf is (With_Policy, Other_Policy, No_Policy, Any, Mapped,
                           None_Plain);
 
@@ -3380,7 +3394,9 @@ procedure Tests is
                    when Req     => Decoded (Pol_Inter_Req_DER),
                    when Plain   => Decoded (Pol_Inter_Plain_DER),
                    when Inhibit => Decoded (Pol_Inter_Inhibit_DER),
-                   when Map     => Decoded (Pol_Inter_Map_DER)),
+                   when Map     => Decoded (Pol_Inter_Map_DER),
+                   when Map_Critical =>
+                     Decoded (Pol_Inter_Map_Crit_DER)),
              when others => Decoded (Pol_Root_DER));
 
       overriding function Is_Trust_Anchor
@@ -3442,6 +3458,19 @@ procedure Tests is
       Check (not Verdict (Map, With_Policy).Valid,
              "and the unmapped one no longer does, because mapping replaced "
              & "what the issuer expects rather than adding to it");
+
+      --  RFC 5280 4.2.1.5 says a conforming CA SHOULD mark policyMappings
+      --  critical, so refusing a certificate that does is refusing what the
+      --  specification asks for. This crate processes the extension, which
+      --  is what entitles it to recognise it: the rule is that an extension
+      --  is honoured or the certificate is refused, and honouring it while
+      --  leaving it off the recognised list fails certificates for carrying
+      --  something that was acted on anyway.
+      Check (Verdict (Map_Critical, Mapped).Valid,
+             "a critical policyMappings is honoured rather than refused: "
+             & XV.Failure_Image (Verdict (Map_Critical, Mapped).Failure));
+      Check (not Verdict (Map_Critical, With_Policy).Valid,
+             "and it maps, so the unmapped policy no longer reaches the leaf");
 
       --  The caller's own policy set: RFC 5280's user-initial-policy-set.
       declare

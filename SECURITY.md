@@ -192,9 +192,12 @@ every status reading `Ok` while every key it produces is predictable.
   subject when the certificate carries no rfc822 alternative name. **Certificate policy processing
   is implemented** (RFC 5280 §6.1): the valid_policy_tree, policy mapping, and
   the `explicit_policy` / `policy_mapping` / `inhibit_anyPolicy` counters.
-  `certificatePolicies`, `policyConstraints` and `inhibitAnyPolicy` are all
-  honoured, so a chain carrying them is processed rather than refused --
-  which is what it used to be. `Validation_Result.Policies` reports the
+  `certificatePolicies`, `policyConstraints`, `inhibitAnyPolicy` and
+  `policyMappings` are all honoured, so a chain carrying them is processed
+  rather than refused -- which is what it used to be. All four are on the
+  recognised-critical list because all four are acted on; `policyMappings`
+  in particular is one RFC 5280 §4.2.1.5 says a conforming CA SHOULD mark
+  critical, so refusing it was refusing what the specification asks for. `Validation_Result.Policies` reports the
   policies the authorities in the path actually agreed on, which is not what
   the leaf asserts: a certificate may name a policy no issuer above it
   granted, and that certificate is refused when an explicit policy is
