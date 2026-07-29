@@ -2814,7 +2814,12 @@ procedure Tests is
       subtype Blob is Ada.Streams.Stream_Element_Array;
       subtype Spot is Ada.Streams.Stream_Element_Offset;
 
-      Serial_Octets : constant := 70_000;
+      --  Either side of every boundary where the DER length form changes:
+      --  short form, one octet, two, three. Each fix in this area was found
+      --  by tripping over one value; this walks all of them.
+      type Size_List is array (Positive range <>) of Natural;
+      Sizes : constant Size_List :=
+        [126, 127, 128, 254, 255, 256, 65_534, 65_535, 65_536, 70_000];
 
       --  Minimal DER length octets, so the spliced certificate is one the
       --  reader will accept: it refuses a length written wider than it needs.
@@ -2853,12 +2858,10 @@ procedure Tests is
       declare
          Text   : constant String := To_String (CA_PEM);
          Buffer : Blob
-           (1 .. Ada.Streams.Stream_Element_Offset
-                   (CryptoLib.PEM.Maximum_Decoded_Length (Text)));
-         Last   : Ada.Streams.Stream_Element_Offset;
+           (1 .. Spot (CryptoLib.PEM.Maximum_Decoded_Length (Text)));
+         Last   : Spot;
          From   : Positive := Text'First;
          P      : CryptoLib.PEM.Decode_Status;
-         Status : CryptoLib.ASN1.Errors.Decode_Status;
       begin
          CryptoLib.PEM.Decode_Block
            (Text, CryptoLib.PEM.Certificate_Label, From, Buffer, Last, P);
@@ -2866,9 +2869,9 @@ procedure Tests is
          declare
             Real : constant Blob := Buffer (Buffer'First .. Last);
 
-            --  Both headers are 30 82 LL LL at this size, which is asserted
-            --  rather than assumed: a splice onto a shape that moved would
-            --  silently produce something else.
+            --  Both headers are 30 82 LL LL at this size. Asserted rather
+            --  than assumed: a splice onto a shape that moved would quietly
+            --  produce something else and test nothing.
             Header_Ok : constant Boolean :=
               Real'Length > 8
               and then Real (Real'First) = 16#30#
@@ -2884,7 +2887,6 @@ procedure Tests is
             Trailer  : constant Blob :=
               Real (TBS_Body'Last + 1 .. Real'Last);
 
-            --  version [0] is the first field; the serial follows it.
             Version_Length : constant Spot :=
               2 + Spot (Real (Real'First + 9));
             Before_Serial : constant Blob :=
@@ -2895,63 +2897,77 @@ procedure Tests is
                         + Spot (Real (Real'First + 8 + Version_Length + 1))
                         .. TBS_Body'Last);
 
-            Big_Serial : constant Blob :=
-              Wrap (16#02#,
-                    [1 => 16#01#]
-                    & [1 .. Spot (Serial_Octets) => 16#42#]);
-            Spliced : constant Blob :=
-              Wrap (16#30#,
-                    Wrap (16#30#,
-                          Before_Serial & Big_Serial & After_Serial)
-                    & Trailer);
-
             Roomy : constant CryptoLib.ASN1.Decode_Limits :=
               (Maximum_Input_Size     => 1024 * 1024,
                Maximum_Nesting_Depth  => 16,
                Maximum_Sequence_Items => 2048,
                Maximum_String_Length  => 1024 * 1024);
-            Item : constant X509C.Certificate :=
-              X509C.Decode_DER (Spliced, Roomy, Status);
          begin
             Check (P = CryptoLib.PEM.Ok and then Header_Ok,
                    "fixture: the certificate has the shape this splices");
 
-            --  If this stopped decoding the builder would never be reached
-            --  and the check below would pass without testing anything.
-            Check (Status = CryptoLib.ASN1.Errors.Ok
-                   and then X509C.Is_Present (Item),
-                   "fixture: the spliced certificate decodes, got "
-                   & CryptoLib.ASN1.Errors.Status_Image (Status));
-            Check (X509C.Serial_Number (Item)'Length > 65_535,
-                   "fixture: and its serial is past a two-octet length,"
-                   & Spot'Image (X509C.Serial_Number (Item)'Length)
-                   & " octets");
+            for Size of Sizes loop
+               declare
+                  Big_Serial : constant Blob :=
+                    Wrap (16#02#,
+                          [1 => 16#01#]
+                          & [1 .. Spot (Size) => 16#42#]);
+                  Spliced : constant Blob :=
+                    Wrap (16#30#,
+                          Wrap (16#30#,
+                                Before_Serial & Big_Serial & After_Serial)
+                          & Trailer);
+                  Status : CryptoLib.ASN1.Errors.Decode_Status;
+                  Item   : constant X509C.Certificate :=
+                    X509C.Decode_DER (Spliced, Roomy, Status);
 
-            --  The point: a buffer sized by the documented bound is told it
-            --  is too small, rather than crashed through.
-            declare
-               Sized : Blob (1 .. Spot (CO.Maximum_Request_Length));
-               Stop  : Spot;
-               Built : CryptoLib.ASN1.Errors.Decode_Status;
-            begin
-               CO.Build_Request (Item, Item, Sized, Stop, Built);
-               Check (Built /= CryptoLib.ASN1.Errors.Ok,
-                      "a request that cannot fit is refused, got "
-                      & CryptoLib.ASN1.Errors.Status_Image (Built));
-            end;
+                  Out_Buffer : Blob (1 .. 128 * 1024);
+                  Stop  : Spot;
+                  Built : CryptoLib.ASN1.Errors.Decode_Status;
+               begin
+                  --  If this stopped decoding, the builder would never be
+                  --  reached and everything below would pass while testing
+                  --  nothing.
+                  Check (Status = CryptoLib.ASN1.Errors.Ok
+                         and then X509C.Is_Present (Item),
+                         "a certificate with a" & Natural'Image (Size)
+                         & "-octet serial decodes, got "
+                         & CryptoLib.ASN1.Errors.Status_Image (Status));
 
-            --  And with room, it is written rather than raised.
-            declare
-               Roomy_Buffer : Blob (1 .. 128 * 1024);
-               Stop  : Spot;
-               Built : CryptoLib.ASN1.Errors.Decode_Status;
-            begin
-               CO.Build_Request
-                 (Item, Item, Roomy_Buffer, Stop, Built);
-               Check (Built = CryptoLib.ASN1.Errors.Ok,
-                      "and with room it is written, got "
-                      & CryptoLib.ASN1.Errors.Status_Image (Built));
-            end;
+                  CO.Build_Request
+                    (Item, Item, Out_Buffer, Stop, Built);
+                  Check (Built = CryptoLib.ASN1.Errors.Ok,
+                         "and a request is built for it, got "
+                         & CryptoLib.ASN1.Errors.Status_Image (Built));
+
+                  --  The length octets have to name the rest of the request
+                  --  exactly. This is what each of the three encoder faults
+                  --  got wrong, in three different ways, at three different
+                  --  sizes.
+                  declare
+                     Header : Natural := 2;
+                     Stated : Natural := 0;
+                     Count  : Natural;
+                  begin
+                     if Natural (Out_Buffer (2)) < 128 then
+                        Stated := Natural (Out_Buffer (2));
+                     else
+                        Count := Natural (Out_Buffer (2)) - 128;
+                        Header := 2 + Count;
+                        for I in 1 .. Count loop
+                           Stated :=
+                             Stated * 256
+                             + Natural (Out_Buffer (Spot (2 + I)));
+                        end loop;
+                     end if;
+
+                     Check (Header + Stated = Natural (Stop),
+                            "and its outer length names the whole request:"
+                            & Natural'Image (Header + Stated) & " vs"
+                            & Spot'Image (Stop));
+                  end;
+               end;
+            end loop;
          end;
       end;
    end Check_Oversized_Serial;
