@@ -73,16 +73,18 @@ branches, memory indexing, or variable-latency arithmetic:
   S-box, or T-table -- is decidable and absolute. The **conditional-jump counts**
   of the routines that must not branch on secrets are held to a recorded
   baseline.
-- That baseline corrects a claim this document used to make. `CT_Select` does
-  **not** compile to zero conditional jumps: it has one, its loop bound against
-  a fixed count, and `Constant_Time.Equal` has twelve, on array lengths, loop
-  indices and the answer it returns. Those are branches on public values, which
-  is what makes them harmless -- but the earlier wording said something that was
-  not true, and a jump count cannot by itself tell a branch on a length from a
-  branch on a key.
+- The baseline is taken from a **release** build, and the preflight makes one
+  for the check rather than inspecting whatever was last built. The profile
+  changes the answer: `CT_Select` compiles to no conditional jump under `-O3`
+  and to one -- its loop bound -- under the `-Og` development default, and the
+  test crate rebuilds the library again under its own. `Constant_Time.Equal`
+  keeps eleven either way, on array lengths, loop indices and the answer it
+  returns. Those are branches on public values, which is what makes them
+  harmless; a jump count cannot by itself tell a branch on a length from a
+  branch on a key, which is why the budgets are a regression baseline and not
+  a proof.
 - So the gate catches regressions, not leaks. A branchless mask rewritten as an
-  `if` adds jumps inside a loop body and fails it; this was verified by making
-  that edit. A data-dependent memory access leaves no branch behind and would
+  `if` adds a jump and fails it; this was verified by making that edit. A data-dependent memory access leaves no branch behind and would
   pass. Constant-timeness here is still a source-level discipline, and the
   primitives' scalar ladders and field arithmetic are **not** covered by the
   budgets -- only the four routines whose entire job is to be branchless.

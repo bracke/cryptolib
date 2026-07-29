@@ -59,14 +59,15 @@ begin
    --  happened to leave could pass on an artefact that no longer matches the
    --  source. That is not hypothetical: the constant-time check was seen
    --  reporting jump counts from a half-rebuilt library.
-   Step ("build cryptolib", "alr build -- -f");
-
-   --  Before the test suite is built, which rebuilds the library under its
-   --  own profile: that one carries GNAT's runtime checks and so more
-   --  branches, and it is not what ships. The constant-time budgets describe
-   --  the library this crate builds, so they have to be measured on it.
+   --  The constant-time budgets were recorded from a release build, because
+   --  that is what a release ships and because the profile changes the
+   --  answer: CT_Select has no conditional jump under -O3 and one under the
+   --  -Og default. So this check gets its own build rather than inspecting
+   --  whatever the previous step left behind.
+   Step ("build cryptolib for inspection", "alr build --release -- -f");
    Step ("check constant-time properties", "tools/bin/check_constant_time");
 
+   Step ("build cryptolib", "alr build -- -f");
    Step ("build test suite", "cd tests && alr build -- -f");
    Step ("run test suite", "./tests/bin/tests");
    Step ("check alire manifest", "tools/bin/check_alire_manifest");

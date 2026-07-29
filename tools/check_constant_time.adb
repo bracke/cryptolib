@@ -18,20 +18,23 @@ with Project_Tools.Processes;
 --  Two things are checked, and they are not equally strong. That no AES
 --  lookup table is present is decidable and absolute: the table is either in
 --  the binary or it is not. The jump counts are a baseline, not a property.
---  A routine like CT_Select still has one conditional jump -- its loop bound
---  against a fixed count -- and Equal has a dozen, on array lengths and loop
---  indices. Those are branches on public values, which is what makes them
---  harmless; a jump count cannot tell them from a branch on a secret.
+--  CT_Select and Equal_Mask compile to none at all; Equal keeps eleven, on
+--  array lengths, loop indices and the answer it returns. Those are branches
+--  on public values, which is what makes them harmless -- and a jump count
+--  cannot tell them from a branch on a secret, which is why what follows is
+--  a budget rather than a proof.
 --
 --  So the budgets below say "no more than there were", which catches the
 --  regression that actually happens to code like this: a branchless mask
 --  rewritten as an `if` adds jumps inside a loop body. It would not catch a
 --  data-dependent memory access, which leaves no branch behind at all.
---  Run it on the library this crate builds, before anything else rebuilds
---  it. The test crate compiles cryptolib again under its own profile, and
---  that build carries GNAT's runtime checks -- 16 conditional jumps in
---  Modexp.CT_Select where the shipped library has 9. Measuring the wrong one
---  reads those checks as new branching.
+--  The budgets describe a release build, and the preflight makes one for
+--  this check specifically. Profile matters more than it looks: CT_Select
+--  compiles to no conditional jump at all under -O3 and to one -- its loop
+--  bound -- under the -Og default, and the test crate rebuilds the library
+--  again under its own profile. A budget is only meaningful against the
+--  build it was recorded from, so the check owns which build that is rather
+--  than inspecting whatever was left in lib/.
 procedure Check_Constant_Time is
    Library_Path : constant String := "lib/libCryptolib.a";
    Dump_Path    : constant String :=
@@ -263,14 +266,14 @@ begin
          & "lookup tables were checked");
    else
       Require_Within
-        ("cryptolib__constant_time__equal", 12,
+        ("cryptolib__constant_time__equal", 11,
          "array lengths, loop bounds, and the returned answer");
       Require_Within
-        ("cryptolib__ec_arith__ct_select", 1, "one loop bound");
+        ("cryptolib__ec_arith__ct_select", 0, "branchless outright");
       Require_Within
-        ("cryptolib__modexp__ct_select", 9, "loop bounds and range checks");
+        ("cryptolib__modexp__ct_select", 16, "loop bounds and range checks");
       Require_Within
-        ("cryptolib__ec_arith__equal_mask", 1, "one loop bound");
+        ("cryptolib__ec_arith__equal_mask", 0, "branchless outright");
    end if;
 
    if Failures = 0 then
