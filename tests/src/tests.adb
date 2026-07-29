@@ -2039,6 +2039,151 @@ procedure Tests is
       end;
    end Check_X509_Access_Locations;
 
+   --  An extension that appears twice, and extensions on a certificate whose
+   --  version does not admit them. Both are ways of writing a certificate
+   --  that means one thing to one reader and something else to another,
+   --  which is worth refusing outright: whichever instance this happened to
+   --  take, some other implementation takes the other, and the two disagree
+   --  about what the issuer authorised.
+   procedure Check_Certificate_Ambiguity is
+      use type CryptoLib.ASN1.Errors.Decode_Status;
+
+      package X509C renames CryptoLib.X509.Certificates;
+      package XE renames CryptoLib.X509.Extensions;
+
+      Honest_V3_DER : constant String :=
+        "308203253082020da00302010202023000300d06092a864886f70d01010b050030163114301206035504030c0b" &
+        "63726c2d746573742d6361301e170d3236303732393031313432365a170d3237303732393031313432365a301a" &
+        "3118301606035504030c0f7265766f6b65642e6578616d706c6530820122300d06092a864886f70d0101010500" &
+        "0382010f003082010a0282010100c0ed219d3150260bb4a5a976fd93941636a1dcdc8976321a5c82e468c74ff7" &
+        "e755f29a6940524606cf7e70308e8c3ed01c6954e7e7a45fdedd1d914b6cf2459cbba0b0a2f3a248771f69301a" &
+        "c2735a408af830e03b7c3941648de0810c102c79f17da1d486a3b676993fd30102ed86ee4d4cde770d3abf8dd4" &
+        "b178885132f79e8799c63595af16af350d94207d96a5d830c19e2eff9edb43607e7c8e5ba3e737b82f71937a7c" &
+        "a59ffcac9dfc633aa69ce1e08aabf84a068c4e1dfa9f7ca28f959062408140c1c8cf63d66761609bc2dff8b3d4" &
+        "bd3250ee0a86b507023e9f9aee80b2184c01758ffaf3c280eeeff0fb0926de9c83cfc2f327c4dcd6254a044715" &
+        "0203010001a3793077300c0603551d130101ff04023000300e0603551d0f0101ff0404030205a030170603551d" &
+        "110410300e820c686f73742e6578616d706c65301d0603551d0e04160414b2300eeca1b7034732dc8f88bc8292" &
+        "ab5ecbe8fe301f0603551d23041830168014a1f6d41f7e7b24380aa8a0cd33926e4452de852f300d06092a8648" &
+        "86f70d01010b0500038201010032fbc37897b1aded84fd07e03393dbd35ab45ba2149704757853447c7c82dc2f" &
+        "1e5a5cf0fca4a9b513e7014f240a1acf63ec11514a61fa82d801339d754fcf60049cda3f618b215aa8c0bbd547" &
+        "4fae1fcb1d7a60853962fc7a99af186be8f9eab7c4dfedac2824545d94eca8f716bb2e7a99145172c8f626b0d8" &
+        "8e50bfa8083c833abe24a060379ae0bae5478e728d9bf302ff18540b24443ad055ce624d7c3de8526df13a6bc4" &
+        "b727e57e0f2cb2ee3cafa62b177b7272e0b8bcc327441e5fc27acd6bf5a57df5ac9cb24025efb811d7520b94d2" &
+        "0ecf1d6d96a26f7d1312e1c4e9389c35ff6bdce8ee602ed60cce5f9a7ddbb20fa4a1d073d217a282782a40de";
+
+      Duplicate_Extension_DER : constant String :=
+        "308203433082022ba00302010202023000300d06092a864886f70d01010b050030163114301206035504030c0b" &
+        "63726c2d746573742d6361301e170d3236303732393031313432365a170d3237303732393031313432365a301a" &
+        "3118301606035504030c0f7265766f6b65642e6578616d706c6530820122300d06092a864886f70d0101010500" &
+        "0382010f003082010a0282010100c0ed219d3150260bb4a5a976fd93941636a1dcdc8976321a5c82e468c74ff7" &
+        "e755f29a6940524606cf7e70308e8c3ed01c6954e7e7a45fdedd1d914b6cf2459cbba0b0a2f3a248771f69301a" &
+        "c2735a408af830e03b7c3941648de0810c102c79f17da1d486a3b676993fd30102ed86ee4d4cde770d3abf8dd4" &
+        "b178885132f79e8799c63595af16af350d94207d96a5d830c19e2eff9edb43607e7c8e5ba3e737b82f71937a7c" &
+        "a59ffcac9dfc633aa69ce1e08aabf84a068c4e1dfa9f7ca28f959062408140c1c8cf63d66761609bc2dff8b3d4" &
+        "bd3250ee0a86b507023e9f9aee80b2184c01758ffaf3c280eeeff0fb0926de9c83cfc2f327c4dcd6254a044715" &
+        "0203010001a38196308193300f0603551d130101ff040530030101ff30090603551d1304023000300c0603551d" &
+        "130101ff04023000300e0603551d0f0101ff0404030205a030170603551d110410300e820c686f73742e657861" &
+        "6d706c65301d0603551d0e04160414b2300eeca1b7034732dc8f88bc8292ab5ecbe8fe301f0603551d23041830" &
+        "168014a1f6d41f7e7b24380aa8a0cd33926e4452de852f300d06092a864886f70d01010b0500038201010007da" &
+        "c8456835599f6b84eb8f88ad5eacc9bea0568a5f832288edab6454b5f06a5083f7bd83789d554dc33e44e9b8eb" &
+        "f07d199b9e1a9980e900f490a1726e0cb6891e8413012e64193f90f1de7383e0442be007a0d38a8322701a5281" &
+        "6abe62869d7d117b961b005a2752d592eeb4e0486ae4065038d05792501c3d1e24bf081522e0af4bf0986aac51" &
+        "dc915ba204f188d4d5f124a32c5823bff6d671c07b2f2df9cd4728b136c11aed8a110d8ed37297d50fb4c13f8c" &
+        "04625622168659e00a7b39ad192f4eccfe9c031dd1da51968543c6bce1d0d2850a40072f66040452bae65aa06b" &
+        "d363111be7d43e77c292e762910985d6fc3bd65dba43bb5d54cfc38c81";
+
+      V1_With_Extensions_DER : constant String :=
+        "308203203082020802023000300d06092a864886f70d01010b050030163114301206035504030c0b63726c2d74" &
+        "6573742d6361301e170d3236303732393031313432365a170d3237303732393031313432365a301a3118301606" &
+        "035504030c0f7265766f6b65642e6578616d706c6530820122300d06092a864886f70d01010105000382010f00" &
+        "3082010a0282010100c0ed219d3150260bb4a5a976fd93941636a1dcdc8976321a5c82e468c74ff7e755f29a69" &
+        "40524606cf7e70308e8c3ed01c6954e7e7a45fdedd1d914b6cf2459cbba0b0a2f3a248771f69301ac2735a408a" &
+        "f830e03b7c3941648de0810c102c79f17da1d486a3b676993fd30102ed86ee4d4cde770d3abf8dd4b178885132" &
+        "f79e8799c63595af16af350d94207d96a5d830c19e2eff9edb43607e7c8e5ba3e737b82f71937a7ca59ffcac9d" &
+        "fc633aa69ce1e08aabf84a068c4e1dfa9f7ca28f959062408140c1c8cf63d66761609bc2dff8b3d4bd3250ee0a" &
+        "86b507023e9f9aee80b2184c01758ffaf3c280eeeff0fb0926de9c83cfc2f327c4dcd6254a0447150203010001" &
+        "a3793077300c0603551d130101ff04023000300e0603551d0f0101ff0404030205a030170603551d110410300e" &
+        "820c686f73742e6578616d706c65301d0603551d0e04160414b2300eeca1b7034732dc8f88bc8292ab5ecbe8fe" &
+        "301f0603551d23041830168014a1f6d41f7e7b24380aa8a0cd33926e4452de852f300d06092a864886f70d0101" &
+        "0b050003820101004a659bb771d37116b98b3991540d1a1bc392137fcfb077420fb43b414b0db9f3404a29d98c" &
+        "94bc9b74c34f37b68486dcb533d263fe52b2129fc5874f2269f86b73b3deb0580aec94172626aad4a6906bca5d" &
+        "5b28d350a62597ac9958dc34d0228800b4016423cabd05a264c5e2dd7601183daf8f4135cbfd01314579a3b6bc" &
+        "5c1db235debec26f05edc536ca0aca626374ccd53b443ee9ab1e7e8ef627f59867c5d85533bd0a0e6958b61d02" &
+        "3405f393c510ec66bb744f8b3a2f8db42b779b1f0c47fc9cbcf91b1f2392057848f152967817d96afc45d11a1d" &
+        "1655f418563d3b91466b825335c56ac1b1d755240fe6b50a0eee3c28f0dc7f62aa548200ded705";
+
+      function From_Hex
+        (Text : String) return Ada.Streams.Stream_Element_Array
+      is
+         Result : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (Text'Length / 2));
+         function Nibble (C : Character) return Natural
+         is (case C is
+                when '0' .. '9' => Character'Pos (C) - Character'Pos ('0'),
+                when others     => Character'Pos (C) - Character'Pos ('a') + 10);
+      begin
+         for I in Result'Range loop
+            Result (I) :=
+              Ada.Streams.Stream_Element
+                (Nibble (Text (Text'First + 2 * Natural (I - 1))) * 16
+                 + Nibble (Text (Text'First + 2 * Natural (I - 1) + 1)));
+         end loop;
+         return Result;
+      end From_Hex;
+
+      Status : CryptoLib.ASN1.Errors.Decode_Status;
+   begin
+      --  The certificate the other two are built from: an ordinary v3 leaf
+      --  that is not a CA. This must keep working, or the check below is
+      --  refusing certificates rather than ambiguity.
+      declare
+         Honest : constant X509C.Certificate :=
+           X509C.Decode_DER
+             (From_Hex (Honest_V3_DER), CryptoLib.ASN1.Default_Limits,
+              Status);
+         Limits : constant XE.Basic_Constraints :=
+           XE.Get_Basic_Constraints (Honest);
+      begin
+         Check (Status = CryptoLib.ASN1.Errors.Ok
+                and then X509C.Is_Present (Honest),
+                "an ordinary v3 certificate decodes");
+         Check (Limits.Present and then not Limits.Is_CA,
+                "and is not a CA");
+      end;
+
+      --  The same certificate with basicConstraints CA:TRUE inserted before
+      --  the CA:FALSE it already carried, and re-signed so the signature
+      --  holds. Taking the first instance makes it a CA; taking the last
+      --  makes it a leaf. OpenSSL refuses to load it at all.
+      declare
+         Doubled : constant X509C.Certificate :=
+           X509C.Decode_DER
+             (From_Hex (Duplicate_Extension_DER),
+              CryptoLib.ASN1.Default_Limits, Status);
+      begin
+         Check (Status /= CryptoLib.ASN1.Errors.Ok,
+                "a certificate carrying an extension twice is refused, got "
+                & CryptoLib.ASN1.Errors.Status_Image (Status));
+         Check (not X509C.Is_Present (Doubled),
+                "and nothing is decoded from it");
+      end;
+
+      --  Extensions on a v1 certificate: some parsers read them, some
+      --  ignore them, which is the same disagreement reached another way.
+      declare
+         Old : constant X509C.Certificate :=
+           X509C.Decode_DER
+             (From_Hex (V1_With_Extensions_DER),
+              CryptoLib.ASN1.Default_Limits, Status);
+      begin
+         Check (Status /= CryptoLib.ASN1.Errors.Ok,
+                "extensions on a v1 certificate are refused, got "
+                & CryptoLib.ASN1.Errors.Status_Image (Status));
+         Check (not X509C.Is_Present (Old),
+                "and nothing is decoded from it either");
+      end;
+   end Check_Certificate_Ambiguity;
+
    procedure Check_X509_Extensions is
       use type CryptoLib.ASN1.Errors.Decode_Status;
       use type CryptoLib.PEM.Decode_Status;
@@ -6883,6 +7028,7 @@ begin
    Check_X509_Decode;
    Check_X509_Verify;
    Check_X509_Extensions;
+   Check_Certificate_Ambiguity;
    Check_X509_Access_Locations;
    Check_RSA_Verify;
    Check_ECDSA_Curves;

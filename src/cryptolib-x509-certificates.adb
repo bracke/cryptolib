@@ -28,6 +28,25 @@ package body CryptoLib.X509.Certificates is
    is (First => Encoded_First (Value), Last => Encoded_Last (Value));
 
    --  Which signature algorithm does this AlgorithmIdentifier name?
+   --  Do two parsed extensions name the same identifier?
+   function Same_Identifier
+     (Data : Octets; Left : Extension_Record; Right : Extension_Record)
+      return Boolean
+   is
+      L : constant Octets := Data (Left.OID_First .. Left.OID_Last);
+      R : constant Octets := Data (Right.OID_First .. Right.OID_Last);
+   begin
+      if L'Length /= R'Length then
+         return False;
+      end if;
+      for I in 0 .. L'Length - 1 loop
+         if L (L'First + Offset (I)) /= R (R'First + Offset (I)) then
+            return False;
+         end if;
+      end loop;
+      return True;
+   end Same_Identifier;
+
    function Signature_Algorithm_For
      (Data : Octets; OID : Element) return Signature_Algorithm
    is
@@ -495,6 +514,35 @@ package body CryptoLib.X509.Certificates is
 
                      if not DER_Reader.At_End (Walk, Tag.Last) then
                         Status := Trailing_Data;
+                        return Result;
+                     end if;
+
+                     --  RFC 5280: a certificate MUST NOT carry two
+                     --  instances of the same extension. Refused rather than
+                     --  resolved, because there is no right way to resolve
+                     --  it: readers that take the first and readers that
+                     --  take the last both look correct, and a certificate
+                     --  carrying basicConstraints twice is a CA to one of
+                     --  them and not to the other. OpenSSL refuses to load
+                     --  such a certificate at all.
+                     for A in 1 .. Seen loop
+                        for B in A + 1 .. Seen loop
+                           if Same_Identifier
+                                (Work, Result.Extensions (A),
+                                 Result.Extensions (B))
+                           then
+                              Status := Invalid_Value;
+                              return Result;
+                           end if;
+                        end loop;
+                     end loop;
+
+                     --  Extensions belong to v3 only. A v1 or v2 certificate
+                     --  carrying them is read by some parsers and ignored by
+                     --  others, which is the same disagreement by another
+                     --  route.
+                     if Result.Version_Number /= 3 then
+                        Status := Invalid_Value;
                         return Result;
                      end if;
 
