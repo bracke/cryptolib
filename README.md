@@ -56,11 +56,11 @@ Do not run plain system `gnat*`, `gnatmake`, `gnatls`, `gnatprove`,
 | `CryptoLib.X509.Identity` | RFC 9525 service identity matching: DNS names, wildcards, IP addresses |
 | `CryptoLib.X509.Purposes` | may this certificate serve TLS, sign code, act as a CA |
 | `CryptoLib.X509.Names` | distinguished names by attribute; RFC 4514 formatting kept separate |
-| `CryptoLib.X509.CRLs` | revocation lists: decode, verify the issuer's signature, look a serial up |
+| `CryptoLib.X509.CRLs` | revocation lists: decode, verify the issuer's signature, look a serial up, and read when it was revoked and why |
 | `CryptoLib.OCSP` | OCSP requests and responses, including responder authorisation |
 | `CryptoLib.X509.Revocation` | ask a CRL or an OCSP response about a certificate, freshness included |
 | `CryptoLib.X509.Path_Building` | search for a path to a trust anchor; proposes, never concludes |
-| `CryptoLib.Certificates` | X.509: local CA, server/client/email issuance, CSR signing, PKCS#12, fingerprints |
+| `CryptoLib.Certificates` | X.509: local CA, server/client/email issuance, CSR signing, PKCS#12, fingerprints; issued certificates carry a random serial, a validity window from the clock, and key identifiers |
 | `CryptoLib.Errors`, `CryptoLib.Buffers`, `CryptoLib.Fingerprints` | status codes, packet buffers, key fingerprints |
 
 The snippets below are fragments, chosen to show the call rather than a whole
@@ -76,6 +76,13 @@ builds.
   closed** — on any error the `out` result is zeroed rather than left partial.
 - **No exceptions escape** the public API for ordinary failures; they map to a
   `Status`.
+- **Defaults that cost time or expire are stated, not buried.** An issued
+  certificate is valid for 397 days from the moment it is issued, not for a
+  decade; a PKCS#12 bundle takes 600,000 PBKDF2 iterations to open. Both are
+  parameters — `Valid_Days` on the issuing calls, `Iterations` on
+  `Generate_PKCS12` — and `PKCS12.Open` takes `Maximum_Iterations` so a
+  caller opening bundles it did not write can say what it is willing to
+  spend. `SECURITY.md` explains why each is what it is.
 
 ## Quickstart
 
