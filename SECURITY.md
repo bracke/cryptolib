@@ -18,7 +18,7 @@ The reference sources are:
 | Area | Algorithms | Verified against |
 |------|-----------|------------------|
 | Hashes | MD5, SHA-1, SHA-256/384/512, SHA3-256/512, SHAKE128/256 | NIST / RFC KATs |
-| MAC / KDF | HMAC-SHA1/256/384/512, PBKDF2, PBKDF1, PKCS12KDF, bcrypt_pbkdf, UMAC-64/128 | RFC 2202 / 4231 / 6070; RFC 4418 (UMAC); bcrypt proven by decrypting a real OpenSSH key |
+| MAC / KDF | HMAC-SHA1/256/384/512, PBKDF2, PBKDF1, PKCS12KDF, bcrypt_pbkdf, UMAC-64/128 | RFC 2202 / 4231 / 6070; RFC 4418 (UMAC); bcrypt_pbkdf against the OpenBSD construction as the `bcrypt` module implements it, at three round counts and output lengths, plus its refusals of a zero round count and an empty passphrase |
 | AEAD / ciphers | AES-128/192/256 (CTR/CBC/GCM), ChaCha20-Poly1305, 3DES, RC2 | FIPS-197; AES-256-GCM and chacha20-poly1305@openssh.com cross-checked vs pyca/OpenSSL |
 | GHASH | GF(2¹²⁸) for AES-GCM | via the GCM KAT |
 | X25519 | Curve25519 ECDH | RFC 7748 §5.2 |
@@ -75,6 +75,10 @@ branches, memory indexing, or variable-latency arithmetic:
 - **ML-KEM-768** — the FO re-encryption compare uses `Constant_Time.Equal`.
 - **Authentication-tag comparison** — `Constant_Time.Equal` (accumulate-OR,
   no early return) is used for GCM, ChaCha20-Poly1305, and the ML-KEM check.
+  Its shape is held to a jump budget, which says nothing about whether it
+  answers correctly, so a difference at each of the eight byte positions is
+  checked separately along with mismatched lengths -- a comparison that runs
+  one byte short is right about all the others.
 
 ### Caveats (read these)
 

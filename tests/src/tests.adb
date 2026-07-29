@@ -21,6 +21,8 @@ with CryptoLib.PKCS8;
 with CryptoLib.PKCS12;
 with CryptoLib.Identities;
 with CryptoLib.X509.Policies;
+with CryptoLib.Constant_Time;
+with CryptoLib.BCrypt_PBKDF;
 with CryptoLib.X509.Times;
 with CryptoLib.X509.Validation;
 with CryptoLib.X509.Path_Building;
@@ -6290,6 +6292,126 @@ procedure Tests is
       end;
    end Check_Undated_Statement_Ages;
 
+   --  bcrypt_pbkdf, which nothing here was checking.
+   --
+   --  This crate exports it for OpenSSH private keys and does not use it
+   --  itself, so no other test reached it even indirectly, and the suite
+   --  named it nowhere -- while SECURITY.md listed it among the primitives
+   --  validated against published vectors. The implementation turns out to
+   --  be right; what was missing was anything that would have said so.
+   --
+   --  The vectors come from the bcrypt module's kdf, which is the same
+   --  OpenBSD construction, and were compared against this before being
+   --  written down.
+   procedure Check_Bcrypt_PBKDF is
+      function From_Hex
+        (Text : String) return Ada.Streams.Stream_Element_Array
+      is
+         Result : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (Text'Length / 2));
+         function Nibble (C : Character) return Natural
+         is (case C is
+                when '0' .. '9' => Character'Pos (C) - Character'Pos ('0'),
+                when others     => Character'Pos (C) - Character'Pos ('a') + 10);
+      begin
+         for I in Result'Range loop
+            Result (I) :=
+              Ada.Streams.Stream_Element
+                (Nibble (Text (Text'First + 2 * Natural (I - 1))) * 16
+                 + Nibble (Text (Text'First + 2 * Natural (I - 1) + 1)));
+         end loop;
+         return Result;
+      end From_Hex;
+
+      procedure One_Vector
+        (Passphrase : String;
+         Salt       : String;
+         Rounds     : Natural;
+         Length     : Natural;
+         Expected   : String)
+      is
+         Derived : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (Length));
+         Status  : constant CryptoLib.Errors.Status :=
+           CryptoLib.BCrypt_PBKDF.Derive
+             (Passphrase, From_Hex (Salt),
+              Interfaces.Unsigned_32 (Rounds), Derived);
+      begin
+         Check (Status = CryptoLib.Errors.Ok
+                and then Derived = From_Hex (Expected),
+                "bcrypt_pbkdf over" & Natural'Image (Rounds)
+                & " rounds into" & Natural'Image (Length) & " bytes");
+      end One_Vector;
+   begin
+      One_Vector
+        ("password", "0102030405060708", 8, 32,
+         "dabe5bcaf0e213b7ab90f96262fc3a9eacf94dcd1b887381ad437350ef38b5de");
+      One_Vector
+        ("correct horse battery staple", "73616c7479736f6d657468696e6721", 16, 64,
+         "c59a3adaea5e47dc1937e1e4c51e33e149d0c7b0ab44573b3796d7125c1037a87eb1dd86f139"
+         & "e6f43ce8c9334e721fc0b8de115f3d9305c53a2a45d3126b001f");
+      One_Vector
+        ("x", "aabbccddeeff0011", 1, 48,
+         "f73b50dc8b834e74ec8f8ae35589883266eb246d10b88eeb76ce08e927861c18351b2faccf53"
+         & "57492128d74c1bffa71e");
+
+      --  The limits are refusals, not silent truncations.
+      declare
+         Small : Ada.Streams.Stream_Element_Array (1 .. 16);
+      begin
+         Check (CryptoLib.BCrypt_PBKDF.Derive
+                  ("pw", From_Hex ("0102030405060708"), 0, Small)
+                /= CryptoLib.Errors.Ok,
+                "no rounds is refused rather than derived from");
+         Check (Small = [1 .. 16 => 0],
+                "and the output is zeroed rather than left half filled");
+
+         Check (CryptoLib.BCrypt_PBKDF.Derive
+                  ("", From_Hex ("0102030405060708"), 8, Small)
+                /= CryptoLib.Errors.Ok,
+                "an empty passphrase is refused");
+      end;
+   end Check_Bcrypt_PBKDF;
+
+   --  The comparison every tag check goes through.
+   --
+   --  Its shape is held to a jump budget by check_constant_time, so it
+   --  cannot quietly acquire an early return; that says nothing about
+   --  whether it answers correctly, and nothing named it. A tamper test on
+   --  an AEAD reaches it, but only for the byte that test happens to
+   --  disturb.
+   procedure Check_Constant_Time_Equal is
+      A : constant Ada.Streams.Stream_Element_Array (1 .. 8) :=
+        [1, 2, 3, 4, 5, 6, 7, 8];
+      Empty : constant Ada.Streams.Stream_Element_Array (1 .. 0) :=
+        [others => 0];
+
+      function Differing_At (Where : Positive) return Boolean is
+         B : Ada.Streams.Stream_Element_Array (1 .. 8) := A;
+      begin
+         B (Ada.Streams.Stream_Element_Offset (Where)) :=
+           B (Ada.Streams.Stream_Element_Offset (Where)) xor 16#80#;
+         return CryptoLib.Constant_Time.Equal (A, B);
+      end Differing_At;
+   begin
+      Check (CryptoLib.Constant_Time.Equal (A, A),
+             "a value equals itself");
+
+      --  Every position, because a comparison that stops early or runs one
+      --  short is right about all the others.
+      for Where in 1 .. 8 loop
+         Check (not Differing_At (Where),
+                "a difference at byte" & Natural'Image (Where) & " is seen");
+      end loop;
+
+      Check (not CryptoLib.Constant_Time.Equal (A, A (1 .. 7)),
+             "a shorter value is not equal to a longer one");
+      Check (not CryptoLib.Constant_Time.Equal (A (1 .. 7), A),
+             "nor the other way round");
+      Check (CryptoLib.Constant_Time.Equal (Empty, Empty),
+             "two empty values are equal, which is what the contract says");
+   end Check_Constant_Time_Equal;
+
    procedure Check_X509_Extensions is
       use type CryptoLib.ASN1.Errors.Decode_Status;
       use type CryptoLib.PEM.Decode_Status;
@@ -11215,6 +11337,8 @@ begin
    Check_Validity_Not_Past_Issuer;
    Check_Impossible_Dates;
    Check_Undated_Statement_Ages;
+   Check_Bcrypt_PBKDF;
+   Check_Constant_Time_Equal;
    Check_Random_Fails_Closed;
    Check_Off_Curve_Key;
    Check_Ed25519_Encoding;
