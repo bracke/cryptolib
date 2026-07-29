@@ -6098,6 +6098,44 @@ procedure Tests is
         "90887c3b28dfe059572c9d7fc8b9300506032b65700341007c3a46fa18d9399201c207d4b39510689c321d00" &
         "e21238c63b6bf631429e79665f98463750a4792e8c4b887dcda8aaf423a7651b38e5b889186a829c34cf280c";
 
+      OCSP_No_Next_DER : constant String :=
+        "308202700a0100a08202693082026506092b06010505073001010482025630820252307fa118301631143012" &
+        "06035504030c0b4f43535020416765204341180f32303236303732393131303935355a30523050303b300906" &
+        "052b0e03021a050004148aa32804b8ef3e1a72a802fa517db805a64d6b860414cd92b608f1fd749014a411de" &
+        "eaafcf1b3c5e589702021e618000180f32303236303732393131303935355a300a06082a8648ce3d04030203" &
+        "4700304402206faf3ddabc08070db84eac39ad1a082a490917774f3f6c95edf7ea471823f6cc02205ab938e7" &
+        "357de2d8b5a8aea5cdf2fd7ac00741f3e45ef854bf3fd984acfa99a1a0820178308201743082017030820116" &
+        "a0030201020214727b3004679aafba2769bea705a91b243a8dba81300a06082a8648ce3d0403023016311430" &
+        "1206035504030c0b4f43535020416765204341301e170d3236303732393131303935355a170d333431303135" &
+        "3131303935355a30163114301206035504030c0b4f435350204167652043413059301306072a8648ce3d0201" &
+        "06082a8648ce3d030107034200049dd9b1bdb250fafd0132582cc4ec06f590ef980cb19c5b94391cc539af61" &
+        "a1ba333bc63a9dd6ac1fc8d721e114626be9cc45eb735e1029ede22b1811f760bc57a3423040300f0603551d" &
+        "130101ff040530030101ff300e0603551d0f0101ff040403020106301d0603551d0e04160414cd92b608f1fd" &
+        "749014a411deeaafcf1b3c5e5897300a06082a8648ce3d0403020348003045022067c206a7d209626c102be4" &
+        "8f757a7a4afaf209562d73be0b43ba70bcbf4f5b8b0221008f76d1f212b8e471977a9f57aaf00673b53777bd" &
+        "5fc36c3dfdb60f170726a0cc";
+
+      OCSP_CA_DER : constant String :=
+        "3082017030820116a0030201020214727b3004679aafba2769bea705a91b243a8dba81300a06082a8648ce3d" &
+        "04030230163114301206035504030c0b4f43535020416765204341301e170d3236303732393131303935355a" &
+        "170d3334313031353131303935355a30163114301206035504030c0b4f435350204167652043413059301306" &
+        "072a8648ce3d020106082a8648ce3d030107034200049dd9b1bdb250fafd0132582cc4ec06f590ef980cb19c" &
+        "5b94391cc539af61a1ba333bc63a9dd6ac1fc8d721e114626be9cc45eb735e1029ede22b1811f760bc57a342" &
+        "3040300f0603551d130101ff040530030101ff300e0603551d0f0101ff040403020106301d0603551d0e0416" &
+        "0414cd92b608f1fd749014a411deeaafcf1b3c5e5897300a06082a8648ce3d0403020348003045022067c206" &
+        "a7d209626c102be48f757a7a4afaf209562d73be0b43ba70bcbf4f5b8b0221008f76d1f212b8e471977a9f57" &
+        "aaf00673b53777bd5fc36c3dfdb60f170726a0cc";
+
+      OCSP_Leaf_DER : constant String :=
+        "3082016e30820113a00302010202021e61300a06082a8648ce3d04030230163114301206035504030c0b4f43" &
+        "535020416765204341301e170d3236303732393131303935355a170d3332303131393131303935355a301731" &
+        "15301306035504030c0c6c6561662e6578616d706c653059301306072a8648ce3d020106082a8648ce3d0301" &
+        "07034200046d43ecd744c212d59a835dc92090d5431edd8c4085918fef3e90613dec37b48d3b7fc556b1beae" &
+        "e9b13a66eb9dec3d9d16e37bbbb6c8161188a0e915504835ada350304e300c0603551d130101ff0402300030" &
+        "1d0603551d0e04160414032c9886bbda604bc235e452d5697eabedc5e673301f0603551d23041830168014cd" &
+        "92b608f1fd749014a411deeaafcf1b3c5e5897300a06082a8648ce3d04030203490030460221008ee8ca58a3" &
+        "4bfaf8306e32e6eecf1a06b1464578a1a79a6cc42f43243387b17c022100c265d327bb504ff33138c5436790" &
+        "3cc9297164c077c20ac285785052130cdba1";
       Status : CryptoLib.ASN1.Errors.Decode_Status;
 
       function From_Hex
@@ -6164,6 +6202,46 @@ procedure Tests is
                 Maximum_Age_Days => 4_000) = RV.Not_Revoked,
              "and a caller who says it may be that old gets the answer, so "
              & "nothing else about the list is what was refused");
+
+      --  The same for OCSP, where a response without a nextUpdate is not an
+      --  oddity but what "openssl ocsp" produces unless told otherwise. RFC
+      --  6960 reads the omission as newer information being available all
+      --  the time, which is the opposite of what believing it for ever does.
+      declare
+         Reply : CryptoLib.OCSP.Response :=
+           CryptoLib.OCSP.Decode_Response
+             (From_Hex (OCSP_No_Next_DER), CryptoLib.ASN1.Default_Limits,
+              Status);
+         Resp_Leaf : constant X509C.Certificate :=
+           X509C.Decode_DER (From_Hex (OCSP_Leaf_DER),
+                             CryptoLib.ASN1.Default_Limits, Status);
+         Resp_CA   : constant X509C.Certificate :=
+           X509C.Decode_DER (From_Hex (OCSP_CA_DER),
+                             CryptoLib.ASN1.Default_Limits, Status);
+         Days_Later : constant CryptoLib.X509.Certificate_Time :=
+           (Year => 2026, Month => 8, Day => 1,
+            Hour => 12, Minute => 0, Second => 0);
+         Years_Later : constant CryptoLib.X509.Certificate_Time :=
+           (Year => 2036, Month => 8, Day => 1,
+            Hour => 12, Minute => 0, Second => 0);
+      begin
+         Check (not CryptoLib.OCSP.Has_Next_Update (Reply),
+                "fixture: the response names no nextUpdate");
+         Check (RV.Check_Against_OCSP (Resp_Leaf, Resp_CA, Reply, Days_Later)
+                = RV.Not_Revoked,
+                "a response without a nextUpdate answers while it is fresh, "
+                & "got "
+                & RV.Answer_Image
+                    (RV.Check_Against_OCSP
+                       (Resp_Leaf, Resp_CA, Reply, Days_Later)));
+         Check (RV.Check_Against_OCSP (Resp_Leaf, Resp_CA, Reply, Years_Later)
+                = RV.Stale,
+                "and is stale ten years on rather than still speaking for "
+                & "the certificate, got "
+                & RV.Answer_Image
+                    (RV.Check_Against_OCSP
+                       (Resp_Leaf, Resp_CA, Reply, Years_Later)));
+      end;
    end Check_Undated_Statement_Ages;
 
    procedure Check_X509_Extensions is
