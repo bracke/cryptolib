@@ -1,3 +1,5 @@
+with Ada.Streams;
+
 package body CryptoLib.X509 is
 
    function Reason_Image (Reason : Revocation_Reason) return String is
@@ -59,5 +61,43 @@ package body CryptoLib.X509 is
 
       return True;
    end Is_Not_After;
+
+   function Same_Serial
+     (Left : CryptoLib.ASN1.Octets; Right : CryptoLib.ASN1.Octets)
+      return Boolean
+   is
+      use type CryptoLib.ASN1.Offset;
+      use type Ada.Streams.Stream_Element;
+      L : CryptoLib.ASN1.Offset := Left'First;
+      R : CryptoLib.ASN1.Offset := Right'First;
+   begin
+      while L <= Left'Last and then Left (L) = 0 loop
+         L := L + 1;
+      end loop;
+      while R <= Right'Last and then Right (R) = 0 loop
+         R := R + 1;
+      end loop;
+
+      --  Two serials that are both zero are not a certificate's serial
+      --  either way -- RFC 5280 requires a positive one -- so this says no
+      --  rather than matching everything that failed to parse.
+      if L > Left'Last or else R > Right'Last then
+         return False;
+      end if;
+
+      if Left'Last - L /= Right'Last - R then
+         return False;
+      end if;
+
+      while L <= Left'Last loop
+         if Left (L) /= Right (R) then
+            return False;
+         end if;
+         L := L + 1;
+         R := R + 1;
+      end loop;
+
+      return True;
+   end Same_Serial;
 
 end CryptoLib.X509;

@@ -5238,6 +5238,52 @@ procedure Tests is
       end;
    end Check_Weak_RSA_Key;
 
+   --  One comparison for a serial number, shared by both revocation paths.
+   --
+   --  A serial reaches a revocation check from two directions -- the
+   --  certificate, and whatever a CA or a responder wrote about it -- and
+   --  those are written by different implementations. The CRL path compared
+   --  them as numbers and the OCSP path compared the octets, so the two
+   --  could disagree about whether an answer was even about this
+   --  certificate.
+   --
+   --  Leniency is the safe direction here, which is why the numeric reading
+   --  is the one kept. A padded encoding read as a different certificate
+   --  means an answer about this one is not found, and not finding a
+   --  revocation looks exactly like not being revoked -- silently, and
+   --  pointing the wrong way. Reading two different serials as the same
+   --  number is not something this can do.
+   procedure Check_Serial_Comparison is
+      function S (Data : Ada.Streams.Stream_Element_Array)
+        return Ada.Streams.Stream_Element_Array is (Data);
+
+      Nothing : constant Ada.Streams.Stream_Element_Array (1 .. 0) :=
+        [others => 0];
+   begin
+      Check (CryptoLib.X509.Same_Serial (S ([16#01#]), S ([16#00#, 16#01#])),
+             "a padded serial is the same number as the bare one");
+      Check (CryptoLib.X509.Same_Serial
+               (S ([16#00#, 16#00#, 16#FF#]), S ([16#FF#])),
+             "however many zeros it was padded with");
+      Check (CryptoLib.X509.Same_Serial (S ([16#12#, 16#34#]),
+                                         S ([16#12#, 16#34#])),
+             "and an unpadded pair still matches itself");
+
+      Check (not CryptoLib.X509.Same_Serial (S ([16#01#]), S ([16#02#])),
+             "two different serials do not match");
+      Check (not CryptoLib.X509.Same_Serial
+                   (S ([16#01#]), S ([16#01#, 16#01#])),
+             "nor do two whose values differ by a trailing octet");
+
+      --  RFC 5280 requires a positive serial, so zero is not one. Matching
+      --  it against another zero would make every unparsed serial agree
+      --  with every other.
+      Check (not CryptoLib.X509.Same_Serial (S ([16#00#]), S ([16#00#])),
+             "a zero serial matches nothing, itself included");
+      Check (not CryptoLib.X509.Same_Serial (Nothing, S ([16#01#])),
+             "and an empty one is not a number at all");
+   end Check_Serial_Comparison;
+
    procedure Check_X509_Extensions is
       use type CryptoLib.ASN1.Errors.Decode_Status;
       use type CryptoLib.PEM.Decode_Status;
@@ -10148,6 +10194,7 @@ begin
    Check_Policy_Constraint_Skipcerts;
    Check_Name_Constraint_Depth_Fields;
    Check_Weak_RSA_Key;
+   Check_Serial_Comparison;
    Check_Random_Fails_Closed;
    Check_Off_Curve_Key;
    Check_Ed25519_Encoding;

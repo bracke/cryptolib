@@ -570,31 +570,8 @@ package body CryptoLib.X509.CRLs is
    --  one depending on where it came from. Comparing raw octets would miss a
    --  revocation on that account, and a missed revocation is a revoked
    --  certificate treated as good.
-   function Same_Number (Left : Octets; Right : Octets) return Boolean is
-      L : Offset := Left'First;
-      R : Offset := Right'First;
-   begin
-      while L <= Left'Last and then Left (L) = 0 loop
-         L := L + 1;
-      end loop;
-      while R <= Right'Last and then Right (R) = 0 loop
-         R := R + 1;
-      end loop;
-
-      if Left'Last - L /= Right'Last - R then
-         return False;
-      end if;
-
-      while L <= Left'Last loop
-         if Left (L) /= Right (R) then
-            return False;
-         end if;
-         L := L + 1;
-         R := R + 1;
-      end loop;
-
-      return True;
-   end Same_Number;
+   function Same_Number (Left : Octets; Right : Octets) return Boolean
+   is (CryptoLib.X509.Same_Serial (Left, Right));
 
    function Is_Revoked
      (Item : Revocation_List; Serial : Octets) return Boolean

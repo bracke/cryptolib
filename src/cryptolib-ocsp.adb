@@ -1076,7 +1076,8 @@ package body CryptoLib.OCSP is
 
             if Same_Bytes (Slice (Item, Row_Name), Name_Hash)
               and then Same_Bytes (Slice (Item, Row_Key), Key_Hash)
-              and then Same_Bytes (Slice (Item, Row_Serial), Serial)
+              and then CryptoLib.X509.Same_Serial
+                         (Slice (Item, Row_Serial), Serial)
             then
                --  This is the answer that was asked for; the rest are about
                --  other certificates and say nothing about this one.

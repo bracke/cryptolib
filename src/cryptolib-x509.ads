@@ -142,4 +142,25 @@ package CryptoLib.X509 is
    function Is_Not_After
      (Left : Certificate_Time; Right : Certificate_Time) return Boolean;
 
+   --  Do two encoded serial numbers name the same certificate?
+   --
+   --  Compared as numbers, so leading zero octets do not matter. DER admits
+   --  only the minimal encoding, but a serial reaches this from two
+   --  directions -- a certificate and whatever a CA or a responder wrote
+   --  about it -- and the two are written by different implementations.
+   --  Comparing the octets instead would let a padded encoding read as a
+   --  different certificate, which on the revocation path means an answer
+   --  about this certificate being taken for an answer about another one.
+   --  That failure is silent and points the wrong way: not finding the
+   --  answer looks like not being revoked.
+   --
+   --  This cannot make two different serials equal, so the leniency is only
+   --  ever in the safe direction.
+   --  @param Left one encoded serial number
+   --  @param Right the other
+   --  @return True when they are the same number
+   function Same_Serial
+     (Left : CryptoLib.ASN1.Octets; Right : CryptoLib.ASN1.Octets)
+      return Boolean;
+
 end CryptoLib.X509;
