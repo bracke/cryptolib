@@ -21,6 +21,7 @@ with CryptoLib.PKCS8;
 with CryptoLib.PKCS12;
 with CryptoLib.Identities;
 with CryptoLib.X509.Policies;
+with CryptoLib.Hybrid_PQ_Kex;
 with CryptoLib.Fingerprints;
 with CryptoLib.Constant_Time;
 with CryptoLib.BCrypt_PBKDF;
@@ -7776,6 +7777,72 @@ procedure Tests is
              "and a different sequence number encrypts it differently");
    end Check_Chacha_Length_Agreement;
 
+   --  Which post-quantum method a name asks for.
+   --
+   --  ssh_lib does not carry a list of these names. It asks Is_Implemented
+   --  and offers whatever this crate says it can do, so these predicates are
+   --  the whole of the decision about what gets negotiated -- and then which
+   --  KEM runs and which hash combines the two shared secrets.
+   --
+   --  A name classified into the wrong family runs the wrong KEM; one
+   --  classified into the wrong combiner derives a different key from the
+   --  same exchange. Both end the connection rather than weakening it, but
+   --  neither is visible from inside either crate: the peer is the only
+   --  thing that disagrees.
+   procedure Check_Hybrid_PQ_Names is
+      package HK renames CryptoLib.Hybrid_PQ_Kex;
+      use type HK.Hybrid_PQ_Kind;
+
+      ML_256 : constant String := "mlkem768x25519-sha256";
+      ML_512 : constant String := "mlkem768x25519-sha512";
+      NT_SSH : constant String := "sntrup761x25519-sha512@openssh.com";
+      NT_Bare : constant String := "sntrup761x25519-sha512";
+   begin
+      --  All four are offered, and nothing else is.
+      Check (HK.Is_Implemented (ML_256) and then HK.Is_Implemented (ML_512)
+             and then HK.Is_Implemented (NT_SSH)
+             and then HK.Is_Implemented (NT_Bare),
+             "the four hybrid names are offered");
+      Check (not HK.Is_Implemented ("curve25519-sha256")
+             and then not HK.Is_Implemented ("sntrup761x25519-sha256")
+             and then not HK.Is_Implemented (""),
+             "and a name that is not one of them is not");
+
+      --  The family decides which KEM runs.
+      Check (HK.Is_MLKEM768_Hybrid_PQ_Kex_Name (ML_256)
+             and then HK.Is_MLKEM768_Hybrid_PQ_Kex_Name (ML_512),
+             "the ML-KEM names are recognised as ML-KEM");
+      Check (not HK.Is_MLKEM768_Hybrid_PQ_Kex_Name (NT_SSH)
+             and then not HK.Is_MLKEM768_Hybrid_PQ_Kex_Name (NT_Bare),
+             "and the sntrup names are not");
+      Check (HK.Is_SNTRUP761_Hybrid_PQ_Kex_Name (NT_SSH)
+             and then HK.Is_SNTRUP761_Hybrid_PQ_Kex_Name (NT_Bare),
+             "the sntrup names are recognised as sntrup");
+      Check (not HK.Is_SNTRUP761_Hybrid_PQ_Kex_Name (ML_256)
+             and then not HK.Is_SNTRUP761_Hybrid_PQ_Kex_Name (ML_512),
+             "and the ML-KEM names are not");
+
+      --  The suffix decides which hash combines the two secrets. This is the
+      --  one where the name says the answer, so disagreeing with it is
+      --  disagreeing with every peer that reads the same name.
+      Check (not HK.Uses_SHA512_Combiner (ML_256),
+             "the sha256 name combines with SHA-256");
+      Check (HK.Uses_SHA512_Combiner (ML_512)
+             and then HK.Uses_SHA512_Combiner (NT_SSH)
+             and then HK.Uses_SHA512_Combiner (NT_Bare),
+             "and every sha512 name with SHA-512");
+
+      --  The two sntrup spellings are one method: OpenSSH used the suffixed
+      --  name before the bare one was settled, and a peer may offer either.
+      Check (HK.Kind_Of (NT_SSH) /= HK.Kind_Of (ML_256)
+             and then HK.Uses_SHA512_Combiner (NT_SSH)
+                      = HK.Uses_SHA512_Combiner (NT_Bare)
+             and then HK.Is_SNTRUP761_Hybrid_PQ_Kex_Name (NT_SSH)
+                      = HK.Is_SNTRUP761_Hybrid_PQ_Kex_Name (NT_Bare),
+             "the suffixed and bare sntrup names agree about everything that "
+             & "decides the exchange");
+   end Check_Hybrid_PQ_Names;
+
    procedure Check_X509_Extensions is
       use type CryptoLib.ASN1.Errors.Decode_Status;
       use type CryptoLib.PEM.Decode_Status;
@@ -12784,6 +12851,7 @@ begin
    Check_Gex_Group_Selection;
    Check_UMAC_Sequence_Nonce;
    Check_Chacha_Length_Agreement;
+   Check_Hybrid_PQ_Names;
    Check_Cipher_Names;
    Check_X25519_Shared_Secret;
    Check_Chain_Constraint_Bypasses;
