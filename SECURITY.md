@@ -162,6 +162,25 @@ two representative sites was confirmed to fail the suite.
 Callers must still check the status. An all-zero buffer is a plausible
 plaintext, not a sentinel.
 
+## Entry points the consumers reach for
+
+Coverage here was audited against what the downstream crates actually call,
+not only against what looked important from inside. Six public entry points
+turned out to be exercised in shipping code and by nothing in this suite:
+`Ciphers.AES_GCM_Key_Length`, `Ciphers.Encrypt_GCM_Length`,
+`Hybrid_PQ_Kex.Is_OpenSSH_Hybrid_PQ_Kex_Name` and `X509.Policies.Encoded_Value`
+(`ssh_lib`), and `Ciphers.Is_Active` and `Errors.Is_Success` (`versionlib`).
+
+`Check_Consumer_Entry_Points` holds each to the code that consumes its answer
+rather than to a restatement of its body: the GCM key length is checked to be
+the length `Seal_GCM` accepts and one octet short is checked to be refused, so
+it cannot be a self-consistent wrong number; the hybrid-PQ predicate must agree
+with `Kind_Of` in both directions and carry wire lengths exactly when it says
+hybrid; `Is_Success` is swept across the whole `Status` enumeration so a value
+added later cannot quietly join the success side. Teeth-checked: reporting 16
+octets for `aes256-gcm@openssh.com` and admitting `End_Of_Stream` as success
+each fail the suite.
+
 ## Randomness
 
 `Random` in `Production_Mode` delegates to `OS_Random.Fill_OS`, selected per OS

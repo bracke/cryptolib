@@ -8180,6 +8180,169 @@ procedure Tests is
    --  at what is left: a partial plaintext, half a signature, or the caller's
    --  own stale bytes would all survive a status check that a caller forgot
    --  to make.
+   --  Six public entry points that a shipping consumer calls and this suite
+   --  never did: sshlib uses AES_GCM_Key_Length, Encrypt_GCM_Length,
+   --  Is_OpenSSH_Hybrid_PQ_Kex_Name and Policies.Encoded_Value; versionlib
+   --  uses Ciphers.Is_Active and Errors.Is_Success. Each is checked against
+   --  the code that consumes its answer rather than against a restatement of
+   --  its body, so a wrong answer has to disagree with something real.
+   procedure Check_Consumer_Entry_Points is
+      package HP renames CryptoLib.Hybrid_PQ_Kex;
+      package PO renames CryptoLib.X509.Policies;
+
+      --  The GCM key length has to be the length Seal_GCM will accept: a
+      --  number that is merely self-consistent would still break the caller
+      --  sizing a key from it.
+      procedure Check_GCM_Width (Text : String; Want : Natural) is
+         Width : constant Natural :=
+           CryptoLib.Ciphers.AES_GCM_Key_Length (Text);
+         Nonce : constant Ada.Streams.Stream_Element_Array (1 .. 12) :=
+           [others => 1];
+         Plain : constant Ada.Streams.Stream_Element_Array (1 .. 8) :=
+           [others => 16#5A#];
+         Wire  : Ada.Streams.Stream_Element_Array (1 .. 24);
+      begin
+         Check (Width = Want, "AES_GCM_Key_Length names " & Text);
+         declare
+            Key : constant Ada.Streams.Stream_Element_Array
+              (1 .. Ada.Streams.Stream_Element_Offset (Width)) := [others => 3];
+            Short : constant Ada.Streams.Stream_Element_Array
+              (1 .. Ada.Streams.Stream_Element_Offset (Width) - 1) :=
+                [others => 3];
+         begin
+            Check (CryptoLib.Ciphers.Seal_GCM (Text, Key, Nonce, 0, Plain, Wire)
+                     = CryptoLib.Errors.Ok,
+                   "a key of that length is the length Seal_GCM wants");
+            Check (CryptoLib.Ciphers.Seal_GCM
+                     (Text, Short, Nonce, 0, Plain, Wire)
+                     /= CryptoLib.Errors.Ok,
+                   "one octet short is refused, so " & Text
+                   & "'s length is not merely a lower bound");
+         end;
+      end Check_GCM_Width;
+
+      --  The predicate must agree with the table it reads, in both
+      --  directions, and a hybrid name must carry lengths where a classic
+      --  one must not.
+      procedure Check_Hybrid_Name (Text : String) is
+         use type HP.Hybrid_PQ_Kind;
+         Shown  : constant String :=
+           (if Text = "" then "the empty name" else Text);
+         Hybrid : constant Boolean := HP.Is_OpenSSH_Hybrid_PQ_Kex_Name (Text);
+      begin
+         Check (Hybrid = (HP.Kind_Of (Text) /= HP.Not_Hybrid_PQ),
+                "Is_OpenSSH_Hybrid_PQ_Kex_Name agrees with Kind_Of on " & Shown);
+         Check ((HP.Client_Init_Total_Length (Text) > 0) = Hybrid,
+                "the client-init length is present exactly when hybrid: "
+                & Shown);
+      end Check_Hybrid_Name;
+   begin
+      --  The GCM key length has to be the length Seal_GCM will accept: a
+      --  number that is merely self-consistent would still break the caller
+      --  sizing a key from it.
+      Check_GCM_Width ("aes128-gcm@openssh.com", 16);
+      Check_GCM_Width ("aes256-gcm@openssh.com", 32);
+      Check (CryptoLib.Ciphers.AES_GCM_Key_Length ("aes192-gcm@openssh.com") = 0
+             and then CryptoLib.Ciphers.AES_GCM_Key_Length ("aes256-ctr") = 0
+             and then CryptoLib.Ciphers.AES_GCM_Key_Length ("") = 0,
+             "AES_GCM_Key_Length answers zero for a name it does not know");
+
+      --  The GCM length step is the identity, but it is a seam the caller
+      --  goes through every packet, so its refusals matter as much.
+      declare
+         Key    : constant Ada.Streams.Stream_Element_Array (1 .. 32) :=
+           [others => 7];
+         Nonce  : constant Ada.Streams.Stream_Element_Array (1 .. 12) :=
+           [others => 2];
+         Header : constant Ada.Streams.Stream_Element_Array (1 .. 4) :=
+           [16#00#, 16#00#, 16#01#, 16#2C#];
+         Out4   : Ada.Streams.Stream_Element_Array (1 .. 4) :=
+           [others => 16#A5#];
+         Out3   : Ada.Streams.Stream_Element_Array (1 .. 3) :=
+           [others => 16#A5#];
+         St     : CryptoLib.Errors.Status;
+      begin
+         St := CryptoLib.Ciphers.Encrypt_GCM_Length
+           ("aes256-gcm@openssh.com", Key, Nonce, 0, Header, Out4);
+         Check (St = CryptoLib.Errors.Ok and then Out4 = Header,
+                "Encrypt_GCM_Length passes the cleartext length through");
+
+         St := CryptoLib.Ciphers.Encrypt_GCM_Length
+           ("aes256-gcm@openssh.com", Key, Nonce, 0, Header, Out3);
+         Check (St /= CryptoLib.Errors.Ok,
+                "Encrypt_GCM_Length refuses an output that is not four octets");
+         Check (Out3 = [Out3'Range => 0],
+                "and zeroes it, like every other out buffer here");
+      end;
+
+      --  A context is inactive until it is keyed, and inactive again after a
+      --  Reset -- which is what versionlib asks it.
+      declare
+         Item : CryptoLib.Ciphers.Cipher_State;
+         Key  : constant Ada.Streams.Stream_Element_Array (1 .. 32) :=
+           [others => 4];
+         IV   : constant Ada.Streams.Stream_Element_Array (1 .. 16) :=
+           [others => 5];
+      begin
+         CryptoLib.Ciphers.Reset (Item);
+         Check (not CryptoLib.Ciphers.Is_Active (Item),
+                "a reset cipher context is inactive");
+         Check (CryptoLib.Ciphers.Initialize
+                  (Item, "aes256-ctr", CryptoLib.Ciphers.Client_To_Server,
+                   Key, IV) = CryptoLib.Errors.Ok,
+                "the context keys");
+         Check (CryptoLib.Ciphers.Is_Active (Item),
+                "a keyed cipher context is active");
+         CryptoLib.Ciphers.Reset (Item);
+         Check (not CryptoLib.Ciphers.Is_Active (Item),
+                "Reset makes it inactive again");
+      end;
+
+      --  Is_Success must be true for exactly one value. Written as a sweep of
+      --  the whole enumeration rather than a couple of spot checks, so a
+      --  status added later cannot quietly join the success side.
+      declare
+         Successes : Natural := 0;
+      begin
+         for St in CryptoLib.Errors.Status loop
+            if CryptoLib.Errors.Is_Success (St) then
+               Successes := Successes + 1;
+               Check (St = CryptoLib.Errors.Ok,
+                      "Is_Success is true only for Ok, not " & St'Image);
+            end if;
+         end loop;
+         Check (Successes = 1, "exactly one status counts as success");
+      end;
+
+      --  The hybrid-PQ predicate must agree with the table it reads, in both
+      --  directions, for every name the table knows and for one it does not.
+      Check_Hybrid_Name ("mlkem768x25519-sha256");
+      Check_Hybrid_Name ("mlkem768x25519-sha512");
+      Check_Hybrid_Name ("sntrup761x25519-sha512");
+      Check_Hybrid_Name ("sntrup761x25519-sha512@openssh.com");
+      Check_Hybrid_Name ("curve25519-sha256");
+      Check_Hybrid_Name ("diffie-hellman-group14-sha256");
+      Check_Hybrid_Name ("");
+
+      --  A policy OID must survive the round trip it is put through whenever
+      --  one is reported back to a caller.
+      declare
+         Encoded : constant PO.Octets := [16#2A#, 16#86#, 16#48#, 16#86#,
+                                          16#F7#, 16#0D#, 16#01#, 16#07#];
+         Value   : constant PO.Policy_Value := PO.To_Policy (Encoded);
+         Any     : constant PO.Policy_Value := PO.Any_Policy;
+      begin
+         Check (PO.Is_Present (Value), "an OID becomes a policy value");
+         Check (PO.Encoded_Value (Value) = Encoded,
+                "Encoded_Value returns the octets it was given");
+         Check (PO.Encoded_Value (Any)
+                  = PO.Octets'[16#55#, 16#1D#, 16#20#, 16#00#],
+                "anyPolicy encodes as 2.5.29.32.0");
+         Check (PO.Is_Any (Any) and then not PO.Is_Any (Value),
+                "Is_Any tells anyPolicy from an ordinary policy");
+      end;
+   end Check_Consumer_Entry_Points;
+
    procedure Check_Zero_On_Failure is
       Pattern : constant Ada.Streams.Stream_Element := 16#A5#;
 
@@ -13536,6 +13699,7 @@ begin
    Check_Buffer_Ceiling;
    Check_HKDF;
    Check_Zero_On_Failure;
+   Check_Consumer_Entry_Points;
    Check_Cipher_Names;
    Check_X25519_Shared_Secret;
    Check_Chain_Constraint_Bypasses;
