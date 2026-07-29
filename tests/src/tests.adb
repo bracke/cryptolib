@@ -8110,6 +8110,59 @@ procedure Tests is
              & "than the hash of nothing");
    end Check_SHA1_Fingerprint;
 
+   --  The packet buffer's ceiling, one byte at a time.
+   --
+   --  Append_Byte is what ssh_lib fills a buffer with when it is building
+   --  from something it read, and the ceiling is the only thing between a
+   --  peer's idea of how much to send and this crate's storage. The bound is
+   --  written down and was never exercised.
+   --
+   --  What matters as much as the refusal is that the refusal changes
+   --  nothing: a buffer that grew by one past its limit and then reported
+   --  failure would have written somewhere it should not.
+   --
+   --  Two things enforce it, which is worth knowing before someone tidies
+   --  one away. Append_Byte tests the ceiling itself, and Last is of a
+   --  subtype that stops at it, so the assignment would raise and the
+   --  handler would return a status regardless. Deleting the explicit test
+   --  changes nothing observable here -- I tried it -- so this pins the
+   --  behaviour rather than either mechanism, and a change that removed
+   --  both would fail it.
+   procedure Check_Buffer_Ceiling is
+      Item   : CryptoLib.Buffers.Packet_Buffer;
+      Status : CryptoLib.Errors.Status := CryptoLib.Errors.Ok;
+   begin
+      CryptoLib.Buffers.Clear (Item);
+      Check (CryptoLib.Buffers.Is_Empty (Item), "a cleared buffer is empty");
+
+      --  Right up to the ceiling.
+      for Count in 1 .. CryptoLib.Buffers.Max_Packet_Length loop
+         Status := CryptoLib.Buffers.Append_Byte (Item, 16#5A#);
+         exit when Status /= CryptoLib.Errors.Ok;
+      end loop;
+      Check (Status = CryptoLib.Errors.Ok,
+             "a buffer fills to its stated capacity a byte at a time");
+      Check (CryptoLib.Buffers.Length (Item)
+             = CryptoLib.Buffers.Max_Packet_Length,
+             "and holds exactly that many, got"
+             & Natural'Image (CryptoLib.Buffers.Length (Item)));
+
+      --  One past it.
+      Status := CryptoLib.Buffers.Append_Byte (Item, 16#5A#);
+      Check (Status /= CryptoLib.Errors.Ok,
+             "the byte after the last is refused rather than written");
+      Check (CryptoLib.Buffers.Length (Item)
+             = CryptoLib.Buffers.Max_Packet_Length,
+             "and the refusal leaves the buffer the length it already was");
+
+      --  Set starts over rather than appending to what was there.
+      Status := CryptoLib.Buffers.Set (Item, [1 => 16#01#, 2 => 16#02#]);
+      Check (Status = CryptoLib.Errors.Ok
+             and then CryptoLib.Buffers.Length (Item) = 2,
+             "and Set replaces the contents rather than adding to them, got"
+             & Natural'Image (CryptoLib.Buffers.Length (Item)));
+   end Check_Buffer_Ceiling;
+
    procedure Check_X509_Extensions is
       use type CryptoLib.ASN1.Errors.Decode_Status;
       use type CryptoLib.PEM.Decode_Status;
@@ -13123,6 +13176,7 @@ begin
    Check_UMAC_Negotiation_Guard;
    Check_Streaming_SHA256_SHA512;
    Check_SHA1_Fingerprint;
+   Check_Buffer_Ceiling;
    Check_Cipher_Names;
    Check_X25519_Shared_Secret;
    Check_Chain_Constraint_Bypasses;
