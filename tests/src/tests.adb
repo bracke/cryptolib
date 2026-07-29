@@ -6975,6 +6975,93 @@ procedure Tests is
              & XV.Failure_Image (Verdict (Rogue_Name).Failure));
    end Check_Chain_Constraint_Bypasses;
 
+   --  A certificate that names one algorithm twice and disagrees with
+   --  itself.
+   --
+   --  The signature algorithm appears in two places: inside the TBS, where
+   --  it is covered by the signature, and outside it, where it is not. Only
+   --  the inner one is protected, so the outer one is free for anybody to
+   --  change after the fact. RFC 5280 requires them to be the same, and a
+   --  verifier that reads the algorithm from the unprotected copy is being
+   --  told how to check a signature by whoever last touched the file.
+   --
+   --  Both certificates below carry the same edit; one applies it to the
+   --  outer copy alone and the other to both. The consistent one decodes,
+   --  which is what makes this a test of the disagreement rather than of the
+   --  edit.
+   procedure Check_Signature_Algorithm_Agreement is
+      package X509C renames CryptoLib.X509.Certificates;
+      use type CryptoLib.ASN1.Errors.Decode_Status;
+
+      Alg_Mismatched_DER : constant String :=
+        "308201853082012ba003020102021433cde67db76ddf4e1f2be6917a34aa4fb7101bb1300a06082a8648" &
+        "ce3d04030230183116301406035504030c0d416c6720436f6e667573696f6e301e170d32363037323931" &
+        "32303332315a170d3332303131393132303332315a30183116301406035504030c0d416c6720436f6e66" &
+        "7573696f6e3059301306072a8648ce3d020106082a8648ce3d03010703420004fa4d50277869e9712522" &
+        "68073b4cd40fdb5ab5a49699d13d0508e83a1ac8bd02570dec8c642cd0490632c1dcdab8e6fe0185bfa1" &
+        "4e4658c071eacbff3b750fc2a3533051301d0603551d0e04160414acf3f2269ab96aa3ba990a0c4850cf" &
+        "91ae9ef11d301f0603551d23041830168014acf3f2269ab96aa3ba990a0c4850cf91ae9ef11d300f0603" &
+        "551d130101ff040530030101ff300a06082a8648ce3d0403040348003045022022f4576a4b39c5dea9b8" &
+        "9aad54bc71d84016bfa1e8a17cb25e122546d421f93d022100f909605c27251ae25103d0f741b8dc4c3a" &
+        "d4b2a4a779f21d3e63f580a5a41d41";
+
+      Alg_Agreed_DER : constant String :=
+        "308201853082012ba003020102021433cde67db76ddf4e1f2be6917a34aa4fb7101bb1300a06082a8648" &
+        "ce3d04030430183116301406035504030c0d416c6720436f6e667573696f6e301e170d32363037323931" &
+        "32303332315a170d3332303131393132303332315a30183116301406035504030c0d416c6720436f6e66" &
+        "7573696f6e3059301306072a8648ce3d020106082a8648ce3d03010703420004fa4d50277869e9712522" &
+        "68073b4cd40fdb5ab5a49699d13d0508e83a1ac8bd02570dec8c642cd0490632c1dcdab8e6fe0185bfa1" &
+        "4e4658c071eacbff3b750fc2a3533051301d0603551d0e04160414acf3f2269ab96aa3ba990a0c4850cf" &
+        "91ae9ef11d301f0603551d23041830168014acf3f2269ab96aa3ba990a0c4850cf91ae9ef11d300f0603" &
+        "551d130101ff040530030101ff300a06082a8648ce3d0403040348003045022022f4576a4b39c5dea9b8" &
+        "9aad54bc71d84016bfa1e8a17cb25e122546d421f93d022100f909605c27251ae25103d0f741b8dc4c3a" &
+        "d4b2a4a779f21d3e63f580a5a41d41";
+
+      function From_Hex
+        (Text : String) return Ada.Streams.Stream_Element_Array
+      is
+         Result : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (Text'Length / 2));
+         function Nibble (C : Character) return Natural
+         is (case C is
+                when '0' .. '9' => Character'Pos (C) - Character'Pos ('0'),
+                when others     => Character'Pos (C) - Character'Pos ('a') + 10);
+      begin
+         for I in Result'Range loop
+            Result (I) :=
+              Ada.Streams.Stream_Element
+                (Nibble (Text (Text'First + 2 * Natural (I - 1))) * 16
+                 + Nibble (Text (Text'First + 2 * Natural (I - 1) + 1)));
+         end loop;
+         return Result;
+      end From_Hex;
+
+      Mismatched_Status : CryptoLib.ASN1.Errors.Decode_Status;
+      Agreed_Status     : CryptoLib.ASN1.Errors.Decode_Status;
+
+      Mismatched : constant X509C.Certificate :=
+        X509C.Decode_DER (From_Hex (Alg_Mismatched_DER),
+                          CryptoLib.ASN1.Default_Limits, Mismatched_Status);
+      Agreed     : constant X509C.Certificate :=
+        X509C.Decode_DER (From_Hex (Alg_Agreed_DER),
+                          CryptoLib.ASN1.Default_Limits, Agreed_Status);
+   begin
+      Check (Mismatched_Status /= CryptoLib.ASN1.Errors.Ok,
+             "a certificate whose outer signature algorithm differs from the "
+             & "one inside the TBS does not decode, got "
+             & CryptoLib.ASN1.Errors.Status_Image (Mismatched_Status));
+      Check (not X509C.Is_Present (Mismatched),
+             "and nothing is handed back to be asked questions about");
+
+      --  The same substitution made in both places, so the certificate
+      --  disagrees with nothing. It decodes; only the disagreement was
+      --  fatal.
+      Check (Agreed_Status = CryptoLib.ASN1.Errors.Ok
+             and then X509C.Is_Present (Agreed),
+             "while the same algorithm named consistently decodes, got "
+             & CryptoLib.ASN1.Errors.Status_Image (Agreed_Status));
+   end Check_Signature_Algorithm_Agreement;
+
    procedure Check_X509_Extensions is
       use type CryptoLib.ASN1.Errors.Decode_Status;
       use type CryptoLib.PEM.Decode_Status;
@@ -11908,6 +11995,7 @@ begin
    Check_DH_Group1;
    Check_X25519_Shared_Secret;
    Check_Chain_Constraint_Bypasses;
+   Check_Signature_Algorithm_Agreement;
    Check_Random_Fails_Closed;
    Check_Off_Curve_Key;
    Check_Ed25519_Encoding;

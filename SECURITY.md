@@ -201,6 +201,15 @@ every status reading `Ok` while every key it produces is predictable.
   is wrong with the pair, and saying otherwise would be a claim this cannot
   support. That test used Ed448 for both until Ed448 became something this
   crate decides, which is the right way for such an example to go stale.
+- **A certificate must not disagree with itself about how it was signed.**
+  The signature algorithm appears twice: inside the TBS, covered by the
+  signature, and outside it, where it is not. Only the inner copy is
+  protected, so the outer one can be changed by anyone holding the file, and
+  a verifier reading the algorithm from there is being told how to check a
+  signature by whoever touched it last. RFC 5280 requires the two to agree
+  and this refuses the certificate at decode when they do not -- pinned
+  against a pair carrying the same substitution, applied to the outer copy
+  alone and to both, where only the disagreeing one is refused.
 - **The oldest chain questions are pinned, not assumed.** How deep a CA may
   delegate (`pathLenConstraint`), whether an issuer is a CA at all, and
   whether it is permitted to sign certificates are each asserted against a
