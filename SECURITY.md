@@ -67,11 +67,25 @@ branches, memory indexing, or variable-latency arithmetic:
 ### Caveats (read these)
 
 - Constant-timeness is enforced at the **Ada source level** (branchless masks),
-  not by `pragma Suppress` or a verification tool. It was spot-checked with
-  `objdump` (e.g. `CT_Select` compiles to zero conditional jumps; the jumps in
-  `Mont_Mul`/`Pack`/`Unpack` are loop counters and input-independent GNAT range
-  checks). A compiler upgrade could in principle reintroduce a branch; there is
-  **no automated CT regression gate**.
+  not by `pragma Suppress` or a verification tool. `tools/bin/check_constant_time`
+  now runs in the release preflight and checks two things against the built
+  library. That **no AES lookup table is present** -- forward S-box, inverse
+  S-box, or T-table -- is decidable and absolute. The **conditional-jump counts**
+  of the routines that must not branch on secrets are held to a recorded
+  baseline.
+- That baseline corrects a claim this document used to make. `CT_Select` does
+  **not** compile to zero conditional jumps: it has one, its loop bound against
+  a fixed count, and `Constant_Time.Equal` has twelve, on array lengths, loop
+  indices and the answer it returns. Those are branches on public values, which
+  is what makes them harmless -- but the earlier wording said something that was
+  not true, and a jump count cannot by itself tell a branch on a length from a
+  branch on a key.
+- So the gate catches regressions, not leaks. A branchless mask rewritten as an
+  `if` adds jumps inside a loop body and fails it; this was verified by making
+  that edit. A data-dependent memory access leaves no branch behind and would
+  pass. Constant-timeness here is still a source-level discipline, and the
+  primitives' scalar ladders and field arithmetic are **not** covered by the
+  budgets -- only the four routines whose entire job is to be branchless.
 - AES is **bit-sliced, not AES-NI** — it eliminates the cache-timing channel but
   is slower than hardware AES (the deliberate correctness/side-channel tradeoff).
 - `Constant_Time_Proof` is a **declarative manifest, not an automated proof**.

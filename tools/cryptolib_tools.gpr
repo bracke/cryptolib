@@ -14,7 +14,8 @@ project Cryptolib_Tools is
      ("check_release_ready.adb",
       "check_alire_manifest.adb",
       "check_test_suite.adb",
-      "check_gnatdoc_tags.adb");
+      "check_gnatdoc_tags.adb",
+      "check_constant_time.adb");
 
    package Compiler is
       --  -gnatyM120 is not decoration: Ada_Compiler_Switches brings -gnatym,

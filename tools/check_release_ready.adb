@@ -52,8 +52,22 @@ begin
    end if;
 
    Require_Alire_GNAT_15;
-   Step ("build cryptolib", "alr build");
-   Step ("build test suite", "cd tests && alr build");
+
+   --  Forced, both of them. Everything after this inspects what the build
+   --  produced -- the test binary's behaviour, and the library's generated
+   --  code -- so a preflight that accepted whatever an incremental build
+   --  happened to leave could pass on an artefact that no longer matches the
+   --  source. That is not hypothetical: the constant-time check was seen
+   --  reporting jump counts from a half-rebuilt library.
+   Step ("build cryptolib", "alr build -- -f");
+
+   --  Before the test suite is built, which rebuilds the library under its
+   --  own profile: that one carries GNAT's runtime checks and so more
+   --  branches, and it is not what ships. The constant-time budgets describe
+   --  the library this crate builds, so they have to be measured on it.
+   Step ("check constant-time properties", "tools/bin/check_constant_time");
+
+   Step ("build test suite", "cd tests && alr build -- -f");
    Step ("run test suite", "./tests/bin/tests");
    Step ("check alire manifest", "tools/bin/check_alire_manifest");
    Step ("check test suite", "tools/bin/check_test_suite");
