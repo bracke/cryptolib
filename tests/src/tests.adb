@@ -5961,8 +5961,22 @@ procedure Tests is
                       CryptoLib.ASN1.Default_Limits, Status));
       end Expiry;
 
+      Forever_CA_PEM : constant String :=
+        "-----BEGIN CERTIFICATE-----" & ASCII.LF &
+        "MIIBEDCBw6ADAgECAhRIsMOpcUPLN2HirLi3TmMn5IgvSjAFBgMrZXAwFTETMBEG" & ASCII.LF &
+        "A1UEAwwKRm9yZXZlciBDQTAgFw0yMDAxMDEwMDAwMDBaGA85OTk5MTIzMTIzNTk1" & ASCII.LF &
+        "OVowFTETMBEGA1UEAwwKRm9yZXZlciBDQTAqMAUGAytlcAMhAILRKIiOp48mey16" & ASCII.LF &
+        "LkTZ4/nE9oFe5nVvUUYXK+N7HEtIoyMwITAPBgNVHRMBAf8EBTADAQH/MA4GA1Ud" & ASCII.LF &
+        "DwEB/wQEAwIBBjAFBgMrZXADQQAUFqdL6oObX9i0AkQhVS9lCf/jx/YB9bCGIJfc" & ASCII.LF &
+        "30XoMCg4VUVbDPzhaGXvxJrXZIzBLxD20x8pGn/PRfX0vZMD" & ASCII.LF &
+        "-----END CERTIFICATE-----";
+      Forever_Key_PEM : constant String :=
+        "-----BEGIN PRIVATE KEY-----" & ASCII.LF &
+        "MC4CAQAwBQYDK2VwBCIEILZ+QZgzg6qYQGeXmkxYe16XLRdxIClgNw43MsJiuzHW" & ASCII.LF &
+        "-----END PRIVATE KEY-----";
       Short_CA, Short_Key, Leaf, Leaf_Key : Unbounded_String;
       Long_CA, Long_Key, Long_Leaf, Long_Leaf_Key : Unbounded_String;
+      Ever_Leaf, Ever_Key : Unbounded_String;
    begin
       --  A CA with two days left, asked for a leaf good for over a year.
       Check (CryptoLib.Certificates.Create_Local_CA
@@ -5997,6 +6011,38 @@ procedure Tests is
                     Expiry (To_String (Long_Leaf))),
              "whose window is its own and shorter than the CA's, not "
              & "clamped to it");
+
+      --  A CA that says it never expires, which RFC 5280 spells 99991231.
+      --  The ceiling is worked out as a clock time and no clock here reaches
+      --  the year 9999, so this is the case where the bound cannot be
+      --  computed -- and the right answer is to leave the certificate alone,
+      --  because nothing issued today can run past a CA that never ends.
+      --  Worth pinning because it arrives through an exception handler
+      --  rather than a test on the year, and because the only other way in
+      --  was a date like the 31st of February, which no longer parses.
+      Check (CryptoLib.Certificates.Issue_Server_Certificate
+               (Forever_CA_PEM, Forever_Key_PEM, "under.forever",
+                [1 => To_Unbounded_String ("under.forever")],
+                Ever_Leaf, Ever_Key, 397)
+             = CryptoLib.Certificates.Ok,
+             "a CA that never expires still issues");
+      Check (Expiry (To_String (Ever_Leaf)).Year < 9999,
+             "and the certificate gets a window of its own rather than the "
+             & "CA's, got"
+             & Natural'Image (Expiry (To_String (Ever_Leaf)).Year));
+
+      --  The window it asked for, to the day: the same 397 days as the leaf
+      --  issued above under an ordinary CA. Checking only that it is short
+      --  of 9999 would pass just as well if the unreadable expiry had been
+      --  read as "expires now", which is the other way this can go wrong.
+      Check (Expiry (To_String (Ever_Leaf)).Year
+             = Expiry (To_String (Long_Leaf)).Year
+             and then Expiry (To_String (Ever_Leaf)).Month
+                      = Expiry (To_String (Long_Leaf)).Month
+             and then Expiry (To_String (Ever_Leaf)).Day
+                      = Expiry (To_String (Long_Leaf)).Day,
+             "and it is the same window a leaf gets under an ordinary CA, "
+             & "not one cut back to the moment of issue");
    end Check_Validity_Not_Past_Issuer;
 
    --  A date that does not exist is not a time.
