@@ -232,7 +232,11 @@ every status reading `Ok` while every key it produces is predictable.
   may be wrong, so a path it finds is a proposal that must still go through
   `Validate_Path`. The search verifies signatures as it goes rather than
   trusting name matches, which is what makes cross-signed roots resolve, and
-  it is bounded by depth and by a link budget. Trust is never inferred -- a
+  it applies policy processing to a completed path for the same reason -- two
+  certificates can share a subject name *and* a key and grant different
+  policies, which is what cross-signing produces, so stopping at the first
+  anchor reached proposes a path the validator then refuses while a working
+  one sits unexamined. It is bounded by depth and by a link budget. Trust is never inferred -- a
   self-signed certificate is not an anchor unless the caller says so.
 - **Revocation is available but not wired into validation.** `X509.CRLs`
   decodes a CRL, verifies that its issuer signed it, and answers whether a

@@ -11,6 +11,8 @@ package body CryptoLib.X509.Path_Building is
    package X509C renames CryptoLib.X509.Certificates;
    package XS renames CryptoLib.X509.Signatures;
 
+   package PP renames CryptoLib.X509.Policies;
+
    function Same_Name (Left : Octets; Right : Octets) return Boolean is
    begin
       if Left'Length /= Right'Length or else Left'Length = 0 then
@@ -28,9 +30,11 @@ package body CryptoLib.X509.Path_Building is
    end Same_Name;
 
    function Build_Path
-     (Leaf   : Certificate;
-      Source : Candidate_Source'Class;
-      Limits : Search_Limits := Default_Limits) return Build_Result
+     (Leaf     : Certificate;
+      Source   : Candidate_Source'Class;
+      Limits   : Search_Limits := Default_Limits;
+      Options  : PP.Policy_Options := PP.Default_Options;
+      Accepted : PP.Accepted_Policies := PP.Accept_Any) return Build_Result
    is
       Total   : constant Natural := Count (Source);
       Ceiling : constant Natural :=
@@ -39,6 +43,42 @@ package body CryptoLib.X509.Path_Building is
       Result : Build_Result;
       Chosen : Path_Indices := [others => 1];
       Used   : array (1 .. Maximum_Path) of Natural := [others => 0];
+
+      --  Would this completed path survive policy processing?
+      --
+      --  Run in the order section 6.1 counts in, which is the opposite of
+      --  the order the path is built: the certificate the anchor signed
+      --  first, the leaf last. The anchor itself is not processed -- its
+      --  extensions are not inputs to 6.1, only its name and key are.
+      function Policies_Hold (Depth : Natural) return Boolean is
+         Engine : PP.Engine (Path_Length => Depth + 1);
+         Ok     : Boolean;
+
+         function Self_Issued (Item : Certificate) return Boolean
+         is (Same_Name
+               (X509C.Subject_Bytes (Item), X509C.Issuer_Bytes (Item)));
+      begin
+         PP.Start (Engine, Options);
+
+         for K in reverse 1 .. Depth loop
+            declare
+               Item : constant Certificate := Candidate (Source, Chosen (K));
+            begin
+               PP.Step (Engine, Item, Self_Issued (Item), Ok);
+               if not Ok then
+                  return False;
+               end if;
+            end;
+         end loop;
+
+         PP.Step (Engine, Leaf, Self_Issued (Leaf), Ok);
+         if not Ok then
+            return False;
+         end if;
+
+         return PP.Finish
+                  (Engine, Accepted.Values (1 .. Accepted.Count)).Acceptable;
+      end Policies_Hold;
 
       --  Is this candidate already somewhere in the path being built?
       --
@@ -94,21 +134,32 @@ package body CryptoLib.X509.Path_Building is
                         Used (Depth + 1) := I;
                         Chosen (Depth + 1) := I;
 
-                        if Is_Trust_Anchor (Source, Issuer) then
+                        if Is_Trust_Anchor (Source, Issuer)
+                          and then Policies_Hold (Depth)
+                        then
                            Result.Found := True;
                            Result.Length := Depth + 1;
                            Result.Indices := Chosen;
                            return True;
                         end if;
 
-                        if Extend (Issuer, Depth + 1) then
-                           return True;
-                        end if;
+                        --  An anchor whose path cannot carry the policies is
+                        --  not the end of the search. Falling through here
+                        --  rather than returning is what lets a second
+                        --  cross-signed root be tried.
+                        if Is_Trust_Anchor (Source, Issuer) then
+                           Used (Depth + 1) := 0;
+                        else
 
-                        --  That branch led nowhere. Put the slot back and go
-                        --  on to the next candidate rather than concluding
-                        --  there is no path.
-                        Used (Depth + 1) := 0;
+                           if Extend (Issuer, Depth + 1) then
+                              return True;
+                           end if;
+
+                           --  That branch led nowhere. Put the slot back and
+                           --  go on to the next candidate rather than
+                           --  concluding there is no path.
+                           Used (Depth + 1) := 0;
+                        end if;
                      end if;
                   end if;
                end;

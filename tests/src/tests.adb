@@ -3721,6 +3721,189 @@ procedure Tests is
              "neither was truncated");
    end Check_Policy_Qualifiers;
 
+   --  The search skips a path that cannot carry the policies.
+   --
+   --  Path building already verifies signatures as it goes rather than
+   --  trusting a name match, because two certificates can share a subject
+   --  name and not a key. Policies are the same shape of problem one level
+   --  up: two certificates can share a subject name AND a key, and grant
+   --  different policies, which is what cross-signing produces. Taking the
+   --  first anchor reached proposes a path the validator then refuses, while
+   --  a path that works sits unexamined in the pool.
+   --
+   --  Both intermediates here have the same subject and the same key, so
+   --  both verify the leaf and neither can be told from the other by
+   --  signature. They differ only in the policy they grant.
+   procedure Check_Policy_Aware_Path_Building is
+      package X509C renames CryptoLib.X509.Certificates;
+      package PB renames CryptoLib.X509.Path_Building;
+      package XV renames CryptoLib.X509.Validation;
+
+      PB_Leaf_DER : constant String :=
+        "308201c93082014fa003020102020161300a06082a8648ce3d040302301e311c301a06035504030c1373686172" &
+        "65642d696e7465726d656469617465301e170d3236303732393037353430385a170d3237303532353037353430" &
+        "385a30173115301306035504030c0c686f73742e6578616d706c653076301006072a8648ce3d020106052b8104" &
+        "002203620004f87d3963719d77f4c81524657c92199180906b54fc56ff2c848be3b67a0481de7db8684546488b" &
+        "03763c375c507a6cfa64daa5f9f515b82bc6547f955e03f5956d009ea28554beb05e2f85417f91b96fd1b7566f" &
+        "8f92c02e82ac82f0e20a64c0a3683066300c0603551d130101ff0402300030160603551d20040f300d300b0609" &
+        "2b06010401868d1f01301d0603551d0e041604143e80a30384dc81214a81498674ba57783db8ef85301f060355" &
+        "1d2304183016801467499f0fa03b44804b13d5a5c720a449cb6491b4300a06082a8648ce3d0403020368003065" &
+        "0230509701daa9f5a45e57494fdecd832333b175af38018267496392437ef78c0f31f8c43a76ab243e0fb3de3b" &
+        "bd370e61d5023100f07cb804905a423b25c50694034ff8a84f5d750b29c1b9fcbae179ca179c4ed293563050e2" &
+        "bf54d6205769ffcae0e852";
+
+      PB_Inter_Bad_DER : constant String :=
+        "308201e93082016fa003020102020152300a06082a8648ce3d0403023011310f300d06035504030c06726f6f74" &
+        "2d62301e170d3236303732393037353430385a170d3237303532353037353430385a301e311c301a0603550403" &
+        "0c137368617265642d696e7465726d6564696174653076301006072a8648ce3d020106052b8104002203620004" &
+        "56750ad1e24e2bbfd349d09ec008ec4506edadee48ed1af3575025622d583de813ad1ef329f4a374f7a1a8c4ac" &
+        "ac11604e414a6f51da9fb7ecf34adc160806ca4e6670b08309a3e5d08eebd2256d4a3afe7cfbb818b315a0b0ef" &
+        "f0afe4dcd8a7a3818d30818a300f0603551d130101ff040530030101ff300e0603551d0f0101ff040403020106" &
+        "30160603551d20040f300d300b06092b0601040184df5109300f0603551d240101ff04053003800100301d0603" &
+        "551d0e0416041467499f0fa03b44804b13d5a5c720a449cb6491b4301f0603551d230418301680145aeb3a2a00" &
+        "26debc836959f1a6b2fa00df56e19c300a06082a8648ce3d040302036800306502306714225aba6cdff783b990" &
+        "e8c6369c2d7ca531628b2ff65e8ce1246a3379c2aedc6df3fc086038802c67317edd0b28c8023100df0758270b" &
+        "6b633c5e27c27acd6bf5e0ee4a5245ddcb9e609e5011a7a9a1836cf2744b8404f5b48b9dd0140470d48243";
+
+      PB_Inter_Good_DER : constant String :=
+        "308201e83082016fa003020102020151300a06082a8648ce3d0403023011310f300d06035504030c06726f6f74" &
+        "2d61301e170d3236303732393037353430385a170d3237303532353037353430385a301e311c301a0603550403" &
+        "0c137368617265642d696e7465726d6564696174653076301006072a8648ce3d020106052b8104002203620004" &
+        "56750ad1e24e2bbfd349d09ec008ec4506edadee48ed1af3575025622d583de813ad1ef329f4a374f7a1a8c4ac" &
+        "ac11604e414a6f51da9fb7ecf34adc160806ca4e6670b08309a3e5d08eebd2256d4a3afe7cfbb818b315a0b0ef" &
+        "f0afe4dcd8a7a3818d30818a300f0603551d130101ff040530030101ff300e0603551d0f0101ff040403020106" &
+        "30160603551d20040f300d300b06092b06010401868d1f01300f0603551d240101ff04053003800100301d0603" &
+        "551d0e0416041467499f0fa03b44804b13d5a5c720a449cb6491b4301f0603551d2304183016801473a50636f7" &
+        "dc3b6b3e4c411184e7b5a13b9c100d300a06082a8648ce3d0403020367003064023030b37a1d2b20a9e38507cd" &
+        "9217deb780c5a192de41b193b1ea4a798da13329226cc396a2908b85aaddf8cb728c1eaae00230525c5b69e632" &
+        "1645a8b37d0e348bad381c8d3671975067958d5bf935347aca5bb8633e16ae4d607eb4934a15d0158514";
+
+      PB_Root_A_DER : constant String :=
+        "308201bc30820141a003020102021421ea63a70614babf12043ff3fd4bdc41048c4cc1300a06082a8648ce3d04" &
+        "03023011310f300d06035504030c06726f6f742d61301e170d3236303732393037353430385a170d3237303532" &
+        "353037353430385a3011310f300d06035504030c06726f6f742d613076301006072a8648ce3d020106052b8104" &
+        "0022036200045876f37066dba6cc53105ef20479a3c2d895a138f4f807f817e20a836058af4243a7dd42d6898b" &
+        "a8753fce34d928f1c6b782c3af94f16020564ada84880c31087f34d527242c8bba1c2342666e6a95fc9ffb610c" &
+        "b660ecf8438057489fd7e50fa35a3058300f0603551d130101ff040530030101ff300e0603551d0f0101ff0404" &
+        "0302010630160603551d20040f300d300b06092b06010401868d1f01301d0603551d0e0416041473a50636f7dc" &
+        "3b6b3e4c411184e7b5a13b9c100d300a06082a8648ce3d0403020369003066023100a4f9d741fe62998fa48577" &
+        "2c25d75d47c81781fce06439937676dcef371917871aa705f6d74d20ac782f1f1211e9444a023100c7c4830f99" &
+        "df1d17e663ac7c62b7f5c145d5f1e5320dfe54161bd6b5b453efbbaa3201025c068621045d37f35486a94d";
+
+      PB_Root_B_DER : constant String :=
+        "308201bc30820141a0030201020214528b48a4bc34c3d22e407d9102994b89fe991205300a06082a8648ce3d04" &
+        "03023011310f300d06035504030c06726f6f742d62301e170d3236303732393037353430385a170d3237303532" &
+        "353037353430385a3011310f300d06035504030c06726f6f742d623076301006072a8648ce3d020106052b8104" &
+        "002203620004aba3973bbdd01cf0db3f15e268007c7793948acf49742f641407bd1fe91e4bb7fc0cd00d7504fd" &
+        "767169e6484f549e1cb05d61bbbe1652211f04732e488e1c74f82c25593a9fb2eb341c5c2b04e020d64178179b" &
+        "173900ce76fe679e946247d4a35a3058300f0603551d130101ff040530030101ff300e0603551d0f0101ff0404" &
+        "0302010630160603551d20040f300d300b06092b06010401868d1f01301d0603551d0e041604145aeb3a2a0026" &
+        "debc836959f1a6b2fa00df56e19c300a06082a8648ce3d0403020369003066023100b525ff73e032612f337e21" &
+        "ccb7a41434d7705f4f427ce849aaf177d5eb36d0cc5eb2a51b0ced490256eb3d7799807a4802310089ad6f07e8" &
+        "1ac21b9bd7ca6e4368609b7cc42bcc1e81092fb67f90603386bfee276e0c30851485358de5c76575e0d6f2";
+
+      function From_Hex
+        (Text : String) return Ada.Streams.Stream_Element_Array
+      is
+         Result : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (Text'Length / 2));
+         function Nibble (C : Character) return Natural
+         is (case C is
+                when '0' .. '9' => Character'Pos (C) - Character'Pos ('0'),
+                when others     => Character'Pos (C) - Character'Pos ('a') + 10);
+      begin
+         for I in Result'Range loop
+            Result (I) :=
+              Ada.Streams.Stream_Element
+                (Nibble (Text (Text'First + 2 * Natural (I - 1))) * 16
+                 + Nibble (Text (Text'First + 2 * Natural (I - 1) + 1)));
+         end loop;
+         return Result;
+      end From_Hex;
+
+      Status : CryptoLib.ASN1.Errors.Decode_Status;
+
+      function Decoded (Hex : String) return X509C.Certificate
+      is (X509C.Decode_DER
+            (From_Hex (Hex), CryptoLib.ASN1.Default_Limits, Status));
+
+      --  The one that cannot carry the policy comes first, so taking the
+      --  first path found is the wrong answer.
+      type Pool is limited new PB.Candidate_Source with null record;
+
+      overriding function Count (Source : Pool) return Natural is (4);
+
+      overriding function Candidate
+        (Source : Pool; Index : Positive) return X509C.Certificate
+      is (case Index is
+             when 1      => Decoded (PB_Inter_Bad_DER),
+             when 2      => Decoded (PB_Inter_Good_DER),
+             when 3      => Decoded (PB_Root_A_DER),
+             when others => Decoded (PB_Root_B_DER));
+
+      overriding function Is_Trust_Anchor
+        (Source : Pool; Item : X509C.Certificate) return Boolean
+      is (X509C.Subject_Bytes (Item)
+          = X509C.Subject_Bytes (Decoded (PB_Root_A_DER))
+          or else X509C.Subject_Bytes (Item)
+                  = X509C.Subject_Bytes (Decoded (PB_Root_B_DER)));
+
+      Search : constant PB.Build_Result :=
+        PB.Build_Path (Decoded (PB_Leaf_DER), Pool'(null record));
+   begin
+      --  The premise: both intermediates really are indistinguishable by
+      --  key, so the search cannot be picking between them on signatures.
+      Check (X509C.Public_Key (Decoded (PB_Inter_Bad_DER))
+             = X509C.Public_Key (Decoded (PB_Inter_Good_DER)),
+             "fixture: the two intermediates share a key");
+      Check (X509C.Subject_Bytes (Decoded (PB_Inter_Bad_DER))
+             = X509C.Subject_Bytes (Decoded (PB_Inter_Good_DER)),
+             "fixture: and a subject name");
+
+      Check (Search.Found, "a path is found");
+      Check (Search.Length = 2,
+             "of the leaf, an intermediate and an anchor, got"
+             & Natural'Image (Search.Length));
+
+      --  The point: not the first one reached.
+      Check (Search.Indices (1) = 2,
+             "and it goes through the intermediate that grants the policy "
+             & "the leaf asserts, not the one listed first, got"
+             & Natural'Image (Search.Indices (1)));
+
+      --  What it proposed has to survive the validator, which is the only
+      --  thing entitled to conclude anything.
+      declare
+         type Found_Path is limited new XV.Path_Source with null record;
+
+         overriding function Length (Source : Found_Path) return Positive
+         is (3);
+
+         overriding function Certificate_At
+           (Source : Found_Path; Index : Positive) return X509C.Certificate
+         is (case Index is
+                when 1      => Decoded (PB_Leaf_DER),
+                when 2      => Decoded (PB_Inter_Good_DER),
+                when others => Decoded (PB_Root_A_DER));
+
+         overriding function Is_Trust_Anchor
+           (Source : Found_Path; Item : X509C.Certificate) return Boolean
+         is (X509C.Subject_Bytes (Item)
+             = X509C.Subject_Bytes (Decoded (PB_Root_A_DER)));
+
+         At_Time : constant CryptoLib.X509.Certificate_Time :=
+           (Year => 2026, Month => 9, Day => 1,
+            Hour => 12, Minute => 0, Second => 0);
+
+         Verdict : constant XV.Validation_Result :=
+           XV.Validate_Path (Found_Path'(null record), At_Time);
+      begin
+         Check (Verdict.Valid,
+                "and the path it proposes validates: "
+                & XV.Failure_Image (Verdict.Failure));
+      end;
+   end Check_Policy_Aware_Path_Building;
+
    procedure Check_X509_Extensions is
       use type CryptoLib.ASN1.Errors.Decode_Status;
       use type CryptoLib.PEM.Decode_Status;
@@ -8571,6 +8754,7 @@ begin
    Check_X509_Extensions;
    Check_Policy_Processing;
    Check_Policy_Qualifiers;
+   Check_Policy_Aware_Path_Building;
    Check_Random_Fails_Closed;
    Check_Off_Curve_Key;
    Check_Ed25519_Encoding;

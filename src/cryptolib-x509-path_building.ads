@@ -1,4 +1,5 @@
 with CryptoLib.X509.Certificates;
+with CryptoLib.X509.Policies;
 
 --  @summary Finding a path from a certificate to a trust anchor.
 --
@@ -94,13 +95,30 @@ package CryptoLib.X509.Path_Building is
    --  link for names and signatures, and it has NOT been checked for validity
    --  windows, basic constraints, key usage, or critical extensions. Hand it
    --  to CryptoLib.X509.Validation before believing it.
+   --  Policies are checked during the search, for the same reason signatures
+   --  are: a path that cannot satisfy them is not a path worth proposing,
+   --  and stopping at the first one found would miss one that works. A pool
+   --  holding two cross-signed roots, one of which grants the policy the
+   --  chain needs, is the case -- the same shape as the cross-signing that
+   --  makes signature checking necessary here.
+   --
+   --  With the defaults this only rejects a path some certificate in it
+   --  demanded an explicit policy for and nothing supplied, which is a path
+   --  Validate_Path would refuse anyway. Naming policies in Accepted makes
+   --  the search find one that establishes them.
    --  @param Leaf the certificate to build up from
    --  @param Source the certificates available and the trust to reach
    --  @param Limits what the caller will spend on the search
+   --  @param Options RFC 5280 section 6.1's three initial inputs
+   --  @param Accepted which policies the caller will accept, empty for any
    --  @return the path found, or a result saying none was
    function Build_Path
-     (Leaf   : Certificate;
-      Source : Candidate_Source'Class;
-      Limits : Search_Limits := Default_Limits) return Build_Result;
+     (Leaf     : Certificate;
+      Source   : Candidate_Source'Class;
+      Limits   : Search_Limits := Default_Limits;
+      Options  : CryptoLib.X509.Policies.Policy_Options :=
+        CryptoLib.X509.Policies.Default_Options;
+      Accepted : CryptoLib.X509.Policies.Accepted_Policies :=
+        CryptoLib.X509.Policies.Accept_Any) return Build_Result;
 
 end CryptoLib.X509.Path_Building;
