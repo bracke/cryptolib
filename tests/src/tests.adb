@@ -8173,6 +8173,163 @@ procedure Tests is
    --  specification treats as meaningful rather than as an error. The
    --  SHA-384 and SHA-512 ones were produced by the same reference and
    --  agreed with pyca.
+   --  Every out buffer in the cipher, AEAD, ECDSA and KDF entry points is
+   --  documented as zero when the status is not Ok. Nothing checked that, so
+   --  it could have decayed into a comment. Each case here pre-fills the
+   --  buffer with a pattern that is not zero, forces the failure, and looks
+   --  at what is left: a partial plaintext, half a signature, or the caller's
+   --  own stale bytes would all survive a status check that a caller forgot
+   --  to make.
+   procedure Check_Zero_On_Failure is
+      Pattern : constant Ada.Streams.Stream_Element := 16#A5#;
+
+      function All_Zero (Item : Ada.Streams.Stream_Element_Array) return Boolean is
+      begin
+         for B of Item loop
+            if B /= 0 then
+               return False;
+            end if;
+         end loop;
+         return True;
+      end All_Zero;
+   begin
+      --  AES-GCM, SSH framing: a flipped tag bit must leave nothing behind.
+      declare
+         Key    : constant Ada.Streams.Stream_Element_Array (1 .. 32) := [others => 7];
+         Nonce  : constant Ada.Streams.Stream_Element_Array (1 .. 12) := [others => 3];
+         Plain  : constant Ada.Streams.Stream_Element_Array (1 .. 20) := [others => 16#5C#];
+         Sealed : Ada.Streams.Stream_Element_Array (1 .. 36) := [others => 0];
+         Out_Buf : Ada.Streams.Stream_Element_Array (1 .. 20) := [others => Pattern];
+         Result : CryptoLib.Errors.Status;
+      begin
+         Result := CryptoLib.Ciphers.Seal_GCM
+           ("aes256-gcm@openssh.com", Key, Nonce, 0, Plain, Sealed);
+         Check (Result = CryptoLib.Errors.Ok, "Seal_GCM seals for the zeroing test");
+         Sealed (Sealed'Last) := Sealed (Sealed'Last) xor 1;
+         Result := CryptoLib.Ciphers.Open_GCM
+           ("aes256-gcm@openssh.com", Key, Nonce, 0, Sealed, Out_Buf);
+         Check (Result /= CryptoLib.Errors.Ok, "Open_GCM rejects a flipped tag");
+         Check (All_Zero (Out_Buf), "Open_GCM zeroes its output on a bad tag");
+      end;
+
+      --  AES-GCM, general purpose.
+      declare
+         Key    : constant Ada.Streams.Stream_Element_Array (1 .. 32) := [others => 9];
+         Nonce  : constant Ada.Streams.Stream_Element_Array (1 .. 12) := [others => 4];
+         Aad    : constant Ada.Streams.Stream_Element_Array (1 .. 5)  := [others => 1];
+         Plain  : constant Ada.Streams.Stream_Element_Array (1 .. 12) := [others => 16#3B#];
+         Sealed : Ada.Streams.Stream_Element_Array (1 .. 28) := [others => 0];
+         Out_Buf : Ada.Streams.Stream_Element_Array (1 .. 12) := [others => Pattern];
+         Result : CryptoLib.Errors.Status;
+      begin
+         Result := CryptoLib.Ciphers.Seal_AEAD
+           ("aes256-gcm@openssh.com", Key, Nonce, Aad, Plain, Sealed);
+         Check (Result = CryptoLib.Errors.Ok, "Seal_AEAD seals for the zeroing test");
+         Sealed (Sealed'First) := Sealed (Sealed'First) xor 16#80#;
+         Result := CryptoLib.Ciphers.Open_AEAD
+           ("aes256-gcm@openssh.com", Key, Nonce, Aad, Sealed, Out_Buf);
+         Check (Result /= CryptoLib.Errors.Ok, "Open_AEAD rejects tampered ciphertext");
+         Check (All_Zero (Out_Buf), "Open_AEAD zeroes its output on a bad tag");
+      end;
+
+      --  ChaCha20-Poly1305.
+      declare
+         Key    : constant Ada.Streams.Stream_Element_Array (1 .. 64) := [others => 16#2A#];
+         Plain  : constant Ada.Streams.Stream_Element_Array (1 .. 16) := [others => 16#77#];
+         Sealed : Ada.Streams.Stream_Element_Array (1 .. 32) := [others => 0];
+         Out_Buf : Ada.Streams.Stream_Element_Array (1 .. 16) := [others => Pattern];
+         Result : CryptoLib.Errors.Status;
+      begin
+         Result := CryptoLib.ChaCha20_Poly1305.Seal (Key, 1, Plain, Sealed);
+         Check (Result = CryptoLib.Errors.Ok, "ChaCha Seal seals for the zeroing test");
+         Sealed (Sealed'Last) := Sealed (Sealed'Last) xor 1;
+         Result := CryptoLib.ChaCha20_Poly1305.Open (Key, 1, Sealed, Out_Buf);
+         Check (Result /= CryptoLib.Errors.Ok, "ChaCha Open rejects a flipped tag");
+         Check (All_Zero (Out_Buf), "ChaCha Open zeroes its output on a bad tag");
+      end;
+
+      --  An unknown cipher name is refused before any key schedule exists.
+      declare
+         Key    : constant Ada.Streams.Stream_Element_Array (1 .. 16) := [others => 2];
+         IV     : constant Ada.Streams.Stream_Element_Array (1 .. 16) := [others => 5];
+         Cipher : constant Ada.Streams.Stream_Element_Array (1 .. 16) := [others => 6];
+         Out_Buf : Ada.Streams.Stream_Element_Array (1 .. 16) := [others => Pattern];
+         Result : CryptoLib.Errors.Status;
+      begin
+         Result := CryptoLib.Ciphers.Decrypt_CBC_Raw
+           ("not-a-cipher", Key, IV, Cipher, Out_Buf);
+         Check (Result /= CryptoLib.Errors.Ok, "Decrypt_CBC_Raw refuses an unknown name");
+         Check (All_Zero (Out_Buf), "Decrypt_CBC_Raw zeroes its output on an unknown name");
+      end;
+
+      --  A streaming context that was never initialized must not pass input
+      --  through to the output.
+      declare
+         Item    : CryptoLib.Ciphers.Cipher_State;
+         Plain   : constant Ada.Streams.Stream_Element_Array (1 .. 16) := [others => 16#11#];
+         Out_Buf : Ada.Streams.Stream_Element_Array (1 .. 16) := [others => Pattern];
+         Result  : CryptoLib.Errors.Status;
+      begin
+         CryptoLib.Ciphers.Reset (Item);
+         Result := CryptoLib.Ciphers.Encrypt (Item, Plain, Out_Buf);
+         Check (Result /= CryptoLib.Errors.Ok, "Encrypt refuses an inactive context");
+         Check (All_Zero (Out_Buf), "Encrypt zeroes its output for an inactive context");
+      end;
+
+      --  ECDSA: a wrong-width output is refused with nothing written.
+      declare
+         Scalar  : constant Ada.Streams.Stream_Element_Array (1 .. 48) := [others => 16#41#];
+         Message : constant Ada.Streams.Stream_Element_Array (1 .. 8)  := [others => 16#22#];
+         R_Buf   : Ada.Streams.Stream_Element_Array (1 .. 32) := [others => Pattern];
+         S_Buf   : Ada.Streams.Stream_Element_Array (1 .. 32) := [others => Pattern];
+         Result  : CryptoLib.Errors.Status;
+      begin
+         Result := CryptoLib.ECDSA.Sign_Nistp384_Raw
+           (Scalar, Message, R_Buf, S_Buf);
+         Check (Result /= CryptoLib.Errors.Ok,
+                "Sign_Nistp384_Raw refuses a 32-byte r and s");
+         Check (All_Zero (R_Buf) and then All_Zero (S_Buf),
+                "Sign_Nistp384_Raw zeroes both halves on refusal");
+      end;
+
+      --  ECDSA public key derivation, same shape.
+      declare
+         Scalar  : constant Ada.Streams.Stream_Element_Array (1 .. 48) := [others => 16#41#];
+         Out_Buf : Ada.Streams.Stream_Element_Array (1 .. 64) := [others => Pattern];
+         Result  : CryptoLib.Errors.Status;
+      begin
+         Result := CryptoLib.ECDSA.Public_Key_Raw
+           (CryptoLib.ECDSA.Nistp384, Scalar, Out_Buf);
+         Check (Result /= CryptoLib.Errors.Ok,
+                "Public_Key_Raw refuses a 64-byte point");
+         Check (All_Zero (Out_Buf), "Public_Key_Raw zeroes its output on refusal");
+      end;
+
+      --  bcrypt_pbkdf with no rounds to run.
+      declare
+         Salt    : constant Ada.Streams.Stream_Element_Array (1 .. 16) := [others => 8];
+         Out_Buf : Ada.Streams.Stream_Element_Array (1 .. 32) := [others => Pattern];
+         Result  : CryptoLib.Errors.Status;
+      begin
+         Result := CryptoLib.BCrypt_PBKDF.Derive ("password", Salt, 0, Out_Buf);
+         Check (Result /= CryptoLib.Errors.Ok, "bcrypt_pbkdf refuses zero rounds");
+         Check (All_Zero (Out_Buf), "bcrypt_pbkdf zeroes its output on refusal");
+      end;
+
+      --  HKDF past the 255-block ceiling, the one case already reachable.
+      declare
+         PRK     : constant Ada.Streams.Stream_Element_Array (1 .. 32) := [others => 16#0B#];
+         Info    : constant Ada.Streams.Stream_Element_Array (1 .. 4)  := [others => 1];
+         Out_Buf : Ada.Streams.Stream_Element_Array (1 .. 255 * 32 + 1) := [others => Pattern];
+         Result  : CryptoLib.Errors.Status;
+      begin
+         Result := CryptoLib.HKDF.Expand
+           (CryptoLib.HKDF.SHA256, PRK, Info, Out_Buf);
+         Check (Result /= CryptoLib.Errors.Ok, "HKDF refuses one octet past the ceiling");
+         Check (All_Zero (Out_Buf), "HKDF zeroes its output past the ceiling");
+      end;
+   end Check_Zero_On_Failure;
+
    procedure Check_HKDF is
       package HK renames CryptoLib.HKDF;
 
@@ -13378,6 +13535,7 @@ begin
    Check_SHA1_Fingerprint;
    Check_Buffer_Ceiling;
    Check_HKDF;
+   Check_Zero_On_Failure;
    Check_Cipher_Names;
    Check_X25519_Shared_Secret;
    Check_Chain_Constraint_Bypasses;

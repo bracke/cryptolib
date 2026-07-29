@@ -135,6 +135,33 @@ long-term private scalar, per-signature nonce, `k⁻¹`, and HMAC-DRBG state.
 Zeroization is **not comprehensive** across every primitive's ephemeral buffers;
 it targets the highest-value long-term-key and nonce material.
 
+## Output buffers on failure
+
+Separate from wiping secrets: every entry point in `Ciphers`,
+`ChaCha20_Poly1305`, `ECDSA`, `BCrypt_PBKDF`, `HKDF`, `Ed25519`, `Ed448`,
+`Curve25519` and `Random` that takes an `out` buffer zeroes it before doing
+anything else, so a status other than `Ok` leaves that buffer zero rather than
+holding a partial result, an unauthenticated plaintext, or the caller's own
+stale bytes. The two AEAD `Open` paths and ChaCha's go further and verify the
+tag *before* computing any plaintext, so a forged packet never produces
+plaintext that then has to be discarded.
+
+This is a plain `[others => 0]`, not `Secure_Wipe`, and deliberately so: the
+target is a caller-visible `out` parameter that is read after the call
+returns, so it is not a dead store and the optimizer cannot remove it. The
+same assignment on a local before return would be removed, which is what
+`Secure_Wipe` exists for.
+
+Pinned by `Check_Zero_On_Failure`, which pre-fills each buffer with a non-zero
+pattern, forces the refusal, and inspects what is left -- a bad GCM tag, a bad
+ChaCha tag, an unknown cipher name, an uninitialized streaming context, a
+wrong-width ECDSA signature or public point, a zero bcrypt round count, and
+HKDF one octet past its 255-block ceiling. Deleting the zeroing at either of
+two representative sites was confirmed to fail the suite.
+
+Callers must still check the status. An all-zero buffer is a plausible
+plaintext, not a sentinel.
+
 ## Randomness
 
 `Random` in `Production_Mode` delegates to `OS_Random.Fill_OS`, selected per OS

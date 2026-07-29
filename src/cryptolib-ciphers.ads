@@ -10,6 +10,14 @@ with CryptoLib.Errors;
 --  entry points are one-shot helpers keyed per call. Algorithms are selected by
 --  their SSH/OpenSSL name string (e.g. "aes256-ctr", "3des-cbc", "rc2-128-cbc",
 --  "aes128-gcm@openssh.com").
+--
+--  Every subprogram here that takes an out buffer zeroes it before doing
+--  anything else, so a status other than Ok always leaves that buffer zero
+--  rather than holding a partial or unauthenticated result. The two Open
+--  entry points go further: the tag is verified before any plaintext is
+--  computed, so a forged packet does not produce plaintext that then has to
+--  be discarded. Callers must still check the status -- an all-zero buffer
+--  is a plausible plaintext, not a sentinel.
 package CryptoLib.Ciphers is
 
    AES_GCM_Tag_Length : constant Natural := 16;

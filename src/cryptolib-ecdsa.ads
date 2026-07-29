@@ -9,6 +9,10 @@ with CryptoLib.Random;
 --  all curve arithmetic is fixed-width, branchless Montgomery (see
 --  CryptoLib.EC_Arith).  Signatures are returned as fixed-width big-endian
 --  r and s octet strings.
+--
+--  Every subprogram here that takes an out buffer zeroes it before doing
+--  anything else, so a status other than Ok never leaves half a signature or
+--  half a public key for a caller that ignores it.
 package CryptoLib.ECDSA is
 
    --  Deterministically sign a pre-formed message over NIST P-384 (SHA-384).

@@ -9,6 +9,12 @@ with CryptoLib.Errors;
 --  encrypts the packet payload, K_1 in bytes 32..63 encrypts the 4-byte length
 --  field), with a Poly1305 one-time key derived from the first keystream block.
 --  The 64-bit nonce is the big-endian SSH packet sequence number.
+--
+--  Every failure path zeroes the out buffer before returning, so a status
+--  other than Ok leaves no partial or unauthenticated plaintext behind. Open
+--  compares the Poly1305 tag in constant time and zeroes on a mismatch.
+--  Callers must still check the status -- an all-zero buffer is a plausible
+--  plaintext, not a sentinel.
 package CryptoLib.ChaCha20_Poly1305 is
 
    Key_Length : constant Natural := 64;   --  K_2 (0..31) || K_1 (32..63)

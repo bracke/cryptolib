@@ -693,6 +693,12 @@ package body CryptoLib.ECDSA is
       Zn : constant Element := From_Mont (Cv.Field, Pt.Z);
       Zi : Element;
    begin
+      --  Zeroed here rather than left to the callers. Both of them happen to
+      --  zero Public_Point before calling, so this changes nothing today --
+      --  but the package promises a zeroed buffer on failure, and a helper
+      --  that only keeps that promise when its caller already did is one
+      --  edit away from breaking it silently.
+      Public_Point := [others => 0];
       if Is_Zero_Mask (Zn) /= 0 then
          return CryptoLib.Errors.Authentication_Failed;
       end if;
