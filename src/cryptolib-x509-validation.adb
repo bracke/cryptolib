@@ -273,10 +273,12 @@ package body CryptoLib.X509.Validation is
                --  A self-issued certificate is one a CA wrote for itself,
                --  typically to change keys. It does not lengthen the path,
                --  so it does not spend any of the policy allowances.
+               --
+               --  Asked of the certificate rather than reconstructed here:
+               --  the predicate is named, documented and tested, and a
+               --  second copy of it is a second thing to keep true.
                Self_Issued : constant Boolean :=
-                 Same_Name
-                   (X509C.Subject_Bytes (Subject),
-                    X509C.Issuer_Bytes (Subject));
+                 X509C.Is_Self_Issued (Subject);
             begin
                pragma Unreferenced (Issuer);
                PP.Step (Engine, Subject, Self_Issued, Ok);

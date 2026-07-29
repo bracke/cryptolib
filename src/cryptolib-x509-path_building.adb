@@ -54,9 +54,6 @@ package body CryptoLib.X509.Path_Building is
          Engine : PP.Engine (Path_Length => Depth + 1);
          Ok     : Boolean;
 
-         function Self_Issued (Item : Certificate) return Boolean
-         is (Same_Name
-               (X509C.Subject_Bytes (Item), X509C.Issuer_Bytes (Item)));
       begin
          PP.Start (Engine, Options);
 
@@ -64,14 +61,14 @@ package body CryptoLib.X509.Path_Building is
             declare
                Item : constant Certificate := Candidate (Source, Chosen (K));
             begin
-               PP.Step (Engine, Item, Self_Issued (Item), Ok);
+               PP.Step (Engine, Item, X509C.Is_Self_Issued (Item), Ok);
                if not Ok then
                   return False;
                end if;
             end;
          end loop;
 
-         PP.Step (Engine, Leaf, Self_Issued (Leaf), Ok);
+         PP.Step (Engine, Leaf, X509C.Is_Self_Issued (Leaf), Ok);
          if not Ok then
             return False;
          end if;
