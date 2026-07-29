@@ -7344,6 +7344,79 @@ procedure Tests is
              "and neither verifies over something else");
    end Check_ECDSA_Raw_Entry_Points;
 
+   --  Each DH keypair generator, against the function that consumes what it
+   --  produces.
+   --
+   --  Three of the four were called by nothing here. The shared-secret side
+   --  is pinned by fixed-exponent vectors, but those say nothing about the
+   --  generators: a generator using the wrong prime, or raising the wrong
+   --  base, produces a public value nobody here would question.
+   --
+   --  No vector is needed to catch that. The public value a generator emits
+   --  must be 2 raised to the private value it emitted alongside it, which
+   --  is exactly what the shared-secret function computes when the peer
+   --  sends 2. If the two halves disagree about the prime or the base they
+   --  disagree here, and if they agree wrongly the vectors catch it -- so
+   --  between them there is nowhere for a wrong constant to hide.
+   procedure Check_DH_Generators is
+      Rng : CryptoLib.Random.Random_Source;
+
+      procedure One_Group (Label : String; Group : Natural) is
+         Private_Value, Public_Value, Recomputed :
+           CryptoLib.Buffers.Packet_Buffer;
+         Status : CryptoLib.Errors.Status;
+      begin
+         case Group is
+            when 1 =>
+               Status := CryptoLib.Diffie_Hellman.Generate_Group1_Keypair
+                           (Rng, Private_Value, Public_Value);
+            when 14 =>
+               Status := CryptoLib.Diffie_Hellman.Generate_Group14_Keypair
+                           (Rng, Private_Value, Public_Value);
+            when 16 =>
+               Status := CryptoLib.Diffie_Hellman.Generate_Group16_Keypair
+                           (Rng, Private_Value, Public_Value);
+            when others =>
+               Status := CryptoLib.Diffie_Hellman.Generate_Group18_Keypair
+                           (Rng, Private_Value, Public_Value);
+         end case;
+         Check (Status = CryptoLib.Errors.Ok,
+                Label & " generates a keypair");
+
+         --  The peer sends 2, so the shared secret is 2^priv mod p: the
+         --  public value again, by another route.
+         case Group is
+            when 1 =>
+               Status := CryptoLib.Diffie_Hellman.Compute_Group1_Shared_Secret
+                           (CryptoLib.Buffers.To_Array (Private_Value),
+                            [1 => 2], Recomputed);
+            when 14 =>
+               Status := CryptoLib.Diffie_Hellman.Compute_Group14_Shared_Secret
+                           (CryptoLib.Buffers.To_Array (Private_Value),
+                            [1 => 2], Recomputed);
+            when 16 =>
+               Status := CryptoLib.Diffie_Hellman.Compute_Group16_Shared_Secret
+                           (CryptoLib.Buffers.To_Array (Private_Value),
+                            [1 => 2], Recomputed);
+            when others =>
+               Status := CryptoLib.Diffie_Hellman.Compute_Group18_Shared_Secret
+                           (CryptoLib.Buffers.To_Array (Private_Value),
+                            [1 => 2], Recomputed);
+         end case;
+         Check (Status = CryptoLib.Errors.Ok,
+                Label & " recomputes from the private value it gave back");
+         Check (CryptoLib.Buffers.To_Array (Public_Value)
+                = CryptoLib.Buffers.To_Array (Recomputed),
+                Label & " agrees with itself about the prime and the base");
+      end One_Group;
+   begin
+      CryptoLib.Random.Initialize_Production (Rng);
+      One_Group ("group1", 1);
+      One_Group ("group14", 14);
+      One_Group ("group16", 16);
+      One_Group ("group18", 18);
+   end Check_DH_Generators;
+
    procedure Check_X509_Extensions is
       use type CryptoLib.ASN1.Errors.Decode_Status;
       use type CryptoLib.PEM.Decode_Status;
@@ -12348,6 +12421,7 @@ begin
    Check_OpenSSH_Fingerprints;
    Check_DH_Group14;
    Check_DH_Group1;
+   Check_DH_Generators;
    Check_X25519_Shared_Secret;
    Check_Chain_Constraint_Bypasses;
    Check_Signature_Algorithm_Agreement;
