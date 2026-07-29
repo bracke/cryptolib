@@ -7097,6 +7097,117 @@ procedure Tests is
              & CryptoLib.ASN1.Errors.Status_Image (Agreed_Status));
    end Check_Signature_Algorithm_Agreement;
 
+   --  A real OpenSSH private key, opened with nothing but this crate.
+   --
+   --  SECURITY.md used to claim bcrypt was "proven by decrypting a real
+   --  OpenSSH key". That proof lived somewhere else, and when the KAT was
+   --  added a few commits ago the claim was narrowed to match what is
+   --  actually here. This puts the original claim back, earned: the key
+   --  below came out of ssh-keygen, and what opens it is bcrypt_pbkdf for
+   --  the key material and AES-256-CTR for the blob, both from this crate.
+   --
+   --  Two primitives against a third party's artifact catches what neither
+   --  KAT can. A vector proves each one computes what its own specification
+   --  says; this proves they agree with what OpenSSH actually wrote, in the
+   --  order and the widths it wrote it -- 32 bytes of key and 16 of IV cut
+   --  from one 48-byte derivation.
+   procedure Check_OpenSSH_Key_Unlock is
+      OpenSSH_Salt : constant String :=
+        "2a44a1b83faf7d1cac356a66592e5cca";
+      OpenSSH_Blob : constant String :=
+        "bbe192ee2b44570b362c32d3bedb15f91cdc535243911677e733050c34c02d6f698ff951949d4e5587c8" &
+        "23f77312e30943e8abcc2c2dedb45eb45d65f5336fb34df2c484559b53b24cbc71fc5e70404c8c2cda85" &
+        "a6bf7b22e6186804a6a4101a5dfb2111a38898a7e1714fbbefc96c4d1e883a11340f03ed5a2ef5f8b762" &
+        "ff300d194299eb451ab501170e1edb0bd4bb19e8ba5a5654e33ec1ce9d3f7c9ebe5f";
+      OpenSSH_Rounds : constant := 24;
+
+      function From_Hex
+        (Text : String) return Ada.Streams.Stream_Element_Array
+      is
+         Result : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (Text'Length / 2));
+         function Nibble (C : Character) return Natural
+         is (case C is
+                when '0' .. '9' => Character'Pos (C) - Character'Pos ('0'),
+                when others     => Character'Pos (C) - Character'Pos ('a') + 10);
+      begin
+         for I in Result'Range loop
+            Result (I) :=
+              Ada.Streams.Stream_Element
+                (Nibble (Text (Text'First + 2 * Natural (I - 1))) * 16
+                 + Nibble (Text (Text'First + 2 * Natural (I - 1) + 1)));
+         end loop;
+         return Result;
+      end From_Hex;
+
+      --  The passphrase given to ssh-keygen.
+      Passphrase : constant String := "correct horse";
+
+      procedure Open_With (Pass : String; Ok : out Boolean;
+                           Names_The_Key : out Boolean)
+      is
+         Material : Ada.Streams.Stream_Element_Array (1 .. 48);
+         Blob     : constant Ada.Streams.Stream_Element_Array :=
+           From_Hex (OpenSSH_Blob);
+         Plain    : Ada.Streams.Stream_Element_Array (Blob'Range);
+         Context  : CryptoLib.Ciphers.Cipher_State;
+         Status   : CryptoLib.Errors.Status;
+      begin
+         Ok := False;
+         Names_The_Key := False;
+
+         Status :=
+           CryptoLib.BCrypt_PBKDF.Derive
+             (Pass, From_Hex (OpenSSH_Salt),
+              Interfaces.Unsigned_32 (OpenSSH_Rounds), Material);
+         if Status /= CryptoLib.Errors.Ok then
+            return;
+         end if;
+
+         --  OpenSSH cuts one derivation into the key and the IV.
+         Status :=
+           CryptoLib.Ciphers.Initialize
+             (Context, "aes256-ctr", CryptoLib.Ciphers.Client_To_Server,
+              Material (1 .. 32), Material (33 .. 48));
+         if Status /= CryptoLib.Errors.Ok then
+            return;
+         end if;
+
+         Status := CryptoLib.Ciphers.Decrypt (Context, Blob, Plain);
+         if Status /= CryptoLib.Errors.Ok then
+            return;
+         end if;
+
+         --  The two check words OpenSSH writes at the head of the private
+         --  section, equal only when the passphrase was right.
+         Ok := Plain (Plain'First .. Plain'First + 3)
+               = Plain (Plain'First + 4 .. Plain'First + 7);
+
+         --  And past them, the key type as a length-prefixed string.
+         declare
+            Kind : constant Ada.Streams.Stream_Element_Array :=
+              Plain (Plain'First + 8 .. Plain'First + 22);
+         begin
+            Names_The_Key :=
+              Kind = From_Hex ("0000000b7373682d65643235353139");
+         end;
+      end Open_With;
+
+      Unlocked, Named : Boolean;
+   begin
+      Open_With (Passphrase, Unlocked, Named);
+      Check (Unlocked,
+             "a key written by ssh-keygen opens with bcrypt_pbkdf and "
+             & "AES-256-CTR from this crate");
+      Check (Named,
+             "and what comes out names itself ssh-ed25519, so the plaintext "
+             & "is the key and not merely self-consistent");
+
+      Open_With ("wrong horse", Unlocked, Named);
+      Check (not Unlocked,
+             "the wrong passphrase does not open it");
+   end Check_OpenSSH_Key_Unlock;
+
    procedure Check_X509_Extensions is
       use type CryptoLib.ASN1.Errors.Decode_Status;
       use type CryptoLib.PEM.Decode_Status;
@@ -12093,6 +12204,7 @@ begin
    Check_Impossible_Dates;
    Check_Undated_Statement_Ages;
    Check_Bcrypt_PBKDF;
+   Check_OpenSSH_Key_Unlock;
    Check_Constant_Time_Equal;
    Check_DH_Peer_Validation;
    Check_OpenSSH_Fingerprints;

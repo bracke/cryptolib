@@ -18,7 +18,7 @@ The reference sources are:
 | Area | Algorithms | Verified against |
 |------|-----------|------------------|
 | Hashes | MD5, SHA-1, SHA-256/384/512, SHA3-256/512, SHAKE128/256 | NIST / RFC KATs |
-| MAC / KDF | HMAC-SHA1/256/384/512, PBKDF2, PBKDF1, PKCS12KDF, bcrypt_pbkdf, UMAC-64/128 | RFC 2202 / 4231 / 6070; RFC 4418 (UMAC); bcrypt_pbkdf against the OpenBSD construction as the `bcrypt` module implements it, at three round counts and output lengths, plus its refusals of a zero round count and an empty passphrase |
+| MAC / KDF | HMAC-SHA1/256/384/512, PBKDF2, PBKDF1, PKCS12KDF, bcrypt_pbkdf, UMAC-64/128 | RFC 2202 / 4231 / 6070; RFC 4418 (UMAC); bcrypt_pbkdf against the OpenBSD construction as the `bcrypt` module implements it, at three round counts and output lengths, plus its refusals of a zero round count and an empty passphrase; and end to end, a private key written by `ssh-keygen` is opened using only this crate -- bcrypt_pbkdf for the material, AES-256-CTR for the blob, the 48-byte derivation cut into key and IV the way OpenSSH cuts it -- with the check words matching and the plaintext naming itself `ssh-ed25519`, which a vector for either primitive alone cannot show |
 | AEAD / ciphers | AES-128/192/256 (CTR/CBC/GCM), ChaCha20-Poly1305, 3DES, RC2 | FIPS-197; AES-256-GCM and chacha20-poly1305@openssh.com cross-checked vs pyca/OpenSSL |
 | GHASH | GF(2¹²⁸) for AES-GCM | via the GCM KAT |
 | X25519 | Curve25519 ECDH | RFC 7748 §5.2, through the raw primitive and again through `Shared_Secret`, the entry point a key exchange calls -- two keypairs agree, and an all-zero peer point is refused there too. The refusal has two layers, a zero Z and a zero result, so removing either alone changes nothing and both had to go before the test noticed |
