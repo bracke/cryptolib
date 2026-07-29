@@ -206,10 +206,20 @@ package CryptoLib.MLKEM768_Core is
       Right : Polyvec)
       return Polyvec;
 
-   --  NTT-domain dot product of two vectors: sum of pointwise products.
-   --  @param Left  the first NTT-domain vector
-   --  @param Right the second NTT-domain vector
-   --  @return the accumulated NTT-domain polynomial
+   --  Dot product of two vectors in the ordinary coefficient domain: the sum
+   --  of Ring_Multiply_Reference over the components.
+   --
+   --  Not the NTT-domain product, whatever the name suggests, and the two are
+   --  not interchangeable -- feeding this NTT-domain vectors multiplies their
+   --  transforms as if they were coefficients and gives an answer that means
+   --  nothing. This comment said "sum of pointwise products" and the body has
+   --  always used the reference multiply; nothing in the library calls it, so
+   --  the disagreement never showed. Corrected to the body rather than the
+   --  other way round, since changing what an uncalled function computes
+   --  would be inventing a requirement.
+   --  @param Left  the first vector, coefficient domain
+   --  @param Right the second vector, coefficient domain
+   --  @return the accumulated polynomial
    function Dot_Product
      (Left  : Polyvec;
       Right : Polyvec)

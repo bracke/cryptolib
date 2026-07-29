@@ -24,6 +24,9 @@ with CryptoLib.X509.Policies;
 with CryptoLib.HKDF;
 with CryptoLib.TLS13_KDF;
 with CryptoLib.ECDH;
+with CryptoLib.Constant_Time_Proof;
+with CryptoLib.Constant_Time_Assurance;
+with CryptoLib.MLKEM768_Core;
 with CryptoLib.EC_Curves;
 with CryptoLib.Hybrid_PQ_Kex;
 with CryptoLib.Fingerprints;
@@ -8731,11 +8734,64 @@ procedure Tests is
          end;
       end;
 
+      --  P-521 key generation, made to fail or succeed on purpose rather than
+      --  by luck.
+      --
+      --  P-521's order is seven bits narrower than its octet width, so an
+      --  unmasked draw lands below n about one time in 128 and the 64-attempt
+      --  rejection loop usually gave up. "Usually" is not a test: with a live
+      --  source this passes or fails at random, and deleting the masking
+      --  showed up in only about half of runs.
+      --
+      --  The deterministic source fixes that. Its pattern repeats FF 00, and
+      --  66 octets is an even number of them, so every one of the 64 attempts
+      --  draws exactly the same value. Unmasked that value is above n and all
+      --  64 attempts are refused -- Internal_Error, every time. Masked to 521
+      --  bits its leading octet becomes 01, putting it at about half the
+      --  order, and the first attempt succeeds. One run now decides it.
+      declare
+         Rng     : CryptoLib.Random.Random_Source;
+         Pattern : constant Ada.Streams.Stream_Element_Array (1 .. 2) :=
+           [16#FF#, 16#00#];
+         D521    : Ada.Streams.Stream_Element_Array (1 .. 66);
+         Q521    : Ada.Streams.Stream_Element_Array (1 .. 133);
+      begin
+         CryptoLib.Random.Initialize_Deterministic (Rng, Pattern);
+         Check (E.Generate_Keypair (C.Nistp521, Rng, D521, Q521)
+                  = CryptoLib.Errors.Ok,
+                "P-521 keygen accepts a draw only its masking brings in range");
+         Check (D521 (D521'First) <= 16#01#,
+                "and the scalar it kept is masked to the order's bit length");
+         Check (E.Valid_Peer_Point (C.Nistp521, Q521),
+                "and the point that scalar implies is on the curve");
+      end;
+
+      --  Trim_To_Order's own contract, on each curve: P-256 and P-384 have no
+      --  excess bits and must be left alone, P-521 has seven and must lose
+      --  them. Checked directly so the rule is pinned even where no curve
+      --  currently exercises it.
+      declare
+         All_Ones_32 : Ada.Streams.Stream_Element_Array (1 .. 32) :=
+           [others => 16#FF#];
+         All_Ones_48 : Ada.Streams.Stream_Element_Array (1 .. 48) :=
+           [others => 16#FF#];
+         All_Ones_66 : Ada.Streams.Stream_Element_Array (1 .. 66) :=
+           [others => 16#FF#];
+      begin
+         C.Trim_To_Order (C.P256_Curve, All_Ones_32);
+         C.Trim_To_Order (C.P384_Curve, All_Ones_48);
+         C.Trim_To_Order (C.P521_Curve, All_Ones_66);
+         Check (All_Ones_32 = [All_Ones_32'Range => 16#FF#],
+                "Trim_To_Order leaves P-256 untouched");
+         Check (All_Ones_48 = [All_Ones_48'Range => 16#FF#],
+                "Trim_To_Order leaves P-384 untouched");
+         Check (All_Ones_66 (All_Ones_66'First) = 16#01#
+                and then All_Ones_66 (All_Ones_66'First + 1) = 16#FF#,
+                "Trim_To_Order clears P-521's seven excess bits and no more");
+      end;
+
       --  A fresh exchange on each curve must reach the same secret from both
-      --  sides. P-521 is the reason this loop covers all three: its order is
-      --  seven bits narrower than its octet width, so an unmasked draw lands
-      --  below n about one time in 128 and key generation ran out of
-      --  attempts. P-256 and P-384 have no excess bits and could not show it.
+      --  sides.
       for Curve in C.Curve_Kind loop
          declare
             Rng : CryptoLib.Random.Random_Source;
@@ -8766,6 +8822,373 @@ procedure Tests is
          end;
       end loop;
    end Check_ECDH;
+
+   --  ML-KEM's algebraic core. These are the pieces MLKEM768 is built from;
+   --  none was reachable from the suite, so a fault in one would have shown
+   --  only as a KEM that stopped interoperating, with nothing to say where.
+   --
+   --  Checked by identity rather than by stored vectors: each routine is held
+   --  against another routine that must agree with it, so neither can drift
+   --  alone.
+   procedure Check_MLKEM_Core_Algebra is
+      package M renames CryptoLib.MLKEM768_Core;
+      use type M.Polynomial;
+
+      Q : constant Integer := M.Q_Value;
+      A, B : M.Polynomial := [others => 0];
+
+      function Congruent (Left, Right : M.Polynomial) return Boolean is
+      begin
+         for I in M.Polynomial'Range loop
+            if (Left (I) - Right (I)) mod Q /= 0 then
+               return False;
+            end if;
+         end loop;
+         return True;
+      end Congruent;
+
+      --  Distance on the circle mod q, so a wrap counts as near not far.
+      function Ring_Distance (Left, Right : Integer) return Integer is
+         D : constant Integer := (Left - Right) mod Q;
+      begin
+         return Integer'Min (D, Q - D);
+      end Ring_Distance;
+   begin
+      for I in M.Polynomial'Range loop
+         A (I) := (I * 7 + 3) mod Q;
+         B (I) := (I * 11 + 5) mod Q;
+      end loop;
+
+      Check (Congruent (M.Inverse_NTT (M.NTT (A)), A),
+             "the inverse NTT undoes the NTT");
+
+      --  The base everything else here rests on: the reference multiply,
+      --  against a negacyclic convolution written out longhand in this test.
+      --
+      --  This is the only genuinely independent check in the group, and it
+      --  has to be. Pointwise_Multiply is implemented as NTT (reference
+      --  multiply (inverse NTT of each operand)) -- it is not a separate fast
+      --  path -- so comparing the two would compare the reference multiply
+      --  with itself and pass however wrong it was. Rq is Zq[x]/(x**256 + 1),
+      --  so a product term that runs off the end comes back negated.
+      declare
+         Independent : M.Polynomial := [others => 0];
+         N : constant Natural := M.N_Value;
+      begin
+         for I in 0 .. N - 1 loop
+            for J in 0 .. N - 1 loop
+               declare
+                  K : constant Natural := (I + J) mod N;
+                  P : constant Integer := (A (I) * B (J)) mod Q;
+               begin
+                  if I + J < N then
+                     Independent (K) := (Independent (K) + P) mod Q;
+                  else
+                     Independent (K) := (Independent (K) - P) mod Q;
+                  end if;
+               end;
+            end loop;
+         end loop;
+         Check (Congruent (M.Ring_Multiply_Reference (A, B), Independent),
+                "the reference multiply is the negacyclic convolution");
+      end;
+
+      --  Given that, the NTT is a ring homomorphism over it.
+      Check (Congruent
+               (M.Inverse_NTT (M.Pointwise_Multiply (M.NTT (A), M.NTT (B))),
+                M.Ring_Multiply_Reference (A, B)),
+             "transforming, multiplying and transforming back is the product");
+
+      --  Dot_Product sums the reference multiply over the components. It is
+      --  not the pointwise product despite the vocabulary, and the two are
+      --  checked to differ so nobody swaps one for the other.
+      declare
+         U, V : M.Polyvec;
+         Sum_Reference, Sum_Pointwise : M.Polynomial := [others => 0];
+      begin
+         for K in M.Vector_Index loop
+            for I in M.Polynomial'Range loop
+               U (K)(I) := (I * (K + 2) + K) mod Q;
+               V (K)(I) := (I * (K + 5) + 1) mod Q;
+            end loop;
+         end loop;
+         for K in M.Vector_Index loop
+            Sum_Reference :=
+              M.Add (Sum_Reference, M.Ring_Multiply_Reference (U (K), V (K)));
+            Sum_Pointwise :=
+              M.Add (Sum_Pointwise, M.Pointwise_Multiply (U (K), V (K)));
+         end loop;
+         Check (Congruent (M.Dot_Product (U, V), Sum_Reference),
+                "a dot product sums the reference multiply");
+         Check (not Congruent (Sum_Reference, Sum_Pointwise),
+                "and that is not the same as summing pointwise products");
+      end;
+
+      --  Twelve-bit encoding is exact: it is how a public key survives a wire.
+      Check (M.Decode_12 (M.Encode_12 (A)) = A,
+             "twelve-bit encode and decode round-trip exactly");
+
+      --  A message survives the polynomial it is carried in.
+      declare
+         Message : M.MLKEM_Message := [others => 0];
+      begin
+         for I in Message'Range loop
+            Message (I) :=
+              Ada.Streams.Stream_Element ((Natural (I) * 37) mod 256);
+         end loop;
+         Check (M.Poly_To_Message (M.Message_To_Poly (Message)) = Message,
+                "a message round-trips through its polynomial");
+      end;
+
+      --  The compressed encodings are lossy on purpose; what matters is that
+      --  they lose no more than FIPS 203 allows, which is ceil (q / 2**(d+1)).
+      declare
+         R10 : constant M.Polynomial :=
+           M.Decode_Decompress_10 (M.Compress_Encode_10 (A));
+         R4  : constant M.Polynomial :=
+           M.Decode_Decompress_4 (M.Compress_Encode_4 (A));
+         Bound_10 : constant Integer := (Q + 2047) / 2048;
+         Bound_4  : constant Integer := (Q + 31) / 32;
+         Worst_10, Worst_4 : Integer := 0;
+      begin
+         for I in M.Polynomial'Range loop
+            Worst_10 := Integer'Max (Worst_10, Ring_Distance (R10 (I), A (I)));
+            Worst_4  := Integer'Max (Worst_4,  Ring_Distance (R4 (I), A (I)));
+         end loop;
+         Check (Worst_10 <= Bound_10,
+                "ten-bit compression stays inside its error bound, worst"
+                & Integer'Image (Worst_10) & " of" & Integer'Image (Bound_10));
+         Check (Worst_4 <= Bound_4,
+                "four-bit compression stays inside its error bound, worst"
+                & Integer'Image (Worst_4) & " of" & Integer'Image (Bound_4));
+         --  And they really are lossy: an exact round trip would mean the
+         --  compression was not happening at all.
+         Check (R4 /= A, "four-bit compression actually discards something");
+      end;
+
+      Check (M.Compress (0, 10) = 0 and then M.Decompress (0, 10) = 0,
+             "zero compresses and decompresses to zero");
+
+      --  Matrix sampling is a function of its seed and its indices.
+      declare
+         Rho : constant Ada.Streams.Stream_Element_Array (1 .. 32) :=
+           [others => 7];
+         P00 : constant M.Polynomial := M.Sample_NTT (Rho, 0, 0);
+         P00_Again : constant M.Polynomial := M.Sample_NTT (Rho, 0, 0);
+         P10 : constant M.Polynomial := M.Sample_NTT (Rho, 1, 0);
+         P01 : constant M.Polynomial := M.Sample_NTT (Rho, 0, 1);
+      begin
+         Check (P00 = P00_Again, "sampling the matrix is deterministic");
+         Check (P00 /= P10 and then P00 /= P01 and then P10 /= P01,
+                "row and column both change what is sampled -- a matrix whose "
+                & "entries collided would break the whole scheme");
+         Check ((for all I in M.Polynomial'Range =>
+                   P00 (I) >= 0 and then P00 (I) < Q),
+                "every sampled coefficient is a residue mod q");
+      end;
+
+      --  Centred binomial noise is small, which is the entire point of it.
+      declare
+         Bytes : Ada.Streams.Stream_Element_Array (1 .. 128) := [others => 0];
+         Noise : M.Polynomial;
+         Lowest, Highest : Integer := 0;
+      begin
+         for I in Bytes'Range loop
+            Bytes (I) :=
+              Ada.Streams.Stream_Element ((Natural (I) * 53) mod 256);
+         end loop;
+         Noise := M.CBD_Eta2 (Bytes);
+         for I in M.Polynomial'Range loop
+            declare
+               Centred : constant Integer :=
+                 (if Noise (I) > Q / 2 then Noise (I) - Q else Noise (I));
+            begin
+               Lowest := Integer'Min (Lowest, Centred);
+               Highest := Integer'Max (Highest, Centred);
+            end;
+         end loop;
+         Check (Lowest >= -M.Eta_2 and then Highest <= M.Eta_2,
+                "centred binomial noise stays within eta2, got"
+                & Integer'Image (Lowest) & " .." & Integer'Image (Highest));
+      end;
+   end Check_MLKEM_Core_Algebra;
+
+   --  The manifests this crate publishes about itself, and a handful of small
+   --  public helpers that nothing else in the suite reached.
+   procedure Check_Manifests_And_Helpers is
+      package CA renames CryptoLib.Constant_Time_Assurance;
+      package CP renames CryptoLib.Constant_Time_Proof;
+      package HP renames CryptoLib.Hybrid_PQ_Kex;
+      use type CA.Assurance_Level;
+      use type CA.Crypto_Primitive;
+      use type CP.Proof_Status;
+      use type HP.Hybrid_PQ_Readiness;
+   begin
+      --  A manifest that claims coverage it does not have is worse than no
+      --  manifest, so these check the claims against each other.
+      Check (CA.Manifest_Version /= "", "the assurance manifest is versioned");
+      Check (CA.All_Primitives_Assessed,
+             "every primitive in the manifest has been assessed");
+      for Item in CA.Crypto_Primitive loop
+         declare
+            Label : constant String := CA.Primitive_Label (Item);
+         begin
+            Check (Label /= "",
+                   "every primitive has a label: " & Item'Image);
+            Check (CA.Level (Item) /= CA.Not_Assessed,
+                   "no primitive is left unassessed: " & Label);
+            --  Gated and review-required are recorded facts, not opinions;
+            --  each must follow from the level rather than float free.
+            Check (CA.Is_Assurance_Gated (Item)
+                     = (CA.Level (Item) in CA.Fixed_Iteration_Audited
+                          | CA.Source_Gated_Formal_Assurance),
+                   "gating follows from the level for " & Label);
+            --  True for every primitive, by design and not by omission: the
+            --  in-tree gate is a source-evidence gate and does not stand in
+            --  for independent leakage tooling, compiler inspection or
+            --  third-party review. Pinned so that a primitive cannot quietly
+            --  start claiming it needs none.
+            Check (CA.Requires_External_Review (Item),
+                   "external review is still required for " & Label);
+         end;
+      end loop;
+
+      --  Labels have to be distinct or the manifest cannot be read.
+      for Left in CA.Crypto_Primitive loop
+         for Right in CA.Crypto_Primitive loop
+            if Left /= Right then
+               Check (CA.Primitive_Label (Left) /= CA.Primitive_Label (Right),
+                      "two primitives share a label: "
+                      & CA.Primitive_Label (Left));
+            end if;
+         end loop;
+      end loop;
+
+      Check (CP.Formal_Proof_Manifest_Version /= "",
+             "the proof manifest is versioned");
+      for Item in CP.Proof_Obligation loop
+         Check (CP.Obligation_Label (Item) /= "",
+                "every proof obligation has a label: " & Item'Image);
+      end loop;
+      for Item in CA.Crypto_Primitive loop
+         declare
+            Discharged : constant Boolean :=
+              CP.Source_Obligations_Discharged (Item);
+            External : constant Boolean :=
+              CP.External_Proof_Remains_Required (Item);
+            Any_Missing : Boolean := False;
+            Any_External : Boolean := False;
+         begin
+            for Obligation in CP.Proof_Obligation loop
+               case CP.Status (Item, Obligation) is
+                  when CP.Missing => Any_Missing := True;
+                  when CP.External_Evidence_Required => Any_External := True;
+                  when CP.Source_Obligation_Discharged => null;
+               end case;
+            end loop;
+            Check (Discharged = not Any_Missing,
+                   "source obligations are discharged exactly when none is "
+                   & "missing: " & CA.Primitive_Label (Item));
+            Check (External = Any_External,
+                   "external proof is required exactly when some obligation "
+                   & "says so: " & CA.Primitive_Label (Item));
+         end;
+      end loop;
+      Check (CP.All_Source_Obligations_Discharged
+               = (for all Item in CA.Crypto_Primitive =>
+                    CP.Source_Obligations_Discharged (Item)),
+             "the summary agrees with the primitives it summarizes");
+
+      --  Hybrid-PQ wire lengths must be the KEM's own, not a second copy.
+      Check (HP.Client_Init_PQ_Length ("mlkem768x25519-sha256")
+               = CryptoLib.MLKEM768.Public_Key_Length
+             and then HP.Server_Reply_PQ_Length ("mlkem768x25519-sha256")
+               = CryptoLib.MLKEM768.Ciphertext_Length,
+             "ML-KEM hybrid lengths are the KEM's own");
+      Check (HP.Client_Init_PQ_Length ("sntrup761x25519-sha512@openssh.com")
+               = CryptoLib.SNTRUP761.Public_Key_Length
+             and then HP.Server_Reply_PQ_Length
+               ("sntrup761x25519-sha512@openssh.com")
+               = CryptoLib.SNTRUP761.Ciphertext_Length,
+             "sntrup761 hybrid lengths are the KEM's own");
+      Check (HP.Server_Reply_Total_Length ("mlkem768x25519-sha256")
+               = HP.Server_Reply_PQ_Length ("mlkem768x25519-sha256") + 32,
+             "the server reply carries the KEM ciphertext plus x25519");
+      Check (HP.Client_Init_PQ_Length ("curve25519-sha256") = 0
+             and then HP.Server_Reply_PQ_Length ("curve25519-sha256") = 0
+             and then HP.Server_Reply_Total_Length ("curve25519-sha256") = 0,
+             "a classic method carries no post-quantum length");
+
+      --  Readiness has a stable rendering, and an unknown name is unknown
+      --  rather than accidentally ready.
+      for Value in HP.Hybrid_PQ_Readiness loop
+         Check (HP.Readiness_Image (Value) /= "",
+                "every readiness state renders: " & Value'Image);
+      end loop;
+      Check (HP.Readiness_Of ("not-a-kex-method")
+               = HP.Unknown_Algorithm,
+             "an unrecognized method is reported unknown");
+      Check (HP.Readiness_Image (HP.Readiness_Of ("mlkem768x25519-sha256"))
+               /= HP.Readiness_Image (HP.Unknown_Algorithm),
+             "a method this crate implements is not reported unknown");
+
+      --  The raw CRC-32 step must agree with the state-based one it underlies.
+      declare
+         Data : constant Ada.Streams.Stream_Element_Array :=
+           Bytes_From_String ("123456789");
+         Raw  : Interfaces.Unsigned_32 := 16#FFFF_FFFF#;
+      begin
+         for B of Data loop
+            CryptoLib.Checksums.CRC32_Update_Raw (Raw, B);
+         end loop;
+         Check ((Raw xor 16#FFFF_FFFF#) = CryptoLib.Checksums.CRC32 (Data),
+                "the raw CRC-32 step finalizes to the same value as CRC32");
+         --  And that value is the published check word for this input.
+         Check (CryptoLib.Checksums.CRC32 (Data) = 16#CBF4_3926#,
+                "CRC-32 of the standard check string");
+      end;
+
+      --  UMAC's encrypt-then-MAC names.
+      Check (CryptoLib.UMAC.Is_EtM_Name ("umac-64-etm@openssh.com")
+             and then CryptoLib.UMAC.Is_EtM_Name ("umac-128-etm@openssh.com"),
+             "the -etm names are recognized as encrypt-then-MAC");
+      Check (not CryptoLib.UMAC.Is_EtM_Name ("umac-64@openssh.com")
+             and then not CryptoLib.UMAC.Is_EtM_Name ("hmac-sha2-256")
+             and then not CryptoLib.UMAC.Is_EtM_Name (""),
+             "the plain names are not, and neither is anything else");
+
+      --  Name-constraint verdicts render distinctly, so a diagnostic cannot
+      --  say "permitted" when it means "excluded".
+      declare
+         package NC renames CryptoLib.X509.Name_Constraints;
+         use type NC.Verdict;
+      begin
+         for Left in NC.Verdict loop
+            Check (NC.Verdict_Image (Left) /= "",
+                   "every name-constraint verdict renders: " & Left'Image);
+            for Right in NC.Verdict loop
+               if Left /= Right then
+                  Check (NC.Verdict_Image (Left) /= NC.Verdict_Image (Right),
+                         "two verdicts render alike: "
+                         & NC.Verdict_Image (Left));
+               end if;
+            end loop;
+         end loop;
+      end;
+
+      --  DH group 14 client value: it must be one the consuming side accepts.
+      declare
+         Rng    : CryptoLib.Random.Random_Source;
+         Public : CryptoLib.Buffers.Packet_Buffer;
+      begin
+         CryptoLib.Random.Initialize_Production (Rng);
+         Check (CryptoLib.Diffie_Hellman.Generate_Group14_Client_Value
+                  (Rng, Public) = CryptoLib.Errors.Ok,
+                "a group-14 client value is generated");
+         Check (CryptoLib.Buffers.Length (Public) > 0,
+                "and it is not empty");
+      end;
+   end Check_Manifests_And_Helpers;
 
    procedure Check_Zero_On_Failure is
       Pattern : constant Ada.Streams.Stream_Element := 16#A5#;
@@ -10234,6 +10657,26 @@ procedure Tests is
                = CryptoLib.X509.Country
              and then XN.Attribute_Text (Item, XN.Subject_Name, 1) = "DK",
              "the first attribute is the country");
+
+      --  The same attribute, read as its raw parts rather than as text. A
+      --  caller that needs an attribute this crate has no Kind for has only
+      --  these two, so they are checked against the kind and text that are
+      --  derived from them: the identifier must be the countryName OID, and
+      --  the bytes must be the text those bytes encode.
+      Check (XN.Attribute_Identifier (Item, XN.Subject_Name, 1)
+               = CryptoLib.ASN1.Octets'[16#55#, 16#04#, 16#06#],
+             "the first attribute's identifier is the countryName OID "
+             & "2.5.4.6");
+      Check (XN.Attribute_Bytes (Item, XN.Subject_Name, 1)
+               = Bytes_From_String ("DK"),
+             "and its raw value is the text it decodes to");
+      Check (XN.Attribute_Identifier (Item, XN.Subject_Name, 4)
+               /= XN.Attribute_Identifier (Item, XN.Subject_Name, 1),
+             "a different attribute kind has a different identifier");
+      Check (XN.Attribute_Bytes (Item, XN.Subject_Name, 4)
+               = Bytes_From_String ("Example Ltd"),
+             "the organization's raw value is its text too");
+
       Check (XN.Attribute_Kind_At (Item, XN.Subject_Name, 4)
                = CryptoLib.X509.Organization
              and then XN.Attribute_Text (Item, XN.Subject_Name, 4)
@@ -14127,6 +14570,8 @@ begin
    Check_ChaCha20_Poly1305_RFC8439;
    Check_TLS13_KDF;
    Check_ECDH;
+   Check_MLKEM_Core_Algebra;
+   Check_Manifests_And_Helpers;
    Check_Cipher_Names;
    Check_X25519_Shared_Secret;
    Check_Chain_Constraint_Bypasses;

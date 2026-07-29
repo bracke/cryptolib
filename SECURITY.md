@@ -172,6 +172,25 @@ turned out to be exercised in shipping code and by nothing in this suite:
 `Hybrid_PQ_Kex.Is_OpenSSH_Hybrid_PQ_Kex_Name` and `X509.Policies.Encoded_Value`
 (`ssh_lib`), and `Ciphers.Is_Active` and `Errors.Is_Success` (`versionlib`).
 
+Every public subprogram in the library is now named by the suite: the audit
+that found those six was run to exhaustion, and the count of subprograms
+neither tested here nor called anywhere else in the library is zero. The last
+of them were ML-KEM's algebraic core, the two self-describing manifests, and a
+handful of small helpers.
+
+The ML-KEM core is checked by identity rather than by stored vectors, with one
+deliberately independent anchor: `Ring_Multiply_Reference` is held against a
+negacyclic convolution written out longhand in the test. That anchor has to
+exist because `Pointwise_Multiply` is implemented as `NTT (reference multiply
+(inverse NTT of each operand))` -- it is not a separate fast path -- so
+comparing the two would compare the reference multiply with itself and pass
+however wrong it was. Everything else chains off the verified base: the NTT
+round-trips, twelve-bit encoding is exact, a message survives its polynomial,
+the compressed encodings stay inside the FIPS 203 error bound and are checked
+to actually be lossy, matrix sampling depends on both row and column, and
+centred binomial noise stays within eta2. Making the reference multiply cyclic
+instead of negacyclic fails the suite.
+
 `Check_Consumer_Entry_Points` holds each to the code that consumes its answer
 rather than to a restatement of its body: the GCM key length is checked to be
 the length `Seal_GCM` accepts and one octet short is checked to be refused, so
