@@ -91,6 +91,124 @@ package body CryptoLib.X509.Policies is
       return X509C.Extension_Value (Item, Index);
    end Value_Of;
 
+   --  Copy a text qualifier out of the encoding, bounded.
+   procedure Take_Text
+     (Data  : Octets;
+      Where : Element;
+      Item  : in out Policy_Qualifier)
+   is
+      Length : constant Natural := Content_Length (Where);
+   begin
+      Item.Truncated := Length > Maximum_Qualifier_Text;
+      Item.Length := Natural'Min (Length, Maximum_Qualifier_Text);
+      for I in 1 .. Item.Length loop
+         Item.Text (I) :=
+           Character'Val (Data (Where.First + Offset (I - 1)));
+      end loop;
+   end Take_Text;
+
+   --  Read the policyQualifiers that follow a policy identifier.
+   --
+   --  A qualifier this does not recognise is recorded as Other_Qualifier
+   --  with no text rather than dropped: the count then still says how many
+   --  the certificate carried, and a caller displaying them does not report
+   --  two where there were three.
+   procedure Read_Qualifiers
+     (Data   : Octets;
+      From   : Offset;
+      Last   : Offset;
+      Limits : Decode_Limits;
+      Into   : in out Policy_Entry)
+   is
+      Cursor : Offset := From;
+      Seq    : Element;
+      Status : Errors.Decode_Status;
+   begin
+      if DER_Reader.At_End (Cursor, Last) then
+         return;
+      end if;
+
+      DER_Reader.Read_Sequence (Data, Cursor, Last, 3, Limits, Seq, Status);
+      if Status /= Errors.Ok then
+         return;
+      end if;
+
+      Cursor := Seq.First;
+      while not DER_Reader.At_End (Cursor, Seq.Last) loop
+         declare
+            Info : Element;
+            Part : Offset;
+            OID  : Element;
+            Body_Item : Element;
+         begin
+            DER_Reader.Read_Sequence
+              (Data, Cursor, Seq.Last, 4, Limits, Info, Status);
+            exit when Status /= Errors.Ok;
+
+            Part := Info.First;
+            DER_Reader.Read_Object_Identifier
+              (Data, Part, Info.Last, 5, Limits, OID, Status);
+            exit when Status /= Errors.Ok;
+
+            exit when Into.Qualifier_Count = Maximum_Qualifiers;
+            Into.Qualifier_Count := Into.Qualifier_Count + 1;
+
+            declare
+               Slot : Policy_Qualifier renames
+                 Into.Qualifiers (Into.Qualifier_Count);
+            begin
+               if OID_Table.Matches (Data, OID, OID_Table.QT_CPS) then
+                  --  CPSuri ::= IA5String, taken whole.
+                  Slot.Kind := CPS_Uri;
+                  DER_Reader.Read
+                    (Data, Part, Info.Last, 5, Limits, Body_Item, Status);
+                  exit when Status /= Errors.Ok;
+                  Take_Text (Data, Body_Item, Slot);
+
+               elsif OID_Table.Matches
+                       (Data, OID, OID_Table.QT_User_Notice)
+               then
+                  --  UserNotice ::= SEQUENCE { noticeRef OPTIONAL,
+                  --                            explicitText OPTIONAL }
+                  --  The reference is an organisation and a list of numbers
+                  --  that mean something only to whoever published them; the
+                  --  explicit text is the part written to be read, and it is
+                  --  the part taken.
+                  Slot.Kind := User_Notice;
+                  declare
+                     Notice : Element;
+                     Inner  : Offset;
+                     Field  : Element;
+                  begin
+                     DER_Reader.Read_Sequence
+                       (Data, Part, Info.Last, 5, Limits, Notice, Status);
+                     exit when Status /= Errors.Ok;
+
+                     Inner := Notice.First;
+                     while not DER_Reader.At_End (Inner, Notice.Last) loop
+                        DER_Reader.Read
+                          (Data, Inner, Notice.Last, 6, Limits, Field,
+                           Status);
+                        exit when Status /= Errors.Ok;
+
+                        --  DisplayText is a CHOICE of four string types, and
+                        --  a NoticeReference is a SEQUENCE. Anything that is
+                        --  not constructed is the text.
+                        if not Field.Constructed then
+                           Take_Text (Data, Field, Slot);
+                           exit;
+                        end if;
+                     end loop;
+                  end;
+
+               else
+                  Slot.Kind := Other_Qualifier;
+               end if;
+            end;
+         end;
+      end loop;
+   end Read_Qualifiers;
+
    function Policies_Of (Item : Certificate) return Policy_Set is
       Found  : Boolean;
       Data   : constant Octets :=
@@ -154,6 +272,10 @@ package body CryptoLib.X509.Policies is
 
                Result.Count := Result.Count + 1;
                Result.Values (Result.Count) := Value;
+               Result.Entries (Result.Count).Value := Value;
+               Read_Qualifiers
+                 (Data, Part, Info.Last, Limits,
+                  Result.Entries (Result.Count));
                if Is_Any (Value) then
                   Result.Has_Any := True;
                end if;

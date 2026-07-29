@@ -75,6 +75,39 @@ package CryptoLib.X509.Policies is
 
    type Policy_Array is array (Positive range <>) of Policy_Value;
 
+   --  What a policy says to a person reading it.
+   --
+   --  RFC 5280 4.2.1.4 defines two: a pointer to the issuer's certification
+   --  practice statement, and a notice meant to be displayed. Neither
+   --  changes whether a policy applies -- section 6.1 never consults them --
+   --  so they are read for a caller that wants to show why a certificate
+   --  claims what it claims, and for nothing else.
+   type Qualifier_Kind is (CPS_Uri, User_Notice, Other_Qualifier);
+
+   --  The RFC bounds DisplayText at 200 characters and a CPS pointer is a
+   --  URI; anything longer is recorded as truncated rather than kept.
+   Maximum_Qualifier_Text : constant := 200;
+   Maximum_Qualifiers     : constant := 2;
+
+   type Policy_Qualifier is record
+      Kind      : Qualifier_Kind := Other_Qualifier;
+      Truncated : Boolean := False;
+      Length    : Natural := 0;
+      Text      : String (1 .. Maximum_Qualifier_Text) := [others => ' '];
+   end record;
+
+   type Qualifier_Array is
+     array (1 .. Maximum_Qualifiers) of Policy_Qualifier;
+
+   --  One policy, with whatever it says about itself.
+   type Policy_Entry is record
+      Value            : Policy_Value;
+      Qualifier_Count  : Natural := 0;
+      Qualifiers       : Qualifier_Array;
+   end record;
+
+   type Entry_Array is array (1 .. Maximum_Policies) of Policy_Entry;
+
    --  What a certificate's certificatePolicies extension says.
    --
    --  Present and Count are separate: a certificate with no extension does
@@ -89,6 +122,13 @@ package CryptoLib.X509.Policies is
       Has_Any     : Boolean := False;
       Count       : Natural := 0;
       Values      : Policy_Array (1 .. Maximum_Policies);
+
+      --  The same policies, with their qualifiers. Values is kept beside
+      --  this because the processing in section 6.1 only ever needs the
+      --  identifiers, and threading the text through the tree would carry
+      --  a couple of hundred bytes a node for something the tree never
+      --  reads.
+      Entries     : Entry_Array;
    end record;
 
    --  One policyMappings entry: the issuer's policy, and what it maps to in

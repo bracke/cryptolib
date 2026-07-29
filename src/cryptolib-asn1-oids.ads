@@ -90,6 +90,13 @@ package CryptoLib.ASN1.OIDs is
    OCSP_No_Check : constant Octets :=
      [16#2B#, 16#06#, 16#01#, 16#05#, 16#05#, 16#07#, 16#30#, 16#01#, 16#05#];
 
+   --  Policy qualifiers, 1.3.6.1.5.5.7.2.n: a pointer to the issuer's
+   --  certification practice statement, and a notice meant for a person.
+   QT_CPS : constant Octets :=
+     [16#2B#, 16#06#, 16#01#, 16#05#, 16#05#, 16#07#, 16#02#, 16#01#];
+   QT_User_Notice : constant Octets :=
+     [16#2B#, 16#06#, 16#01#, 16#05#, 16#05#, 16#07#, 16#02#, 16#02#];
+
    --  Access methods, 1.3.6.1.5.5.7.48.n. Note that OCSP_No_Check above sits
    --  under AD_OCSP rather than beside it, so a prefix match would confuse
    --  the two -- they are compared whole.

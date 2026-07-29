@@ -197,7 +197,13 @@ every status reading `Ok` while every key it produces is predictable.
   rather than refused -- which is what it used to be. All four are on the
   recognised-critical list because all four are acted on; `policyMappings`
   in particular is one RFC 5280 §4.2.1.5 says a conforming CA SHOULD mark
-  critical, so refusing it was refusing what the specification asks for. `Validation_Result.Policies` reports the
+  critical, so refusing it was refusing what the specification asks for. Policy qualifiers -- a pointer to the issuer's
+  certification practice statement, and a notice meant to be displayed -- are
+  read and reported per policy by `Policies_Of`. They are deliberately not
+  carried through the tree: §6.1 never consults them, a node's qualifiers are
+  those of the certificate that created it, and the ones belonging to a
+  chain's established policies are the leaf's own, which `Policies_Of` gives
+  directly. `Validation_Result.Policies` reports the
   policies the authorities in the path actually agreed on, which is not what
   the leaf asserts: a certificate may name a policy no issuer above it
   granted, and that certificate is refused when an explicit policy is

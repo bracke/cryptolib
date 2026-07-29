@@ -3628,6 +3628,99 @@ procedure Tests is
       end;
    end Check_Random_Fails_Closed;
 
+   --  What a policy says to a person reading it.
+   --
+   --  RFC 5280 4.2.1.4 defines two qualifiers: a pointer to the issuer's
+   --  certification practice statement, and a notice meant to be displayed.
+   --  Neither changes whether a policy applies -- section 6.1 never consults
+   --  them -- so they are read for a caller that wants to show why a
+   --  certificate claims what it claims. They were parsed past and dropped.
+   procedure Check_Policy_Qualifiers is
+      use type CryptoLib.ASN1.Errors.Decode_Status;
+      use type CryptoLib.X509.Policies.Qualifier_Kind;
+
+      package X509C renames CryptoLib.X509.Certificates;
+      package PP renames CryptoLib.X509.Policies;
+
+      Qualified_DER : constant String :=
+        "30820249308201cea003020102021457dc68c06a8727f75fca6853854da359d207b6fc300a06082a8648ce3d04" &
+        "030230163114301206035504030c0b706f6c6963792d726f6f74301e170d3236303732393037343631385a170d" &
+        "3237303532353037343631385a30163114301206035504030c0b706f6c6963792d726f6f743076301006072a86" &
+        "48ce3d020106052b8104002203620004fab57ef5a1788133397062176d5925a43cd8595df917f6743c6323355d" &
+        "2658e3173fce28a87905f80b9ba83ee1aab697a7bb599368c751864a56fbaa711e5b2726530bc20c83714e3ce3" &
+        "718536a74005d731b1489eb8e166434548c44d69b0cfa381dc3081d9300f0603551d130101ff040530030101ff" &
+        "300e0603551d0f0101ff0404030201063081960603551d2004818e30818b30818806092b06010401868d1f0130" &
+        "7b302906082b06010505070201161d68747470733a2f2f6578616d706c652e746573742f6370732e68746d6c30" &
+        "4e06082b060105050702023042301a1a104578616d706c652054657374204f726730060201010201021a244973" &
+        "7375656420756e64657220746865206578616d706c65207465737420706f6c696379301d0603551d0e04160414" &
+        "208a7da7f801c4b3c24c5dea13986578cbec0ed6300a06082a8648ce3d0403020369003066023100d3a5eb9ed0" &
+        "6bc532ebf2da5d489183d0d4f082690d1e888f8ea954e0594b77d2a9d2494c620bc7665fec33b9f48809510231" &
+        "00e86ff2b3713b9ba9a632c6a0fa424829c0548fee20becea5932b0f3e759885375e1feb99b0a882cd62789cfe" &
+        "ea02f666";
+
+      function From_Hex
+        (Text : String) return Ada.Streams.Stream_Element_Array
+      is
+         Result : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (Text'Length / 2));
+         function Nibble (C : Character) return Natural
+         is (case C is
+                when '0' .. '9' => Character'Pos (C) - Character'Pos ('0'),
+                when others     => Character'Pos (C) - Character'Pos ('a') + 10);
+      begin
+         for I in Result'Range loop
+            Result (I) :=
+              Ada.Streams.Stream_Element
+                (Nibble (Text (Text'First + 2 * Natural (I - 1))) * 16
+                 + Nibble (Text (Text'First + 2 * Natural (I - 1) + 1)));
+         end loop;
+         return Result;
+      end From_Hex;
+
+      Status : CryptoLib.ASN1.Errors.Decode_Status;
+      Item   : constant X509C.Certificate :=
+        X509C.Decode_DER
+          (From_Hex (Qualified_DER), CryptoLib.ASN1.Default_Limits, Status);
+      Named  : constant PP.Policy_Set := PP.Policies_Of (Item);
+   begin
+      Check (Status = CryptoLib.ASN1.Errors.Ok
+             and then Named.Well_Formed
+             and then Named.Count = 1,
+             "a certificate with a qualified policy decodes");
+
+      --  Both kinds, in the order the certificate carries them.
+      Check (Named.Entries (1).Qualifier_Count = 2,
+             "both qualifiers are read, got"
+             & Natural'Image (Named.Entries (1).Qualifier_Count));
+
+      Check (Named.Entries (1).Qualifiers (1).Kind = PP.CPS_Uri,
+             "the first is a practice-statement pointer");
+      Check (Named.Entries (1).Qualifiers (1).Text
+               (1 .. Named.Entries (1).Qualifiers (1).Length)
+             = "https://example.test/cps.html",
+             "and it is the URI the certificate carries, got ["
+             & Named.Entries (1).Qualifiers (1).Text
+                 (1 .. Named.Entries (1).Qualifiers (1).Length) & "]");
+
+      --  A user notice holds an organisation and a list of numbers as well
+      --  as the text. The numbers mean something only to whoever published
+      --  them; the explicit text is the part written to be read, and it is
+      --  the part taken.
+      Check (Named.Entries (1).Qualifiers (2).Kind = PP.User_Notice,
+             "the second is a notice");
+      Check (Named.Entries (1).Qualifiers (2).Text
+               (1 .. Named.Entries (1).Qualifiers (2).Length)
+             = "Issued under the example test policy",
+             "and its explicit text is taken rather than its notice "
+             & "reference, got ["
+             & Named.Entries (1).Qualifiers (2).Text
+                 (1 .. Named.Entries (1).Qualifiers (2).Length) & "]");
+
+      Check (not Named.Entries (1).Qualifiers (1).Truncated
+             and then not Named.Entries (1).Qualifiers (2).Truncated,
+             "neither was truncated");
+   end Check_Policy_Qualifiers;
+
    procedure Check_X509_Extensions is
       use type CryptoLib.ASN1.Errors.Decode_Status;
       use type CryptoLib.PEM.Decode_Status;
@@ -8477,6 +8570,7 @@ begin
    Check_X509_Verify;
    Check_X509_Extensions;
    Check_Policy_Processing;
+   Check_Policy_Qualifiers;
    Check_Random_Fails_Closed;
    Check_Off_Curve_Key;
    Check_Ed25519_Encoding;
