@@ -6412,6 +6412,52 @@ procedure Tests is
              "two empty values are equal, which is what the contract says");
    end Check_Constant_Time_Equal;
 
+   --  A peer value that would make the shared secret worthless.
+   --
+   --  Group 16 rejects a public value outside (1, p-1): zero and one give a
+   --  shared secret of zero or one whatever the private exponent is, and a
+   --  value at or above the prime is not a group element. The check is
+   --  written and was never exercised -- the only DH test is a round trip,
+   --  where both sides behave and which passes just as well with no
+   --  validation at all.
+   procedure Check_DH_Peer_Validation is
+      Rng    : CryptoLib.Random.Random_Source;
+      Priv   : CryptoLib.Buffers.Packet_Buffer;
+      Pub    : CryptoLib.Buffers.Packet_Buffer;
+      Shared : CryptoLib.Buffers.Packet_Buffer;
+
+      --  The peer value is given as a sign byte and magnitude, big-endian,
+      --  which is what Generate_Group16_Keypair hands back.
+      function Refuses (Peer : Ada.Streams.Stream_Element_Array)
+        return Boolean
+      is (CryptoLib.Diffie_Hellman.Compute_Group16_Shared_Secret
+            (CryptoLib.Buffers.To_Array (Priv), Peer, Shared)
+          /= CryptoLib.Errors.Ok);
+
+      At_Or_Above_Prime : constant Ada.Streams.Stream_Element_Array
+        (1 .. 512) := [others => 16#FF#];
+   begin
+      CryptoLib.Random.Initialize_Production (Rng);
+      Check (CryptoLib.Diffie_Hellman.Generate_Group16_Keypair
+               (Rng, Priv, Pub) = CryptoLib.Errors.Ok,
+             "a group16 keypair to answer with");
+
+      Check (Refuses ([1 => 0]),
+             "a peer value of zero is refused, since every secret from it "
+             & "is zero");
+      Check (Refuses ([1 => 1]),
+             "and a peer value of one, since every secret from it is one");
+      Check (Refuses (At_Or_Above_Prime),
+             "and one at or above the prime, which is not a group element");
+
+      --  And the check is not simply refusing everything: a real public
+      --  value, and the smallest legitimate one, both go through.
+      Check (not Refuses ([1 => 2]),
+             "while two is inside the group and is accepted");
+      Check (not Refuses (CryptoLib.Buffers.To_Array (Pub)),
+             "as is a public value this crate generated itself");
+   end Check_DH_Peer_Validation;
+
    procedure Check_X509_Extensions is
       use type CryptoLib.ASN1.Errors.Decode_Status;
       use type CryptoLib.PEM.Decode_Status;
@@ -11339,6 +11385,7 @@ begin
    Check_Undated_Statement_Ages;
    Check_Bcrypt_PBKDF;
    Check_Constant_Time_Equal;
+   Check_DH_Peer_Validation;
    Check_Random_Fails_Closed;
    Check_Off_Curve_Key;
    Check_Ed25519_Encoding;
