@@ -167,7 +167,13 @@ every status reading `Ok` while every key it produces is predictable.
   private-key operation, and no RSA-PSS. `X509.Signatures` reports
   `Unsupported_Algorithm` rather than a failure whenever it cannot check a
   signature, so "we did not check" is never mistaken for "the signature was
-  bad" -- RSA-PSS whose parameters name a hash this crate does not implement
+  bad". It distinguishes four such answers, and each is now held to
+  being distinct: `Algorithm_Mismatch` when the algorithm and the key
+  cannot go together, `Malformed_Signature` when the bytes are not shaped
+  like a signature for that algorithm, `Missing_Input` when a certificate
+  that did not decode was handed in, and `Unsupported_Algorithm` for one
+  this cannot verify. Collapsing any of them into `Invalid_Signature` fails
+  the suite, because that value asserts a certificate was altered -- RSA-PSS whose parameters name a hash this crate does not implement
   lands there. RSA verification touches only public values, so nothing in it needs to
   be constant-time. That distinction is pinned by an Ed448 certificate
   OpenSSL made and signed: it decodes, its key algorithm is named, and its

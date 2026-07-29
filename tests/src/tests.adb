@@ -4411,6 +4411,117 @@ procedure Tests is
       end;
    end Check_Unsupported_Algorithm;
 
+   --  Not verified is not the same as verified and wrong.
+   --
+   --  X509.Signatures answers with four different failures where a lesser
+   --  interface would answer with one. Algorithm_Mismatch means the
+   --  algorithm named and the key handed over cannot go together;
+   --  Malformed_Signature means the bytes are not shaped like a signature
+   --  for that algorithm; Missing_Input means a certificate that did not
+   --  decode was passed. None of them means the signature is bad, and all
+   --  three had no test -- so any of them could have collapsed into
+   --  Invalid_Signature, which is this crate asserting a certificate was
+   --  altered when it has established nothing of the sort.
+   procedure Check_Verification_Failure_Kinds is
+      package XS renames CryptoLib.X509.Signatures;
+      package X509C renames CryptoLib.X509.Certificates;
+      use type XS.Verification_Result;
+
+      Rng     : CryptoLib.Random.Random_Source;
+      Seed    : Ada.Streams.Stream_Element_Array (1 .. 32);
+      Public  : Ada.Streams.Stream_Element_Array (1 .. 32);
+      Message : constant Ada.Streams.Stream_Element_Array (1 .. 5) :=
+        [1, 2, 3, 4, 5];
+      Signed  : Ada.Streams.Stream_Element_Array (1 .. 64);
+   begin
+      CryptoLib.Random.Initialize_Production (Rng);
+      Check (CryptoLib.Ed25519.Generate_Keypair (Rng, Seed, Public)
+             = CryptoLib.Errors.Ok,
+             "fixture: an Ed25519 key pair");
+      Check (CryptoLib.Ed25519.Sign (Seed, Public, Message, Signed)
+             = CryptoLib.Errors.Ok,
+             "fixture: it signs");
+
+      --  The control. Without it the refusals below would be consistent
+      --  with nothing working at all.
+      Check (XS.Verify_With_Key
+               (Message, Signed, CryptoLib.X509.Ed25519_Signature,
+                CryptoLib.X509.Ed25519, Public)
+             = XS.Valid,
+             "the signature verifies under its own key and algorithm");
+
+      --  Altered message: this one really is a bad signature, and saying so
+      --  is correct. It is here so the distinctions below mean something.
+      declare
+         Other : Ada.Streams.Stream_Element_Array := Message;
+      begin
+         Other (Other'First) := Other (Other'First) xor 1;
+         Check (XS.Verify_With_Key
+                  (Other, Signed, CryptoLib.X509.Ed25519_Signature,
+                   CryptoLib.X509.Ed25519, Public)
+                = XS.Invalid_Signature,
+                "an altered message is a bad signature, got "
+                & XS.Result_Image
+                    (XS.Verify_With_Key
+                       (Other, Signed, CryptoLib.X509.Ed25519_Signature,
+                        CryptoLib.X509.Ed25519, Public)));
+      end;
+
+      --  An ECDSA signature algorithm over an Ed25519 key. Nothing was
+      --  checked, and reporting a bad signature would say the opposite.
+      Check (XS.Verify_With_Key
+               (Message, Signed, CryptoLib.X509.ECDSA_With_SHA256,
+                CryptoLib.X509.Ed25519, Public)
+             = XS.Algorithm_Mismatch,
+             "an algorithm the key cannot carry is a mismatch, not a bad "
+             & "signature, got "
+             & XS.Result_Image
+                 (XS.Verify_With_Key
+                    (Message, Signed, CryptoLib.X509.ECDSA_With_SHA256,
+                     CryptoLib.X509.Ed25519, Public)));
+
+      --  An ECDSA signature has to be a SEQUENCE of two integers. Bytes
+      --  that are not are not a failed signature; they are not a signature.
+      declare
+         P384_Key : Ada.Streams.Stream_Element_Array (1 .. 97) :=
+           [others => 0];
+         Rubbish  : constant Ada.Streams.Stream_Element_Array (1 .. 8) :=
+           [others => 16#41#];
+      begin
+         P384_Key (P384_Key'First) := 16#04#;
+         Check (XS.Verify_With_Key
+                  (Message, Rubbish, CryptoLib.X509.ECDSA_With_SHA384,
+                   CryptoLib.X509.ECDSA_P384, P384_Key)
+                = XS.Malformed_Signature,
+                "signature bytes of the wrong shape are malformed, not "
+                & "invalid, got "
+                & XS.Result_Image
+                    (XS.Verify_With_Key
+                       (Message, Rubbish, CryptoLib.X509.ECDSA_With_SHA384,
+                        CryptoLib.X509.ECDSA_P384, P384_Key)));
+      end;
+
+      --  A certificate that did not decode carries no key to check against.
+      declare
+         Status : CryptoLib.ASN1.Errors.Decode_Status;
+         Nothing : constant Ada.Streams.Stream_Element_Array (1 .. 0) :=
+           [others => 0];
+         Absent  : constant X509C.Certificate :=
+           X509C.Decode_DER (Nothing, CryptoLib.ASN1.Default_Limits, Status);
+      begin
+         Check (not X509C.Is_Present (Absent),
+                "fixture: an empty input decodes to nothing");
+         Check (XS.Verify_Signed_Data
+                  (Message, Signed, CryptoLib.X509.Ed25519_Signature, Absent)
+                = XS.Missing_Input,
+                "and verifying against it reports missing input, got "
+                & XS.Result_Image
+                    (XS.Verify_Signed_Data
+                       (Message, Signed, CryptoLib.X509.Ed25519_Signature,
+                        Absent)));
+      end;
+   end Check_Verification_Failure_Kinds;
+
    procedure Check_X509_Extensions is
       use type CryptoLib.ASN1.Errors.Decode_Status;
       use type CryptoLib.PEM.Decode_Status;
@@ -9322,6 +9433,7 @@ begin
    Check_Policy_Aware_Path_Building;
    Check_Self_Issued_Policy_Allowance;
    Check_Unsupported_Algorithm;
+   Check_Verification_Failure_Kinds;
    Check_Random_Fails_Closed;
    Check_Off_Curve_Key;
    Check_Ed25519_Encoding;
