@@ -4522,6 +4522,163 @@ procedure Tests is
       end;
    end Check_Verification_Failure_Kinds;
 
+   --  A policy tree wider than this crate will hold.
+   --
+   --  The bound exists because the tree is built from certificates somebody
+   --  else wrote and must not grow without end. Reaching it is reported and
+   --  refused rather than truncated: a partial tree is missing exactly the
+   --  nodes that pruning would have removed, so answering from one can only
+   --  ever be too permissive.
+   --
+   --  This is a real divergence and worth stating as one. OpenSSL accepts
+   --  the chain below; this refuses it. Exhausted is how a caller tells that
+   --  apart from the certificates failing on their own merits -- the first
+   --  is this implementation's limit, the second is not, and they call for
+   --  different things to be done about them.
+   procedure Check_Policy_Tree_Bound is
+      package X509C renames CryptoLib.X509.Certificates;
+      package XV renames CryptoLib.X509.Validation;
+      use type XV.Validation_Failure;
+
+      EX_Root_DER : constant String :=
+        "308201693082010ea0030201020214258aa8101cb678c72721299bd717e683a715057a300a06082a8648ce3d04" &
+        "030230123110300e06035504030c0765782d726f6f74301e170d3236303732393038333334315a170d32373035" &
+        "32353038333334315a30123110300e06035504030c0765782d726f6f743059301306072a8648ce3d020106082a" &
+        "8648ce3d0301070342000423f87ab29ecf1e6cbe382570602a675d04e31cd3e7a33351f75c266537312873dc77" &
+        "ae00b968e993ea0eecc3d07551ea64d539ca88810b7c5b1d9758807493e5a3423040300f0603551d130101ff04" &
+        "0530030101ff300e0603551d0f0101ff040403020106301d0603551d0e04160414137a5ce002458b4a02a927d3" &
+        "379fb533e8f980f4300a06082a8648ce3d0403020349003046022100dc19551b600487325853796e2ee38b741f" &
+        "7e3c9d49ef67cb47fa6eb45c33feb10221009a53ca584544b77b244fa1c2481b1bb16a0ffdf555c1007bb017c9" &
+        "2c2c580a38";
+
+      EX_C1_DER : constant String :=
+        "30820247308201eda003020102020200a1300a06082a8648ce3d04030230123110300e06035504030c0765782d" &
+        "726f6f74301e170d3236303732393038333334315a170d3237303532353038333334315a3010310e300c060355" &
+        "04030c0565782d63313059301306072a8648ce3d020106082a8648ce3d030107034200041d8a2619a23951a09a" &
+        "00dc1bed7c4c59047f1e8fa693792c989983ca371c6210fc5182095e4a15d5cf3808435b125d1e946d90f5c206" &
+        "f479b663383a38191a63a38201333082012f300f0603551d130101ff040530030101ff300e0603551d0f0101ff" &
+        "0404030201063081cb0603551d200481c33081c0300a06082b06010401a70801300a06082b06010401a7090130" &
+        "0a06082b06010401a70a01300a06082b06010401a70b01300a06082b06010401a70c01300a06082b06010401a7" &
+        "0d01300a06082b06010401a70e01300a06082b06010401a70f01300a06082b06010401a71001300a06082b0601" &
+        "0401a71101300a06082b06010401a71201300a06082b06010401a71301300a06082b06010401a71401300a0608" &
+        "2b06010401a71501300a06082b06010401a71601300a06082b06010401a71701301d0603551d0e04160414b1b8" &
+        "23bd89082af24e093638e614da17ce2ab875301f0603551d23041830168014137a5ce002458b4a02a927d3379f" &
+        "b533e8f980f4300a06082a8648ce3d0403020348003045022041c1e75429a7c3c05ca8475f9f88b4c7f5598c3e" &
+        "7431860a425f33ea0a61404e022100a7fc6c3d0901714ac2734364557b32dfc4218e25be804f85f243dac368ca" &
+        "bae6";
+
+      EX_C2_DER : constant String :=
+        "308201863082012ca003020102020200a2300a06082a8648ce3d0403023010310e300c06035504030c0565782d" &
+        "6331301e170d3236303732393038333334315a170d3237303532353038333334315a3010310e300c0603550403" &
+        "0c0565782d63323059301306072a8648ce3d020106082a8648ce3d0301070342000451db26ea2e413733d7c6e9" &
+        "d07b06b08f5df72df69b4e10d0ee49a4980f388ff02483861446fd20d518c3be5f05f1a27abfced023306fd500" &
+        "8630749610138492a3763074300f0603551d130101ff040530030101ff300e0603551d0f0101ff040403020106" &
+        "30110603551d20040a300830060604551d2000301d0603551d0e041604141b2aac4c9eea97e063695b33838fdb" &
+        "8be4a2d5cb301f0603551d23041830168014b1b823bd89082af24e093638e614da17ce2ab875300a06082a8648" &
+        "ce3d0403020348003045022100dc141147ef634d4fbbe89af902deea720a917be8047350b642b8b4d0cfa8ae55" &
+        "022049425ef4466ca029bc3419e20c535a97e65adbc07f49b46d2996b771bc0f8e36";
+
+      EX_C3_DER : constant String :=
+        "308201873082012ca003020102020200a3300a06082a8648ce3d0403023010310e300c06035504030c0565782d" &
+        "6332301e170d3236303732393038333334315a170d3237303532353038333334315a3010310e300c0603550403" &
+        "0c0565782d63333059301306072a8648ce3d020106082a8648ce3d030107034200048cddee079b2fefa50d3a68" &
+        "9ff693bd9b81979ce7a5415b202cc7a77f1ad95002896c947821fa2559c62977aca714802f6426ce8e83669506" &
+        "6244e6d8dc2d1cc7a3763074300f0603551d130101ff040530030101ff300e0603551d0f0101ff040403020106" &
+        "30110603551d20040a300830060604551d2000301d0603551d0e04160414a5db2091914df88362860a8eb50d77" &
+        "d03d9de3b5301f0603551d230418301680141b2aac4c9eea97e063695b33838fdb8be4a2d5cb300a06082a8648" &
+        "ce3d0403020349003046022100922be191dc6f1bf2034c76700a87851e4c69f009f9db2be9e0df2a770411f89b" &
+        "022100ea59de8c1f19e253d2fa8bf341e83c39098f3330335e847c785e35585c6b6a35";
+
+      EX_Leaf_DER : constant String :=
+        "308201753082011ba003020102020200a4300a06082a8648ce3d0403023010310e300c06035504030c0565782d" &
+        "6333301e170d3236303732393038333334315a170d3237303532353038333334315a30123110300e0603550403" &
+        "0c0765782d6c6561663059301306072a8648ce3d020106082a8648ce3d0301070342000471fa7e6cdc9e7bed4f" &
+        "e3448926d3af91e0bc41f6e01977b1c3546c38b984c5fe0e5f97e3cfdfc0c4c308dffe3858a74d74f26de0ad73" &
+        "7b8048d56b312a6c592aa3633061300c0603551d130101ff0402300030110603551d20040a300830060604551d" &
+        "2000301d0603551d0e04160414e3b8a5632e9979a915046d66332f2e33f3c47974301f0603551d230418301680" &
+        "14a5db2091914df88362860a8eb50d77d03d9de3b5300a06082a8648ce3d0403020348003045022062f75565c1" &
+        "48b13724cea67660270eabbd6db17952df724d6117b0c5bfc1718b022100b79a98c915ab8f100d541e2e7f0637" &
+        "cc057fe1c7ab56ce8a111fd97158f98b19";
+
+      function From_Hex
+        (Text : String) return Ada.Streams.Stream_Element_Array
+      is
+         Result : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (Text'Length / 2));
+         function Nibble (C : Character) return Natural
+         is (case C is
+                when '0' .. '9' => Character'Pos (C) - Character'Pos ('0'),
+                when others     => Character'Pos (C) - Character'Pos ('a') + 10);
+      begin
+         for I in Result'Range loop
+            Result (I) :=
+              Ada.Streams.Stream_Element
+                (Nibble (Text (Text'First + 2 * Natural (I - 1))) * 16
+                 + Nibble (Text (Text'First + 2 * Natural (I - 1) + 1)));
+         end loop;
+         return Result;
+      end From_Hex;
+
+      Status : CryptoLib.ASN1.Errors.Decode_Status;
+
+      function Decoded (Hex : String) return X509C.Certificate
+      is (X509C.Decode_DER
+            (From_Hex (Hex), CryptoLib.ASN1.Default_Limits, Status));
+
+      --  Sixteen policies at the first level, widened by anyPolicy at each
+      --  level below it: 1 + 16 + 16 + 16 + 16 nodes against a bound of 64.
+      type Wide is limited new XV.Path_Source with null record;
+
+      overriding function Length (Source : Wide) return Positive is (5);
+
+      overriding function Certificate_At
+        (Source : Wide; Index : Positive) return X509C.Certificate
+      is (case Index is
+             when 1      => Decoded (EX_Leaf_DER),
+             when 2      => Decoded (EX_C3_DER),
+             when 3      => Decoded (EX_C2_DER),
+             when 4      => Decoded (EX_C1_DER),
+             when others => Decoded (EX_Root_DER));
+
+      overriding function Is_Trust_Anchor
+        (Source : Wide; Item : X509C.Certificate) return Boolean
+      is (X509C.Subject_Bytes (Item)
+          = X509C.Subject_Bytes (Decoded (EX_Root_DER)));
+
+      At_Time : constant CryptoLib.X509.Certificate_Time :=
+        (Year => 2026, Month => 9, Day => 1,
+         Hour => 12, Minute => 0, Second => 0);
+
+      Verdict : constant XV.Validation_Result :=
+        XV.Validate_Path (Wide'(null record), At_Time);
+   begin
+      --  The premise: the first certificate really does carry enough
+      --  policies to widen the tree past the bound. Sixteen is also the
+      --  most one certificate may assert, so this is the widest a single
+      --  level can get.
+      declare
+         Named : constant CryptoLib.X509.Policies.Policy_Set :=
+           CryptoLib.X509.Policies.Policies_Of (Decoded (EX_C1_DER));
+      begin
+         Check (Named.Well_Formed
+                and then Named.Count = CryptoLib.X509.Policies.Maximum_Policies,
+                "fixture: the first certificate asserts a full set of "
+                & "policies, got" & Natural'Image (Named.Count));
+      end;
+
+      --  Refused, and said to be refused for this reason rather than for
+      --  anything the certificates did.
+      Check (not Verdict.Valid,
+             "a tree wider than the bound is refused rather than answered "
+             & "from in part");
+      Check (Verdict.Policies.Exhausted,
+             "and the refusal says the bound was reached, not that the "
+             & "chain establishes no policy");
+      Check (Verdict.Failure = XV.Policy_Not_Established,
+             "reported as a policy failure, got "
+             & XV.Failure_Image (Verdict.Failure));
+   end Check_Policy_Tree_Bound;
+
    procedure Check_X509_Extensions is
       use type CryptoLib.ASN1.Errors.Decode_Status;
       use type CryptoLib.PEM.Decode_Status;
@@ -9434,6 +9591,7 @@ begin
    Check_Self_Issued_Policy_Allowance;
    Check_Unsupported_Algorithm;
    Check_Verification_Failure_Kinds;
+   Check_Policy_Tree_Bound;
    Check_Random_Fails_Closed;
    Check_Off_Curve_Key;
    Check_Ed25519_Encoding;
