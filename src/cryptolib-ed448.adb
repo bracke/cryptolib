@@ -87,40 +87,45 @@ package body CryptoLib.Ed448 is
    ---------------------------------------------------------------------
 
    --  Is Left >= Right? Whole-width compare, no early exit.
-   function Not_Less (Left : Field_Element; Right : Field_Element)
-     return Boolean
+   --  The borrow out of Left - Right, as 0 or 1.
+   --
+   --  Biased by 256 so the quotient carries the sign: the value is never
+   --  negative, so the division is a shift and nothing tests a sign bit.
+   --  Writing this as "if Diff < 0" reads better and compiles to a jns on
+   --  data that, during signing, is derived from the private scalar.
+   function Borrow_Of (Left : Field_Element; Right : Field_Element)
+     return Natural
    is
       Borrow : Natural := 0;
    begin
       for I in Fe_Index loop
          declare
-            Diff : constant Integer := Left (I) - Right (I) - Borrow;
+            Biased : constant Natural := Left (I) - Right (I) - Borrow + 256;
          begin
-            Borrow := (if Diff < 0 then 1 else 0);
+            Borrow := 1 - Biased / 256;
          end;
       end loop;
-      return Borrow = 0;
-   end Not_Less;
+      return Borrow;
+   end Borrow_Of;
+
+   function Not_Less (Left : Field_Element; Right : Field_Element)
+     return Boolean
+   is (Borrow_Of (Left, Right) = 0);
 
    --  Left - Right when Take is 1, Left unchanged when it is 0.
    procedure Conditional_Subtract
      (Item : in out Field_Element; Amount : Field_Element; Take : Natural)
    is
-      Borrow : Integer := 0;
+      Borrow : Natural := 0;
       Keep   : constant Natural := Take mod 2;
    begin
       for I in Fe_Index loop
          declare
-            Sub  : constant Integer := Amount (I) * Keep;
-            Diff : constant Integer := Item (I) - Sub - Borrow;
+            Sub    : constant Natural := Amount (I) * Keep;
+            Biased : constant Natural := Item (I) - Sub - Borrow + 256;
          begin
-            if Diff < 0 then
-               Item (I) := Byte_Value (Diff + 256);
-               Borrow := 1;
-            else
-               Item (I) := Byte_Value (Diff);
-               Borrow := 0;
-            end if;
+            Item (I) := Biased mod 256;
+            Borrow := 1 - Biased / 256;
          end;
       end loop;
    end Conditional_Subtract;
@@ -131,7 +136,7 @@ package body CryptoLib.Ed448 is
    begin
       for Pass in 1 .. 2 loop
          Conditional_Subtract
-           (Item, Prime_Value, (if Not_Less (Item, Prime_Value) then 1 else 0));
+           (Item, Prime_Value, 1 - Borrow_Of (Item, Prime_Value));
       end loop;
    end Normalize;
 
@@ -175,37 +180,33 @@ package body CryptoLib.Ed448 is
      return Field_Element
    is
       Result : Field_Element := Left;
-      Borrow : Integer := 0;
+      Borrow : Natural := 0;
    begin
       for I in Fe_Index loop
          declare
-            Diff : constant Integer := Left (I) - Right (I) - Borrow;
+            Biased : constant Natural := Left (I) - Right (I) - Borrow + 256;
          begin
-            if Diff < 0 then
-               Result (I) := Byte_Value (Diff + 256);
-               Borrow := 1;
-            else
-               Result (I) := Byte_Value (Diff);
-               Borrow := 0;
-            end if;
+            Result (I) := Biased mod 256;
+            Borrow := 1 - Biased / 256;
          end;
       end loop;
 
-      --  Borrowing out means the true value was negative: add p back.
-      if Borrow /= 0 then
-         declare
-            C : Natural := 0;
-         begin
-            for I in Fe_Index loop
-               declare
-                  Sum : constant Natural := Result (I) + Prime_Value (I) + C;
-               begin
-                  Result (I) := Sum mod 256;
-                  C := Sum / 256;
-               end;
-            end loop;
-         end;
-      end if;
+      --  Borrowing out means the true value was negative, so p goes back on.
+      --  Always added, masked by the borrow, rather than added under an if:
+      --  the borrow is derived from the operands and those are secret here.
+      declare
+         C : Natural := 0;
+      begin
+         for I in Fe_Index loop
+            declare
+               Sum : constant Natural :=
+                 Result (I) + Prime_Value (I) * Borrow + C;
+            begin
+               Result (I) := Sum mod 256;
+               C := Sum / 256;
+            end;
+         end loop;
+      end;
 
       Normalize (Result);
       return Result;
@@ -244,10 +245,10 @@ package body CryptoLib.Ed448 is
             Work (I) := Work (I) mod 256;
          end loop;
 
-         if Carry /= 0 then
-            Work (0) := Work (0) + Carry;
-            Work (28) := Work (28) + Carry;
-         end if;
+         --  Unconditionally, adding nothing when there is no carry: the
+         --  carry out of a product of secret values is secret.
+         Work (0) := Work (0) + Carry;
+         Work (28) := Work (28) + Carry;
       end loop;
 
       for I in Fe_Index loop

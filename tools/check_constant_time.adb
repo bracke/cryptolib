@@ -310,6 +310,29 @@ begin
         ("cryptolib__sntrup761__f3_freeze", 1, "one range check");
       Require_Within
         ("cryptolib__sntrup761__swap_flag", 1, "one range check");
+
+      --  Ed448 signing runs the field arithmetic on values derived from the
+      --  private scalar, so the borrow chain is secret. Written the obvious
+      --  way -- "if Diff < 0 then Item := Diff + 256; Borrow := 1" -- it
+      --  compiles to a jns over genuinely different work, which is how it
+      --  was first written here. Biasing by 256 so the quotient carries the
+      --  sign makes the subtraction single-path; what is left in these is
+      --  GNAT range checks that cannot fire and the loop counters.
+      --
+      --  Conditional_Subtract itself is not listed: the release build
+      --  inlines it away, and this refuses to vouch for what it cannot see.
+      --  It is inlined into these, though, so a branch reappearing inside it
+      --  raises their counts and is caught here rather than nowhere.
+      Require_Within
+        ("cryptolib__ed448__borrow_of", 4, "range checks and the loop");
+      Require_Within
+        ("cryptolib__ed448__select_field", 5, "range checks and the loop");
+      Require_Within
+        ("cryptolib__ed448__sub_mod", 16, "range checks and the loops");
+      Require_Within
+        ("cryptolib__ed448__add_mod", 14, "range checks and the loops");
+      Require_Within
+        ("cryptolib__ed448__mul_mod", 22, "range checks and the loops");
    end if;
 
    if Failures = 0 then

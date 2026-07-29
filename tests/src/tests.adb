@@ -5641,8 +5641,33 @@ procedure Tests is
       package X509C renames CryptoLib.X509.Certificates;
       package XV renames CryptoLib.X509.Validation;
       package XS renames CryptoLib.X509.Signatures;
+      package ID renames CryptoLib.Identities;
       use type XS.Verification_Result;
       use type CryptoLib.X509.Public_Key_Algorithm;
+      use type ID.Identity_Status;
+
+      E448_Leaf_PEM : constant String :=
+        "-----BEGIN CERTIFICATE-----" & ASCII.LF &
+        "MIIBpDCCASSgAwIBAgIUQLczDWL7WwuZoYVM4WsLqa7MwWIwBQYDK2VxMBUxEzAR" & ASCII.LF &
+        "BgNVBAMMCkVkNDQ4IFJvb3QwHhcNMjYwNzI5MDk1NDQ4WhcNMzIwMTE5MDk1NDQ4" & ASCII.LF &
+        "WjAYMRYwFAYDVQQDDA1lZDQ0OC5leGFtcGxlMEMwBQYDK2VxAzoANsYQp79ULh3d" & ASCII.LF &
+        "SjdMmNmFUG1+o2Q5SSCXICPq8UUqzOYBYHeJ7hNF32pZzaGPBjzs2Z+SamfvyS0A" & ASCII.LF &
+        "o2owaDAMBgNVHRMBAf8EAjAAMBgGA1UdEQQRMA+CDWVkNDQ4LmV4YW1wbGUwHQYD" & ASCII.LF &
+        "VR0OBBYEFNb187dyLV9qCvIGD4F3TJR0WLUqMB8GA1UdIwQYMBaAFMbdgp4UBnjX" & ASCII.LF &
+        "ERu+ekkzVsgRgRsVMAUGAytlcQNzAJMzV/lMPoEHUcr1PaG6vEbABaXpt5YnsLan" & ASCII.LF &
+        "6gdTjwBoGMzeoSJNgElR+VgnUzhMFksq9RbPy3KFgPsA1OPP3RxrFlAhuBi4cmPR" & ASCII.LF &
+        "jsn91H3D6FErtsx6azAZ9tTrESyu0MCqMMmGyNuLdEKBFNJO+XIKAA==" & ASCII.LF &
+        "-----END CERTIFICATE-----";
+      E448_Key_PEM : constant String :=
+        "-----BEGIN PRIVATE KEY-----" & ASCII.LF &
+        "MEcCAQAwBQYDK2VxBDsEOYyTXKOV7SfQx6zlvUpFDYciMQ6W+mNHXbEDe8xPX6kz" & ASCII.LF &
+        "OCUb0dKHgHnuElzHtXQCKo9TeCtrBOQFOg==" & ASCII.LF &
+        "-----END PRIVATE KEY-----";
+      E448_Other_Key_PEM : constant String :=
+        "-----BEGIN PRIVATE KEY-----" & ASCII.LF &
+        "MEcCAQAwBQYDK2VxBDsEOZEzccND4JxGmKYY52TJ9TBSiT5dO9S6x5f97ovYOgNO" & ASCII.LF &
+        "INbtgil2L/8dqEoW1wfU5o8SWe9sFGpciQ==" & ASCII.LF &
+        "-----END PRIVATE KEY-----";
 
       E448_Root_DER : constant String :=
         "308201783081f9a00302010202145772562f5003d8e4686dca2c57baa102163cd987300506032b6571301531" &
@@ -5726,6 +5751,32 @@ procedure Tests is
          Check (Verdict.Valid,
                 "and the chain validates, got "
                 & XV.Failure_Image (Verdict.Failure));
+      end;
+
+      --  An Ed448 key is now checked against its certificate rather than
+      --  shrugged at. The difference that matters is the second answer
+      --  below: "these do not go together" is a finding, where
+      --  Unsupported_Key was only ever an admission of not looking.
+      declare
+         Item : ID.Local_Identity;
+         St   : ID.Identity_Status;
+      begin
+         ID.Decode (E448_Leaf_PEM, E448_Key_PEM, Item, St);
+         Check (St = ID.Ok and then ID.Is_Present (Item),
+                "an Ed448 key is recognised as belonging to its leaf, got "
+                & ID.Status_Image (St));
+      end;
+
+      declare
+         Item : ID.Local_Identity;
+         St   : ID.Identity_Status;
+      begin
+         ID.Decode (E448_Leaf_PEM, E448_Other_Key_PEM, Item, St);
+         Check (St = ID.Key_Mismatch,
+                "and another Ed448 key is reported as not belonging to it, "
+                & "not as one that could not be checked, got "
+                & ID.Status_Image (St));
+         Check (not ID.Is_Present (Item), "with nothing handed back");
       end;
    end Check_Ed448_Certificate;
 

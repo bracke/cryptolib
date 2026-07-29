@@ -22,7 +22,7 @@ The reference sources are:
 | AEAD / ciphers | AES-128/192/256 (CTR/CBC/GCM), ChaCha20-Poly1305, 3DES, RC2 | FIPS-197; AES-256-GCM and chacha20-poly1305@openssh.com cross-checked vs pyca/OpenSSL |
 | GHASH | GF(2¹²⁸) for AES-GCM | via the GCM KAT |
 | X25519 | Curve25519 ECDH | RFC 7748 §5.2 |
-| Ed448 | sign / verify | RFC 8032 PureEdDSA over edwards448, SHAKE256. Signatures are deterministic, so agreement with pyca/OpenSSL is byte-for-byte rather than "both verify"; an OpenSSL-issued Ed448 certificate chain verifies here. The curve constants were derived and not transcribed -- the base point was recovered from a real key as `s^-1 * A`, which needs only `p` and `d`, and confirmed by `L * B` reaching the neutral element, so a mistyped digit in any of them would have shown before the port. A public key has one encoding: `y` at or above `p`, spare bits set in the final octet, an `S` at or above the group order, or a non-zero top octet of `S` are each refused |
+| Ed448 | sign / verify | RFC 8032 PureEdDSA over edwards448, SHAKE256; constant-time signing, gated by jump budgets on its field arithmetic. Signatures are deterministic, so agreement with pyca/OpenSSL is byte-for-byte rather than "both verify"; an OpenSSL-issued Ed448 certificate chain verifies here. The curve constants were derived and not transcribed -- the base point was recovered from a real key as `s^-1 * A`, which needs only `p` and `d`, and confirmed by `L * B` reaching the neutral element, so a mistyped digit in any of them would have shown before the port. A public key has one encoding: `y` at or above `p`, spare bits set in the final octet, an `S` at or above the group order, or a non-zero top octet of `S` are each refused |
 | Ed25519 | sign / verify | RFC 8032; a public key has one encoding -- the decoder refuses a non-canonical `y`, requires a real square root, and refuses `x = 0` with the sign bit set (RFC 8032 5.1.3) |
 | ECDSA | P-256 (in `ssh_lib`), P-384 / P-521 sign; P-256 / P-384 / P-521 verify; the public point is checked to be on the curve and within the field before use | **RFC 6979 A.2.5** (P-384, byte-exact) + P-521 (pyca cross-verified); verification against OpenSSL signatures on all three curves, including curve/digest pairings that differ (P-521 with SHA-256, P-384 with SHA-512) |
 | Finite-field DH | groups 1 / 14 / 16 / 18 | live vs OpenSSH; group16/18 pin the exact RFC 3526 primes |
@@ -56,6 +56,16 @@ branches, memory indexing, or variable-latency arithmetic:
   the constant-time `Modexp`. The RFC 6979 nonce candidate check is branchless.
 - **Ed25519** (`Ed25519`) — signing uses always-add scalar multiplication with
   branchless field/`mod L` reduction. (Verification runs on public data.)
+- **Ed448** (`Ed448`) — the same shape: complete projective addition (RFC 8032
+  §5.2.4, no exceptional cases to test for), a double-and-add-always ladder,
+  and branchless selects. The field subtraction is biased by 256 so the
+  quotient carries the sign, because written the obvious way -- `if Diff < 0
+  then Item := Diff + 256; Borrow := 1` -- it compiles to a `jns` over
+  genuinely different work, on a borrow chain derived from the private
+  scalar. That is how it was first written here, and `objdump` is what said
+  so; `Borrow_Of`, `Select_Field`, `Add_Mod`, `Sub_Mod` and `Mul_Mod` are now
+  held to jump budgets by `check_constant_time`, so it cannot come back
+  quietly. (Verification runs on public data.)
 - **X25519** (`Curve25519`) — Montgomery ladder with arithmetic conditional swap;
   the all-zero (low-order-point) shared secret is rejected per RFC 7748 / the SSH
   curve25519 KEX.
