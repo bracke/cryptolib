@@ -6626,6 +6626,115 @@ procedure Tests is
              "and a peer value of one");
    end Check_DH_Group14;
 
+   --  Group 1, the last of the four the table lists.
+   --
+   --  Pinned the same way as group 14 and for the same reason: a round trip
+   --  proves two sides agree, not that they agree on the right number. This
+   --  fixes the exponent and the peer and writes the answer down -- 2 raised
+   --  to 0x012345 modulo the 1024-bit MODP prime -- so a wrong digit in the
+   --  constant shows up here rather than as a quiet interoperability failure
+   --  against something that has the prime right.
+   --
+   --  Group 1 is legacy and weak at 1024 bits. It is pinned because it is
+   --  offered, not because it should be chosen.
+   procedure Check_DH_Group1 is
+      Expected : constant String :=
+           "0097b82fdcff8313a9d7121615b4ee9ac1b5b517db2bd8d095756a09c46ff207ff150d4e3d21c2f43b8e"
+           & "94fc51aeb81afd35860d5e2bbb0b5c403d60340026326719e2af4bbaf6d65878dc49c916533970c1c103"
+           & "6dd5f65684a8b68853dd8f1e163f878e87899ca39af653bc5e0bb37d5db7a2b2f702b75f9d9493ba64ae"
+           & "e2c79d";
+
+      function From_Hex
+        (Text : String) return Ada.Streams.Stream_Element_Array
+      is
+         Result : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (Text'Length / 2));
+         function Nibble (C : Character) return Natural
+         is (case C is
+                when '0' .. '9' => Character'Pos (C) - Character'Pos ('0'),
+                when others     => Character'Pos (C) - Character'Pos ('a') + 10);
+      begin
+         for I in Result'Range loop
+            Result (I) :=
+              Ada.Streams.Stream_Element
+                (Nibble (Text (Text'First + 2 * Natural (I - 1))) * 16
+                 + Nibble (Text (Text'First + 2 * Natural (I - 1) + 1)));
+         end loop;
+         return Result;
+      end From_Hex;
+
+      Fixed_Private : Ada.Streams.Stream_Element_Array (1 .. 128) :=
+        [others => 0];
+      Shared : CryptoLib.Buffers.Packet_Buffer;
+   begin
+      Fixed_Private (126) := 16#01#;
+      Fixed_Private (127) := 16#23#;
+      Fixed_Private (128) := 16#45#;
+
+      Check (CryptoLib.Diffie_Hellman.Compute_Group1_Shared_Secret
+               (Fixed_Private, [1 => 2], Shared) = CryptoLib.Errors.Ok,
+             "group1 computes a shared secret from a fixed exponent");
+      Check (CryptoLib.Buffers.To_Array (Shared) = From_Hex (Expected),
+             "and it is the value an independent modexp over the 1024-bit "
+             & "MODP prime gives");
+
+      Check (CryptoLib.Diffie_Hellman.Compute_Group1_Shared_Secret
+               (Fixed_Private, [1 => 0], Shared) /= CryptoLib.Errors.Ok,
+             "a peer value of zero is refused in group1 too");
+      Check (CryptoLib.Diffie_Hellman.Compute_Group1_Shared_Secret
+               (Fixed_Private, [1 => 1], Shared) /= CryptoLib.Errors.Ok,
+             "and a peer value of one");
+   end Check_DH_Group1;
+
+   --  The X25519 entry point callers actually use.
+   --
+   --  The suite reached the primitive through Compute_Raw, which takes a raw
+   --  scalar; Shared_Secret takes the opaque private key Generate_Keypair
+   --  hands back, and is what a caller doing key exchange calls. It clamps
+   --  and fails closed on its own, and neither had been exercised through
+   --  this door -- a wrapper that dropped the low-order check would have
+   --  looked fine from the primitive's tests.
+   procedure Check_X25519_Shared_Secret is
+      use type CryptoLib.Curve25519.Public_Key;
+
+      Rng : CryptoLib.Random.Random_Source;
+
+      A_Private, B_Private : CryptoLib.Curve25519.Private_Key;
+      A_Public, B_Public   : CryptoLib.Curve25519.Public_Key;
+      A_Secret, B_Secret   : CryptoLib.Curve25519.Public_Key;
+
+      Low_Order : constant CryptoLib.Curve25519.Public_Key := [others => 0];
+   begin
+      CryptoLib.Random.Initialize_Production (Rng);
+      Check (CryptoLib.Curve25519.Generate_Keypair (Rng, A_Private, A_Public)
+             = CryptoLib.Errors.Ok
+             and then CryptoLib.Curve25519.Generate_Keypair
+                        (Rng, B_Private, B_Public) = CryptoLib.Errors.Ok,
+             "two X25519 keypairs");
+
+      Check (CryptoLib.Curve25519.Shared_Secret (A_Private, B_Public, A_Secret)
+             = CryptoLib.Errors.Ok
+             and then CryptoLib.Curve25519.Shared_Secret
+                        (B_Private, A_Public, B_Secret)
+                      = CryptoLib.Errors.Ok,
+             "each side computes a secret from the other's public key");
+      Check (A_Secret = B_Secret,
+             "and the two sides arrive at the same one");
+
+      --  The all-zero peer point: the shared secret would be all-zero, and
+      --  a key exchange that accepted it would key itself with a constant
+      --  the peer chose.
+      Check (CryptoLib.Curve25519.Shared_Secret
+               (A_Private, Low_Order, A_Secret) /= CryptoLib.Errors.Ok,
+             "a low-order peer point is refused through this door as well");
+      Check (A_Secret = [1 .. 32 => 0],
+             "and the secret is zeroed rather than left as whatever the "
+             & "ladder produced");
+
+      CryptoLib.Curve25519.Clear (A_Private);
+      CryptoLib.Curve25519.Clear (B_Private);
+   end Check_X25519_Shared_Secret;
+
    procedure Check_X509_Extensions is
       use type CryptoLib.ASN1.Errors.Decode_Status;
       use type CryptoLib.PEM.Decode_Status;
@@ -11556,6 +11665,8 @@ begin
    Check_DH_Peer_Validation;
    Check_OpenSSH_Fingerprints;
    Check_DH_Group14;
+   Check_DH_Group1;
+   Check_X25519_Shared_Secret;
    Check_Random_Fails_Closed;
    Check_Off_Curve_Key;
    Check_Ed25519_Encoding;
