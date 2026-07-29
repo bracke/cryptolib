@@ -210,7 +210,12 @@ every status reading `Ok` while every key it produces is predictable.
   policies the authorities in the path actually agreed on, which is not what
   the leaf asserts: a certificate may name a policy no issuer above it
   granted, and that certificate is refused when an explicit policy is
-  required. The three initial inputs are in `Validation_Policy.Policy_Options`
+  required. A self-issued certificate -- one a CA wrote for
+  itself, typically to change keys -- does not lengthen the path, so it
+  neither spends the explicit-policy countdown nor loses the right to assert
+  anyPolicy after `inhibitAnyPolicy` reached zero. Both halves of that rule
+  are tested against chains whose verdict turns on them, and OpenSSL agrees
+  on all four. The three initial inputs are in `Validation_Policy.Policy_Options`
   and all default off, and the user-initial-policy-set is
   `Validation_Policy.Accepted_Policies`, empty by default, so a caller that has
   not thought about policies sees no change in behaviour. The set is read in the trust anchor's policy

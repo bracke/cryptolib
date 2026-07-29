@@ -4026,6 +4026,287 @@ procedure Tests is
       end;
    end Check_Policy_Aware_Path_Building;
 
+   --  A self-issued certificate does not spend the policy allowances.
+   --
+   --  RFC 5280 6.1.4 (h) decrements explicit_policy, policy_mapping and
+   --  inhibit_anyPolicy once per certificate -- unless that certificate is
+   --  self-issued, because one a CA wrote for itself does not lengthen the
+   --  path. It is the rule that lets a CA change keys without spending the
+   --  budget its own policyConstraints handed out.
+   --
+   --  Constructing a chain whose verdict turns on it takes some care, since
+   --  6.1.4 applies the constraint after the decrement and the constraint
+   --  value overrides the count. With the tree empty, success needs
+   --  explicit_policy to still be at least two entering the wrap-up, which
+   --  decrements once more. So: a constraint of two, then one middle
+   --  certificate, then a leaf naming no policy. If the middle one is
+   --  self-issued the allowance survives; if it is not, it does not.
+   --
+   --  The two middle certificates differ in nothing but their subject name.
+   --  Same key, same extensions, same issuer.
+   procedure Check_Self_Issued_Policy_Allowance is
+      package X509C renames CryptoLib.X509.Certificates;
+      package XV renames CryptoLib.X509.Validation;
+      use type XV.Validation_Failure;
+
+      SI_Root_DER : constant String :=
+        "308201be30820143a00302010202145472b1d2cdae935174a69f43b7d24d7a0cded637300a06082a8648ce3d04" &
+        "030230123110300e06035504030c0773692d726f6f74301e170d3236303732393038313030365a170d32373035" &
+        "32353038313030365a30123110300e06035504030c0773692d726f6f743076301006072a8648ce3d020106052b" &
+        "8104002203620004c5f1b14fee380c1fa7f26dcf7c1a7445f56686fc578b775dcbb4a86c9e09388931022a69b8" &
+        "9019636fd90851eed38b0209e46379f93d7a694b3b1900b11c619f7ee6d0a8726733ab50dd0f5cff7d0644a1ab" &
+        "810b543bf6d08838d61b9f010c8fa35a3058300f0603551d130101ff040530030101ff300e0603551d0f0101ff" &
+        "04040302010630160603551d20040f300d300b06092b06010401868d1f01301d0603551d0e04160414e4adfd6a" &
+        "929eec316667b49362ab4b7cd848021c300a06082a8648ce3d0403020369003066023100f5bd22151a750f679c" &
+        "8bccfac5ac798d1871320e49942eafcac76c91da7cd74fd00c20cbe590c5f87be52d800e501cf1023100d10c3c" &
+        "0939f57755b78eeb115a51f5e01382c3bf480e0f51da0e2f7bfd3373abbd11fb132ba6f222fb0068545949078b";
+
+      SI_Inter_DER : constant String :=
+        "308201df30820165a003020102020171300a06082a8648ce3d04030230123110300e06035504030c0773692d72" &
+        "6f6f74301e170d3236303732393038313030365a170d3237303532353038313030365a30133111300f06035504" &
+        "030c0873692d696e7465723076301006072a8648ce3d020106052b81040022036200048d820adcf2775e7065ad" &
+        "d15b168345189fdddbade134616d11a9b2ff4031a2a9f4fd86a18dca3dca4993318671747d837f912c3df48120" &
+        "77448ace4e8bf46d55d97adb98bdb02f6f66740c016037d02497b759e06cf52e6c863041a007007351a3818d30" &
+        "818a300f0603551d130101ff040530030101ff300e0603551d0f0101ff04040302010630160603551d20040f30" &
+        "0d300b06092b06010401868d1f01300f0603551d240101ff04053003800102301d0603551d0e041604147a0638" &
+        "a9b61e586eacf75a52776968f6f801c493301f0603551d23041830168014e4adfd6a929eec316667b49362ab4b" &
+        "7cd848021c300a06082a8648ce3d0403020368003065023100863f69f21783c279f19df4aba3049851b8e05c44" &
+        "c0a36eb3801d8f339cd34450aeb3e4b2930cbd98623baf79ad14385502306893a3d34e9335203337d8deaf2f12" &
+        "4c7dca27ecc00aa0d11a02a757f293dbd1cce1c49c4cca4b4875aea981c46401d2";
+
+      SI_Mid_Self_DER : constant String :=
+        "308201b73082013ca00302010202020081300a06082a8648ce3d04030230133111300f06035504030c0873692d" &
+        "696e746572301e170d3236303732393038313030365a170d3237303532353038313030365a30133111300f0603" &
+        "5504030c0873692d696e7465723076301006072a8648ce3d020106052b81040022036200044d51021871860ab8" &
+        "e06affcc44f94af2ead588163ee47c3a925c482aec1c13ec95579fd14f4756e35ebe1a7cfb4077ad849aa1fe83" &
+        "51a4b83868c936a4e18e2a38bb540616c7e07a87e34378c2ba3e8c2f79a206758fed5680c8158a7b987c0fa363" &
+        "3061300f0603551d130101ff040530030101ff300e0603551d0f0101ff040403020106301d0603551d0e041604" &
+        "146d50e83c3aa909d04158d66863af9986458c1307301f0603551d230418301680147a0638a9b61e586eacf75a" &
+        "52776968f6f801c493300a06082a8648ce3d0403020369003066023100b1e5538a8c151966ec2e26be905655cf" &
+        "b24e82c232d588482018aec16235de375f905ce6f3b187317bb0441c13f90c3d023100f9f497e92d81de6a3c57" &
+        "188c267fbc5a95fb07ca65e1ec6af9dcf339230aef20634446dd0dbfa9d512871e292c20716e";
+
+      SI_Mid_Other_DER : constant String :=
+        "308201b53082013ca00302010202020082300a06082a8648ce3d04030230133111300f06035504030c0873692d" &
+        "696e746572301e170d3236303732393038313030365a170d3237303532353038313030365a30133111300f0603" &
+        "5504030c0873692d6f746865723076301006072a8648ce3d020106052b81040022036200044d51021871860ab8" &
+        "e06affcc44f94af2ead588163ee47c3a925c482aec1c13ec95579fd14f4756e35ebe1a7cfb4077ad849aa1fe83" &
+        "51a4b83868c936a4e18e2a38bb540616c7e07a87e34378c2ba3e8c2f79a206758fed5680c8158a7b987c0fa363" &
+        "3061300f0603551d130101ff040530030101ff300e0603551d0f0101ff040403020106301d0603551d0e041604" &
+        "146d50e83c3aa909d04158d66863af9986458c1307301f0603551d230418301680147a0638a9b61e586eacf75a" &
+        "52776968f6f801c493300a06082a8648ce3d04030203670030640230028880c0cacc17aeada041639e20f4cfe6" &
+        "3d5b4194a2554ad27a728831b637a3e65ae23465d87fdb50dca1987f97bc2b023060c8cb52332bcd97ad15f52c" &
+        "a4885e743d52d3495d8c6258d22cfc3621b7f9c3b6af40c65d88d2ebc607f3d86e1d6ecd";
+
+      SI_Inter_NoAny_DER : constant String :=
+        "308201ed30820174a003020102020172300a06082a8648ce3d04030230123110300e06035504030c0773692d72" &
+        "6f6f74301e170d3236303732393038313334335a170d3237303532353038313334335a30133111300f06035504" &
+        "030c0873692d696e7465723076301006072a8648ce3d020106052b81040022036200048d820adcf2775e7065ad" &
+        "d15b168345189fdddbade134616d11a9b2ff4031a2a9f4fd86a18dca3dca4993318671747d837f912c3df48120" &
+        "77448ace4e8bf46d55d97adb98bdb02f6f66740c016037d02497b759e06cf52e6c863041a007007351a3819c30" &
+        "8199300f0603551d130101ff040530030101ff300e0603551d0f0101ff04040302010630160603551d20040f30" &
+        "0d300b06092b06010401868d1f01300f0603551d240101ff04053003800100300d0603551d360101ff04030201" &
+        "00301d0603551d0e041604147a0638a9b61e586eacf75a52776968f6f801c493301f0603551d23041830168014" &
+        "e4adfd6a929eec316667b49362ab4b7cd848021c300a06082a8648ce3d0403020367003064023074ceec09e8e5" &
+        "888826f130fc7ca86786c103d5b27ea4205015b61a70a645fe9574a609804e369a599b3285c815146d8d023075" &
+        "4a2a30b2d5511d5a1e4a06cd5fafcf50da59616d460442c263813b7cf8f5ab468b085d2abbfc720e00d75ed058" &
+        "49ff";
+
+      SI_MidAny_Self_DER : constant String :=
+        "308201c93082014fa00302010202020083300a06082a8648ce3d04030230133111300f06035504030c0873692d" &
+        "696e746572301e170d3236303732393038313334335a170d3237303532353038313334335a30133111300f0603" &
+        "5504030c0873692d696e7465723076301006072a8648ce3d020106052b81040022036200044d51021871860ab8" &
+        "e06affcc44f94af2ead588163ee47c3a925c482aec1c13ec95579fd14f4756e35ebe1a7cfb4077ad849aa1fe83" &
+        "51a4b83868c936a4e18e2a38bb540616c7e07a87e34378c2ba3e8c2f79a206758fed5680c8158a7b987c0fa376" &
+        "3074300f0603551d130101ff040530030101ff300e0603551d0f0101ff04040302010630110603551d20040a30" &
+        "0830060604551d2000301d0603551d0e041604146d50e83c3aa909d04158d66863af9986458c1307301f060355" &
+        "1d230418301680147a0638a9b61e586eacf75a52776968f6f801c493300a06082a8648ce3d0403020368003065" &
+        "023100db90d2118496b871a7d41e94869e024f62db758962b477ef63067460f75eee2da89698fe349b7ead75d5" &
+        "89f2a97ccdca02307af04b39675a429ee3ba5a0de4d9eed5a9e7e5439aceb164c23fe627035712e696acbc0d15" &
+        "b21fae567137b4eb7bf15f";
+
+      SI_MidAny_Other_DER : constant String :=
+        "308201ca3082014fa00302010202020084300a06082a8648ce3d04030230133111300f06035504030c0873692d" &
+        "696e746572301e170d3236303732393038313334335a170d3237303532353038313334335a30133111300f0603" &
+        "5504030c0873692d6f746865723076301006072a8648ce3d020106052b81040022036200044d51021871860ab8" &
+        "e06affcc44f94af2ead588163ee47c3a925c482aec1c13ec95579fd14f4756e35ebe1a7cfb4077ad849aa1fe83" &
+        "51a4b83868c936a4e18e2a38bb540616c7e07a87e34378c2ba3e8c2f79a206758fed5680c8158a7b987c0fa376" &
+        "3074300f0603551d130101ff040530030101ff300e0603551d0f0101ff04040302010630110603551d20040a30" &
+        "0830060604551d2000301d0603551d0e041604146d50e83c3aa909d04158d66863af9986458c1307301f060355" &
+        "1d230418301680147a0638a9b61e586eacf75a52776968f6f801c493300a06082a8648ce3d0403020369003066" &
+        "02310089abe10f6e6457d34be715571171f4241f0229a83ff84b22671ee70296b5910866bec983e16c69d0185d" &
+        "591123c295b6023100c662dbd27f6321ada0f347660821d2018e895c150368beda50044c1cfa0ba116cf5cc2ab" &
+        "4beff2f219a7473cbb98870c";
+
+      SI_LeafAny_Self_DER : constant String :=
+        "308201be30820145a00302010202020092300a06082a8648ce3d04030230133111300f06035504030c0873692d" &
+        "696e746572301e170d3236303732393038313334335a170d3237303532353038313334335a3017311530130603" &
+        "5504030c0c686f73742e6578616d706c653076301006072a8648ce3d020106052b81040022036200043533ae65" &
+        "6cce864ebe5ec01abcd8be7da1900054dddbca9abfb51811f8f627686cfb5ef640120b25abb03ffc64ca4e1a25" &
+        "230a35a74b76ee5c38326e61982a54201701b3659857b9f29e875a758ba8456d2a0de90e1c47eba92bc0b70994" &
+        "e1e6a3683066300c0603551d130101ff0402300030160603551d20040f300d300b06092b06010401868d1f0130" &
+        "1d0603551d0e041604142318475bea76beeb0af07d63a5ac5fcf840c4bb1301f0603551d230418301680146d50" &
+        "e83c3aa909d04158d66863af9986458c1307300a06082a8648ce3d040302036700306402302585ffdc3cc6f971" &
+        "b8f05bfc16526721500ebea572700f30c1b2d73cb52cdfd60e6aa939f952a0b4c10c198957431c860230402d69" &
+        "0bc1ccdf6cbc8add97c5e4364be32d0432103314a1ab1ecd7642de909dea3cf72789185d0a72c788f83088955f";
+
+      SI_LeafAny_Other_DER : constant String :=
+        "308201c030820145a00302010202020092300a06082a8648ce3d04030230133111300f06035504030c0873692d" &
+        "6f74686572301e170d3236303732393038313334335a170d3237303532353038313334335a3017311530130603" &
+        "5504030c0c686f73742e6578616d706c653076301006072a8648ce3d020106052b81040022036200043533ae65" &
+        "6cce864ebe5ec01abcd8be7da1900054dddbca9abfb51811f8f627686cfb5ef640120b25abb03ffc64ca4e1a25" &
+        "230a35a74b76ee5c38326e61982a54201701b3659857b9f29e875a758ba8456d2a0de90e1c47eba92bc0b70994" &
+        "e1e6a3683066300c0603551d130101ff0402300030160603551d20040f300d300b06092b06010401868d1f0130" &
+        "1d0603551d0e041604142318475bea76beeb0af07d63a5ac5fcf840c4bb1301f0603551d230418301680146d50" &
+        "e83c3aa909d04158d66863af9986458c1307300a06082a8648ce3d0403020369003066023100b298db0acf51c2" &
+        "ff1b8d23465e1cc0c82597ae1a3e100b3cc0e8b3772592b737a698869b9ffe01bf1bd5d81de8e979cf023100fd" &
+        "acd518e6bf8c242be13abc2a5b833acec2cf97a2ed3b0344cc2baa5cb5458f20d81495b9998e4ef34183c557b7" &
+        "5963";
+
+      SI_Leaf_Self_DER : constant String :=
+        "308201a73082012da00302010202020091300a06082a8648ce3d04030230133111300f06035504030c0873692d" &
+        "696e746572301e170d3236303732393038313030365a170d3237303532353038313030365a3017311530130603" &
+        "5504030c0c686f73742e6578616d706c653076301006072a8648ce3d020106052b81040022036200043533ae65" &
+        "6cce864ebe5ec01abcd8be7da1900054dddbca9abfb51811f8f627686cfb5ef640120b25abb03ffc64ca4e1a25" &
+        "230a35a74b76ee5c38326e61982a54201701b3659857b9f29e875a758ba8456d2a0de90e1c47eba92bc0b70994" &
+        "e1e6a350304e300c0603551d130101ff04023000301d0603551d0e041604142318475bea76beeb0af07d63a5ac" &
+        "5fcf840c4bb1301f0603551d230418301680146d50e83c3aa909d04158d66863af9986458c1307300a06082a86" &
+        "48ce3d04030203680030650230248d46c68e75e3e512d3324b483943fa1d627ea99925e6d5cd576ccf667c5779" &
+        "8745b20c2387871cbc6393b108e0f9b5023100953d386784f3bc27fe4a1653413a1de3ffe2af72a24ed68b3723" &
+        "32a79876fcbfb6aed73ccc0383eafdd83cc673d8b4ea";
+
+      SI_Leaf_Other_DER : constant String :=
+        "308201a63082012da00302010202020091300a06082a8648ce3d04030230133111300f06035504030c0873692d" &
+        "6f74686572301e170d3236303732393038313030365a170d3237303532353038313030365a3017311530130603" &
+        "5504030c0c686f73742e6578616d706c653076301006072a8648ce3d020106052b81040022036200043533ae65" &
+        "6cce864ebe5ec01abcd8be7da1900054dddbca9abfb51811f8f627686cfb5ef640120b25abb03ffc64ca4e1a25" &
+        "230a35a74b76ee5c38326e61982a54201701b3659857b9f29e875a758ba8456d2a0de90e1c47eba92bc0b70994" &
+        "e1e6a350304e300c0603551d130101ff04023000301d0603551d0e041604142318475bea76beeb0af07d63a5ac" &
+        "5fcf840c4bb1301f0603551d230418301680146d50e83c3aa909d04158d66863af9986458c1307300a06082a86" &
+        "48ce3d04030203670030640230545d57151e1dcb206ee398b91e4cbdc5a0fe6c4ed465e35a5bf37f6e85ba99aa" &
+        "62bdb12fa3e631659c22676bc2502e5e02305380e6a691e72b7c456e5157ed153231abcd50ea8d5d4154cf719c" &
+        "acdcb2928c0b6f327de6f3f7a8046e2dfb30fedfb4";
+
+      function From_Hex
+        (Text : String) return Ada.Streams.Stream_Element_Array
+      is
+         Result : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (Text'Length / 2));
+         function Nibble (C : Character) return Natural
+         is (case C is
+                when '0' .. '9' => Character'Pos (C) - Character'Pos ('0'),
+                when others     => Character'Pos (C) - Character'Pos ('a') + 10);
+      begin
+         for I in Result'Range loop
+            Result (I) :=
+              Ada.Streams.Stream_Element
+                (Nibble (Text (Text'First + 2 * Natural (I - 1))) * 16
+                 + Nibble (Text (Text'First + 2 * Natural (I - 1) + 1)));
+         end loop;
+         return Result;
+      end From_Hex;
+
+      Status : CryptoLib.ASN1.Errors.Decode_Status;
+
+      function Decoded (Hex : String) return X509C.Certificate
+      is (X509C.Decode_DER
+            (From_Hex (Hex), CryptoLib.ASN1.Default_Limits, Status));
+
+      --  Two scenarios, each with a self-issued and a plain middle
+      --  certificate. Allowance: does a self-issued certificate spend the
+      --  explicit-policy countdown. Wildcard: may it still use anyPolicy
+      --  after inhibitAnyPolicy reached zero.
+      type Which is (Self, Other);
+      type Scenario is (Allowance, Wildcard);
+
+      type Four (Case_Kind : Scenario; Kind : Which) is
+        limited new XV.Path_Source with null record;
+
+      overriding function Length (Source : Four) return Positive is (4);
+
+      overriding function Certificate_At
+        (Source : Four; Index : Positive) return X509C.Certificate
+      is (case Index is
+             when 1 =>
+               (case Source.Case_Kind is
+                   when Allowance =>
+                     (if Source.Kind = Self then Decoded (SI_Leaf_Self_DER)
+                      else Decoded (SI_Leaf_Other_DER)),
+                   when Wildcard =>
+                     (if Source.Kind = Self
+                      then Decoded (SI_LeafAny_Self_DER)
+                      else Decoded (SI_LeafAny_Other_DER))),
+             when 2 =>
+               (case Source.Case_Kind is
+                   when Allowance =>
+                     (if Source.Kind = Self then Decoded (SI_Mid_Self_DER)
+                      else Decoded (SI_Mid_Other_DER)),
+                   when Wildcard =>
+                     (if Source.Kind = Self
+                      then Decoded (SI_MidAny_Self_DER)
+                      else Decoded (SI_MidAny_Other_DER))),
+             when 3 =>
+               (case Source.Case_Kind is
+                   when Allowance => Decoded (SI_Inter_DER),
+                   when Wildcard  => Decoded (SI_Inter_NoAny_DER)),
+             when others => Decoded (SI_Root_DER));
+
+      overriding function Is_Trust_Anchor
+        (Source : Four; Item : X509C.Certificate) return Boolean
+      is (X509C.Subject_Bytes (Item)
+          = X509C.Subject_Bytes (Decoded (SI_Root_DER)));
+
+      At_Time : constant CryptoLib.X509.Certificate_Time :=
+        (Year => 2026, Month => 9, Day => 1,
+         Hour => 12, Minute => 0, Second => 0);
+
+      function Verdict
+        (Case_Kind : Scenario; Kind : Which) return XV.Validation_Result
+      is (XV.Validate_Path
+            (Four'(Case_Kind => Case_Kind, Kind => Kind), At_Time));
+   begin
+      --  The premises, asserted rather than assumed: one middle certificate
+      --  is self-issued and the other is not, and they are otherwise the
+      --  same certificate.
+      Check (X509C.Is_Self_Issued (Decoded (SI_Mid_Self_DER)),
+             "fixture: the one middle certificate is self-issued");
+      Check (not X509C.Is_Self_Issued (Decoded (SI_Mid_Other_DER)),
+             "fixture: and the other is not");
+      Check (X509C.Public_Key (Decoded (SI_Mid_Self_DER))
+             = X509C.Public_Key (Decoded (SI_Mid_Other_DER)),
+             "fixture: they carry the same key");
+
+      --  The allowance survives a certificate that did not lengthen the
+      --  path.
+      Check (Verdict (Allowance, Self).Valid,
+             "a self-issued certificate does not spend the explicit-policy "
+             & "allowance: "
+             & XV.Failure_Image (Verdict (Allowance, Self).Failure));
+
+      --  And is spent by one that did. OpenSSL agrees on both, with
+      --  openssl verify -policy_check over the same two chains.
+      Check (not Verdict (Allowance, Other).Valid
+             and then Verdict (Allowance, Other).Failure
+                      = XV.Policy_Not_Established,
+             "and one that is not self-issued does spend it, got "
+             & XV.Failure_Image (Verdict (Allowance, Other).Failure));
+
+      --  The other half of the rule, 6.1.3 (d)(2): a self-issued
+      --  certificate may still assert anyPolicy after inhibitAnyPolicy has
+      --  reached zero, because it is the same CA rather than a step further
+      --  down the path. Here the intermediate withdraws the wildcard and the
+      --  middle certificate uses it anyway.
+      Check (Verdict (Wildcard, Self).Valid,
+             "a self-issued certificate may still use anyPolicy after it "
+             & "was inhibited: "
+             & XV.Failure_Image (Verdict (Wildcard, Self).Failure));
+      Check (not Verdict (Wildcard, Other).Valid
+             and then Verdict (Wildcard, Other).Failure
+                      = XV.Policy_Not_Established,
+             "and one that is not self-issued may not, got "
+             & XV.Failure_Image (Verdict (Wildcard, Other).Failure));
+   end Check_Self_Issued_Policy_Allowance;
+
    procedure Check_X509_Extensions is
       use type CryptoLib.ASN1.Errors.Decode_Status;
       use type CryptoLib.PEM.Decode_Status;
@@ -8877,6 +9158,7 @@ begin
    Check_Policy_Processing;
    Check_Policy_Qualifiers;
    Check_Policy_Aware_Path_Building;
+   Check_Self_Issued_Policy_Allowance;
    Check_Random_Fails_Closed;
    Check_Off_Curve_Key;
    Check_Ed25519_Encoding;
