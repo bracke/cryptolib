@@ -142,6 +142,30 @@ package CryptoLib.Bignum is
       Inverse : out Octets;
       Ok      : out Boolean);
 
+   --  The remainder of one large value divided by another.
+   --
+   --  Shift-and-subtract: take the value a bit at a time, doubling the
+   --  remainder and subtracting the modulus whenever it fits. Compare,
+   --  subtract and shift only, so it is still not a division -- which is why
+   --  it belongs here and why the note above about having no big division
+   --  stands. It is what RSA's CRT signing needs, because the padded block is
+   --  as wide as the modulus and each half of the CRT works modulo a prime
+   --  half that width.
+   --
+   --  Slower than a real division, and that is fine: it runs twice per
+   --  signature, against exponentiations it makes several times cheaper.
+   --  @param Value the dividend, unsigned big-endian
+   --  @param Modulus the divisor, unsigned big-endian and not zero
+   --  @param Result out: the remainder, as wide as requested, zeroed on
+   --    failure
+   --  @param Ok out: False when the modulus is zero or the remainder does not
+   --    fit the buffer
+   procedure Mod_Reduce
+     (Value   : Octets;
+      Modulus : Octets;
+      Result  : out Octets;
+      Ok      : out Boolean);
+
    --  The number of significant bits.
    --  @param Value the number to measure
    --  @return the position of its highest set bit, or zero when it is zero

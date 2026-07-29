@@ -34,9 +34,24 @@ with CryptoLib.Random;
 --    rather than falling back to unblinded if the random source will not
 --    yield bytes.
 --
---  There is no key generation and no CRT. Without p and q there is no CRT
---  path to get wrong, which removes the fault mode CRT is notorious for, at
---  the cost of signing roughly four times slower than a CRT implementation.
+--  CRT is used when the caller supplies the primes and their exponents, and
+--  the plain exponentiation when it does not; both are the same call.
+--
+--  Two exponentiations at half the width cost about a quarter of one at full
+--  width, but that is not what a signature costs. Measured here, a 2048-bit
+--  signature goes from 27 milliseconds to 14 -- a little under twice as fast,
+--  not four times. What CRT does not touch is the rest: the blinding factor's
+--  inverse, the unblinding multiply, and the check that raises the result to
+--  the public exponent are all at full width and all unchanged. Quoting the
+--  fourfold figure for signing would be quoting the part that got faster.
+--
+--  A fault in either CRT half produces a signature that does not verify, and
+--  releasing a faulty CRT signature next to a correct one gives up the
+--  factorisation -- the Bellcore attack, which is what CRT is notorious for.
+--  What makes CRT safe here is the check that was already in place before it
+--  arrived: every signature is raised to the public exponent and compared
+--  with the block that went in, so nothing faulty is ever returned. Without
+--  that check CRT would be a bad trade at any speed.
 --
 --  The verification is done by constructing the block the signature should
 --  have decrypted to and comparing it, rather than by taking the decrypted
@@ -140,6 +155,11 @@ package CryptoLib.RSA is
    --    the signature produced does not verify under the public exponent,
    --    Internal_Error on a fault or when the blinding factor cannot be
    --    drawn
+   --  @param Prime_P     p, for CRT; omit all five to sign the plain way
+   --  @param Prime_Q     q, for CRT
+   --  @param Exponent_P  d mod (p-1), for CRT
+   --  @param Exponent_Q  d mod (q-1), for CRT
+   --  @param Coefficient q inverse mod p, for CRT
    function Sign_PKCS1_V1_5
      (Modulus          : Ada.Streams.Stream_Element_Array;
       Public_Exponent  : Ada.Streams.Stream_Element_Array;
@@ -147,7 +167,12 @@ package CryptoLib.RSA is
       Hash             : Hash_Algorithm;
       Message          : Ada.Streams.Stream_Element_Array;
       Rng              : in out CryptoLib.Random.Random_Source;
-      Signature        : out Ada.Streams.Stream_Element_Array)
+      Signature        : out Ada.Streams.Stream_Element_Array;
+      Prime_P          : Ada.Streams.Stream_Element_Array := [1 .. 0 => 0];
+      Prime_Q          : Ada.Streams.Stream_Element_Array := [1 .. 0 => 0];
+      Exponent_P       : Ada.Streams.Stream_Element_Array := [1 .. 0 => 0];
+      Exponent_Q       : Ada.Streams.Stream_Element_Array := [1 .. 0 => 0];
+      Coefficient      : Ada.Streams.Stream_Element_Array := [1 .. 0 => 0])
       return CryptoLib.Errors.Status;
 
    --  Sign under RSASSA-PSS.
@@ -176,6 +201,11 @@ package CryptoLib.RSA is
    --    modulus cannot hold a block with this digest and salt,
    --    Authentication_Failed when the signature produced does not verify,
    --    Internal_Error on a fault or when the salt cannot be drawn
+   --  @param Prime_P     p, for CRT; omit all five to sign the plain way
+   --  @param Prime_Q     q, for CRT
+   --  @param Exponent_P  d mod (p-1), for CRT
+   --  @param Exponent_Q  d mod (q-1), for CRT
+   --  @param Coefficient q inverse mod p, for CRT
    function Sign_PSS
      (Modulus          : Ada.Streams.Stream_Element_Array;
       Public_Exponent  : Ada.Streams.Stream_Element_Array;
@@ -184,7 +214,12 @@ package CryptoLib.RSA is
       Salt_Length      : Natural;
       Message          : Ada.Streams.Stream_Element_Array;
       Rng              : in out CryptoLib.Random.Random_Source;
-      Signature        : out Ada.Streams.Stream_Element_Array)
+      Signature        : out Ada.Streams.Stream_Element_Array;
+      Prime_P          : Ada.Streams.Stream_Element_Array := [1 .. 0 => 0];
+      Prime_Q          : Ada.Streams.Stream_Element_Array := [1 .. 0 => 0];
+      Exponent_P       : Ada.Streams.Stream_Element_Array := [1 .. 0 => 0];
+      Exponent_Q       : Ada.Streams.Stream_Element_Array := [1 .. 0 => 0];
+      Coefficient      : Ada.Streams.Stream_Element_Array := [1 .. 0 => 0])
       return CryptoLib.Errors.Status;
 
    --  The modulus sizes this will generate.

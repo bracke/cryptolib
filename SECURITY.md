@@ -279,9 +279,36 @@ every status reading `Ok` while every key it produces is predictable.
   done, and it is what the suite checks. Removing the blinding fails there and
   nowhere else.
 
-  Omitting CRT costs roughly a factor of four in signing speed and removes the
-  fault mode CRT is notorious for; it is also why the CRT parameters in a
-  PKCS#8 key are parsed past rather than surfaced.
+  CRT is used when the caller supplies the primes and their exponents, and the
+  plain exponentiation when it does not. Measured here, a 2048-bit signature
+  goes from 27 milliseconds to 14 -- a little under twice as fast, not the four
+  times the halved exponentiations alone would suggest, because the blinding
+  factor's inverse, the unblinding multiply and the check against the public
+  exponent are all full width and unchanged.
+
+  What makes CRT safe here is that check, which predates it. A fault in either
+  half yields a signature that does not verify, and releasing a faulty CRT
+  signature beside a correct one gives up the factorisation -- the Bellcore
+  attack, and the reason CRT has its reputation. Every candidate is raised to
+  the public exponent and compared with the block that went in, so nothing
+  faulty is returned. Swapped CRT exponents are refused rather than signed
+  with.
+
+  That run-time check is also what covers the one branch a test cannot pin
+  down. Bringing s2 below p only happens when q is the larger prime and s2
+  lands above it, which depends on the message as well as the key; signing with
+  both orderings of the primes catches a deliberate break there about one run
+  in three, and no arrangement of a generated key makes it certain. A wrong
+  recombination returns an error on every use, which is a stronger guarantee
+  than a test that fires sometimes.
+
+  The remainder CRT needs -- the padded block modulo each prime -- is
+  shift-and-subtract in `CryptoLib.Bignum`: compare, subtract and shift, so the
+  claim that this crate has no big division still holds.
+
+  The CRT parameters in a PKCS#8 key are still not surfaced, so CRT is
+  available to a caller who kept what key generation returned and not to one
+  who only has the key file.
 
   `Generate_Keypair_With_Primes` hands back the primes and CRT parameters as
   well, which is what a caller needs to write a private key any other

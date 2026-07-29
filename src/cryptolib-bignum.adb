@@ -499,6 +499,59 @@ package body CryptoLib.Bignum is
       end;
    end Mod_Inverse;
 
+   procedure Mod_Reduce
+     (Value   : Octets;
+      Modulus : Octets;
+      Result  : out Octets;
+      Ok      : out Boolean)
+   is
+      --  One octet wider than the modulus, so doubling before the compare
+      --  cannot lose the top bit.
+      Width : constant Offset := Modulus'Length + 1;
+      Running : Octets (1 .. Width) := [others => 0];
+      Fits    : Boolean;
+   begin
+      Result := [others => 0];
+      Ok := False;
+      if Is_Zero (Modulus) then
+         return;
+      end if;
+
+      for I in Value'Range loop
+         for Bit in reverse 0 .. 7 loop
+            --  Running := Running * 2 + this bit.
+            declare
+               Carry : Stream_Element :=
+                 (if (Unsigned_8 (Value (I))
+                      and Shift_Left (Unsigned_8 (1), Bit)) /= 0
+                  then 1 else 0);
+            begin
+               for J in reverse Running'Range loop
+                  declare
+                     Doubled : constant Unsigned_16 :=
+                       Unsigned_16 (Running (J)) * 2 + Unsigned_16 (Carry);
+                  begin
+                     Running (J) := Stream_Element (Doubled and 16#FF#);
+                     Carry := Stream_Element (Shift_Right (Doubled, 8));
+                  end;
+               end loop;
+            end;
+            --  Subtract the modulus once if it fits. Doubling a value already
+            --  below the modulus can reach at most twice it, so once is
+            --  always enough.
+            if Compare (Running, Modulus) >= 0 then
+               Running := Subtract (Running, Modulus);
+            end if;
+         end loop;
+      end loop;
+
+      Resize (Running, Result'Length, Result, Fits);
+      Ok := Fits;
+      if not Ok then
+         Result := [others => 0];
+      end if;
+   end Mod_Reduce;
+
    function Bit_Length (Value : Octets) return Natural is
       First : constant Offset := Value_First (Value);
       Top   : Stream_Element;

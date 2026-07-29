@@ -442,9 +442,93 @@ package body CryptoLib.RSA is
       Public_Exponent  : Octets;
       Private_Exponent : Octets;
       Rng              : in out CryptoLib.Random.Random_Source;
-      Signature        : out Octets) return CryptoLib.Errors.Status
+      Signature        : out Octets;
+      Prime_P          : Octets := [1 .. 0 => 0];
+      Prime_Q          : Octets := [1 .. 0 => 0];
+      Exponent_P       : Octets := [1 .. 0 => 0];
+      Exponent_Q       : Octets := [1 .. 0 => 0];
+      Coefficient      : Octets := [1 .. 0 => 0])
+      return CryptoLib.Errors.Status
    is
       use type CryptoLib.Errors.Status;
+
+      --  CRT is used when every part of it is there, and the plain
+      --  exponentiation when any is missing. Both go through the same
+      --  blinding and the same check afterwards.
+      Use_CRT : constant Boolean :=
+        Prime_P'Length > 0 and then Prime_Q'Length > 0
+        and then Exponent_P'Length > 0 and then Exponent_Q'Length > 0
+        and then Coefficient'Length > 0;
+
+      --  s = s2 + q * (qinv * (s1 - s2) mod p), with s1 and s2 the halves
+      --  taken modulo each prime. Two exponentiations at half the width cost
+      --  about a quarter of one at full width.
+      --
+      --  A fault in either half yields a signature that does not verify, and
+      --  releasing a faulty CRT signature next to a correct one gives up the
+      --  factorisation outright -- the Bellcore attack. That is why CRT is
+      --  only safe here: Private_Operation raises every candidate to the
+      --  public exponent and refuses a mismatch, which is the countermeasure,
+      --  and it was already in place before CRT arrived.
+      function CRT_Exponentiate (Block : Octets) return Octets is
+         package BN renames CryptoLib.Bignum;
+         Half : constant Offset := Prime_P'Length;
+         M_Mod_P, M_Mod_Q : Octets (1 .. Half) := [others => 0];
+         Fine : Boolean;
+      begin
+         BN.Mod_Reduce (Block, Prime_P, M_Mod_P, Fine);
+         if not Fine then
+            return [1 .. 0 => 0];
+         end if;
+         BN.Mod_Reduce (Block, Prime_Q, M_Mod_Q, Fine);
+         if not Fine then
+            return [1 .. 0 => 0];
+         end if;
+
+         declare
+            S1 : constant Octets :=
+              CryptoLib.Modexp.Mod_Exp (M_Mod_P, Exponent_P, Prime_P);
+            S2 : constant Octets :=
+              CryptoLib.Modexp.Mod_Exp (M_Mod_Q, Exponent_Q, Prime_Q);
+            --  The difference is taken modulo p, so s2 has to come below p
+            --  first -- but the s2 added at the end is the unreduced one.
+            --  Using one value for both is wrong, and quietly so.
+            S2_Mod_P : Octets (1 .. Half) := S2;
+            Diff     : Octets (1 .. Half);
+            Result   : Octets (1 .. Block'Length) := [others => 0];
+         begin
+            if BN.Compare (S2_Mod_P, Prime_P) >= 0 then
+               S2_Mod_P := BN.Subtract (S2_Mod_P, Prime_P);
+            end if;
+            if BN.Compare (S1, S2_Mod_P) >= 0 then
+               Diff := BN.Subtract (S1, S2_Mod_P);
+            else
+               declare
+                  Lifted : Octets (1 .. Half + 1);
+                  Held   : Boolean;
+               begin
+                  BN.Resize (BN.Add (S1, Prime_P), Lifted'Length, Lifted,
+                             Held);
+                  if not Held then
+                     return [1 .. 0 => 0];
+                  end if;
+                  Diff := BN.Subtract (Lifted, S2_Mod_P) (2 .. Half + 1);
+               end;
+            end if;
+
+            declare
+               H  : constant Octets :=
+                 CryptoLib.Modexp.Mod_Mul (Coefficient, Diff, Prime_P);
+               HQ : constant Octets := BN.Multiply (H, Prime_Q);
+            begin
+               BN.Resize (BN.Add (HQ, S2), Result'Length, Result, Fine);
+               if not Fine then
+                  return [1 .. 0 => 0];
+               end if;
+               return Result;
+            end;
+         end;
+      end CRT_Exponentiate;
 
       R       : Octets (Modulus'Range) := [others => 0];
       R_Inv   : Octets (Modulus'Range) := [others => 0];
@@ -496,14 +580,18 @@ package body CryptoLib.RSA is
          Blinded : constant Octets :=
            CryptoLib.Modexp.Mod_Mul (Block, R_To_E, Modulus);
          Raw     : constant Octets :=
-           CryptoLib.Modexp.Mod_Exp (Blinded, Private_Exponent, Modulus);
+           (if Use_CRT
+            then CRT_Exponentiate (Blinded)
+            else CryptoLib.Modexp.Mod_Exp
+                   (Blinded, Private_Exponent, Modulus));
          --  m**d * r * r**-1 = m**d: the blinding cancels exactly.
          Candidate : constant Octets :=
            CryptoLib.Modexp.Mod_Mul (Raw, R_Inv, Modulus);
          Round_Trip : constant Octets :=
            CryptoLib.Modexp.Mod_Exp (Candidate, Public_Exponent, Modulus);
       begin
-         if Candidate'Length /= Signature'Length
+         if Raw'Length /= Modulus'Length
+           or else Candidate'Length /= Signature'Length
            or else Round_Trip'Length /= Block'Length
          then
             Scrub;
@@ -562,7 +650,12 @@ package body CryptoLib.RSA is
       Hash             : Hash_Algorithm;
       Message          : Octets;
       Rng              : in out CryptoLib.Random.Random_Source;
-      Signature        : out Octets) return CryptoLib.Errors.Status
+      Signature        : out Octets;
+      Prime_P          : Octets := [1 .. 0 => 0];
+      Prime_Q          : Octets := [1 .. 0 => 0];
+      Exponent_P       : Octets := [1 .. 0 => 0];
+      Exponent_Q       : Octets := [1 .. 0 => 0];
+      Coefficient      : Octets := [1 .. 0 => 0]) return CryptoLib.Errors.Status
    is
       N_First, E_First, D_First : Offset;
       K      : Natural;
@@ -588,7 +681,8 @@ package body CryptoLib.RSA is
             Modulus (N_First .. Modulus'Last),
             Public_Exponent (E_First .. Public_Exponent'Last),
             Private_Exponent (D_First .. Private_Exponent'Last),
-            Rng, Signature);
+            Rng, Signature,
+            Prime_P, Prime_Q, Exponent_P, Exponent_Q, Coefficient);
       end;
    exception
       when others =>
@@ -604,7 +698,12 @@ package body CryptoLib.RSA is
       Salt_Length      : Natural;
       Message          : Octets;
       Rng              : in out CryptoLib.Random.Random_Source;
-      Signature        : out Octets) return CryptoLib.Errors.Status
+      Signature        : out Octets;
+      Prime_P          : Octets := [1 .. 0 => 0];
+      Prime_Q          : Octets := [1 .. 0 => 0];
+      Exponent_P       : Octets := [1 .. 0 => 0];
+      Exponent_Q       : Octets := [1 .. 0 => 0];
+      Coefficient      : Octets := [1 .. 0 => 0]) return CryptoLib.Errors.Status
    is
       N_First, E_First, D_First : Offset;
       K      : Natural;
@@ -702,7 +801,8 @@ package body CryptoLib.RSA is
                   Modulus (N_First .. Modulus'Last),
                   Public_Exponent (E_First .. Public_Exponent'Last),
                   Private_Exponent (D_First .. Private_Exponent'Last),
-                  Rng, Signature);
+                  Rng, Signature,
+                  Prime_P, Prime_Q, Exponent_P, Exponent_Q, Coefficient);
             end;
          end;
       end;

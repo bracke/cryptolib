@@ -135,9 +135,12 @@ package CryptoLib.PKCS8 is
    --  taken responsibility for scrubbing the copy.
    --
    --  Empty for a key that is not RSA. The CRT parameters that follow d in an
-   --  RSAPrivateKey are not surfaced: CryptoLib.RSA signs without them, and
-   --  exposing them would invite a CRT implementation with the fault mode
-   --  that comes with it.
+   --  RSAPrivateKey are still not surfaced, though the reason has changed:
+   --  CryptoLib.RSA does CRT now, and does it behind a check against the
+   --  public exponent that refuses a faulty result, so the fault mode this
+   --  comment used to cite is answered. What remains is only that nothing has
+   --  needed them from a parsed key yet -- a caller that generated the key has
+   --  them from Generate_Keypair_With_Primes.
    --  @param Item the decoded private key
    --  @return the private exponent as unsigned big-endian octets, or empty
    function RSA_Private_Exponent (Item : Private_Key) return Octets;

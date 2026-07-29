@@ -10099,6 +10099,102 @@ procedure Tests is
          end;
       end;
 
+      --  CRT signing. The point of it is speed, and the thing that must not
+      --  change is the answer: a CRT signature is the same octets as the plain
+      --  one, because both are m**d mod n by different routes. Held to the
+      --  byte-exact vectors as well, which is the strongest form of that.
+      declare
+         N  : Ada.Streams.Stream_Element_Array (1 .. 256);
+         Ex : Ada.Streams.Stream_Element_Array (1 .. 3);
+         D  : Ada.Streams.Stream_Element_Array (1 .. 256);
+         P, Q, DP, DQ, QI : Ada.Streams.Stream_Element_Array (1 .. 128);
+         Plain, Via_CRT : Ada.Streams.Stream_Element_Array (1 .. 256);
+      begin
+         Check (R.Generate_Keypair_With_Primes
+                  (R.RSA_2048, Rng, N, Ex, D, P, Q, DP, DQ, QI)
+                  = CryptoLib.Errors.Ok,
+                "a key with its CRT parameters");
+
+         Check (R.Sign_PKCS1_V1_5 (N, Ex, D, R.SHA256, Message, Rng, Plain)
+                  = CryptoLib.Errors.Ok,
+                "v1.5 signs without CRT");
+         Check (R.Sign_PKCS1_V1_5 (N, Ex, D, R.SHA256, Message, Rng, Via_CRT,
+                                   P, Q, DP, DQ, QI)
+                  = CryptoLib.Errors.Ok,
+                "and with it");
+         Check (Plain = Via_CRT,
+                "the CRT signature is the same octets as the plain one");
+         Check (R.Verify_PKCS1_V1_5 (N, Ex, R.SHA256, Message, Via_CRT)
+                  = CryptoLib.Errors.Ok,
+                "and it verifies");
+
+         --  PSS is randomised, so the two cannot be compared directly; both
+         --  must verify.
+         declare
+            PSS_Plain, PSS_CRT : Ada.Streams.Stream_Element_Array (1 .. 256);
+         begin
+            Check (R.Sign_PSS (N, Ex, D, R.SHA256, 0, Message, Rng, PSS_Plain)
+                     = CryptoLib.Errors.Ok
+                   and then R.Sign_PSS (N, Ex, D, R.SHA256, 0, Message, Rng,
+                                        PSS_CRT, P, Q, DP, DQ, QI)
+                     = CryptoLib.Errors.Ok,
+                   "PSS signs both ways at salt length zero");
+            Check (PSS_Plain = PSS_CRT,
+                   "and at salt zero, where PSS is deterministic, they agree");
+         end;
+
+         --  A CRT parameter that belongs to the wrong prime produces a wrong
+         --  signature, and the check against the public exponent refuses it
+         --  rather than returning it. That refusal is the whole reason CRT is
+         --  safe here: a released faulty CRT signature gives up the factors.
+         Check (R.Sign_PKCS1_V1_5 (N, Ex, D, R.SHA256, Message, Rng, Via_CRT,
+                                   P, Q, DQ, DP, QI)
+                  /= CryptoLib.Errors.Ok,
+                "swapped CRT exponents are caught before anything is returned");
+         Check (Via_CRT = [Via_CRT'Range => 0],
+                "and no signature is left behind");
+
+         --  Both orderings of the primes. Swapping means exchanging p with q
+         --  and dp with dq, and computing the coefficient again, since it is
+         --  q inverse mod p and both have changed roles.
+         --
+         --  This improves the odds of exercising the branch that brings s2
+         --  below p, and does not guarantee it. s2 is less than q, so the
+         --  reduction only happens when q is the larger prime and s2 lands
+         --  above p -- which depends on the message as well as on the primes.
+         --  Measured by breaking that branch deliberately, this catches it
+         --  about one run in three, and no arrangement of a generated key
+         --  makes it certain.
+         --
+         --  What does make it safe is not this test. Every signature is
+         --  raised to the public exponent and compared with the block that
+         --  went in, so a wrong recombination returns an error rather than a
+         --  signature. The branch is checked at run time on every use, which
+         --  is a stronger guarantee than a test that fires sometimes.
+         declare
+            Swapped_QI : Ada.Streams.Stream_Element_Array (1 .. 128);
+            Fine       : Boolean;
+            Other_Way  : Ada.Streams.Stream_Element_Array (1 .. 256);
+         begin
+            CryptoLib.Bignum.Mod_Inverse (P, Q, Swapped_QI, Fine);
+            Check (Fine, "the coefficient for the swapped ordering exists");
+            Check (R.Sign_PKCS1_V1_5
+                     (N, Ex, D, R.SHA256, Message, Rng, Other_Way,
+                      Q, P, DQ, DP, Swapped_QI) = CryptoLib.Errors.Ok,
+                   "CRT signs with the primes the other way round");
+            Check (Other_Way = Plain,
+                   "and reaches the same signature, whichever prime is larger");
+         end;
+
+         --  Four of the five is not CRT; it falls back rather than doing
+         --  something halfway.
+         Check (R.Sign_PKCS1_V1_5 (N, Ex, D, R.SHA256, Message, Rng, Via_CRT,
+                                   P, Q, DP, DQ)
+                  = CryptoLib.Errors.Ok
+                and then Via_CRT = Plain,
+                "an incomplete CRT set signs the plain way");
+      end;
+
       --  Blinding cannot be seen in the output -- that is the point of it,
       --  the signature is identical either way, and the byte-exact vectors
       --  above would pass with it removed. What can be seen is that the
