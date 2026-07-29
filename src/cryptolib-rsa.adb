@@ -1,6 +1,9 @@
 with CryptoLib.Constant_Time;
 with CryptoLib.Hashes;
+with CryptoLib.Bignum;
 with CryptoLib.Modexp;
+with CryptoLib.Secure_Wipe;
+with System;
 
 package body CryptoLib.RSA is
 
@@ -649,5 +652,290 @@ package body CryptoLib.RSA is
          Signature := [others => 0];
          return CryptoLib.Errors.Internal_Error;
    end Sign_PSS;
+
+   function Modulus_Octets (Size : Modulus_Size) return Positive
+   is (case Size is
+          when RSA_2048 => 256,
+          when RSA_3072 => 384,
+          when RSA_4096 => 512);
+
+   --  Enough small primes to strike most composites before any
+   --  exponentiation. Each one removed here is a Miller-Rabin round not run.
+   Small_Primes : constant array (Positive range <>) of Positive :=
+     [3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67,
+      71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131, 137, 139,
+      149, 151, 157, 163, 167, 173, 179, 181, 191, 193, 197, 199, 211, 223,
+      227, 229, 233, 239, 241, 251, 257, 263, 269, 271, 277, 281, 283, 293,
+      307, 311, 313, 317, 331, 337, 347, 349, 353, 359, 367, 373, 379, 383,
+      389, 397, 401, 409, 419, 421, 431, 433, 439, 443, 449, 457, 461, 463,
+      467, 479, 487, 491, 499, 503, 509, 521, 523, 541, 547, 557, 563, 569,
+      571, 577, 587, 593, 599, 601, 607, 613, 617, 619, 631, 641, 643, 647,
+      653, 659, 661, 673, 677, 683, 691, 701, 709, 719, 727, 733, 739, 743,
+      751, 757, 761, 769, 773, 787, 797, 809, 811, 821, 823, 827, 829, 839,
+      853, 857, 859, 863, 877, 881, 883, 887, 907, 911, 919, 929, 937, 941,
+      947, 953, 967, 971, 977, 983, 991, 997];
+
+   --  Miller-Rabin rounds. The candidates here are random rather than
+   --  adversarial, where a handful of rounds already puts the error far below
+   --  anything that matters; this is generous because key generation happens
+   --  once and the cost is not the operation anyone waits on.
+   Rabin_Rounds : constant := 24;
+
+   --  Is this odd candidate probably prime?
+   function Probably_Prime
+     (Candidate : Octets;
+      Rng       : in out CryptoLib.Random.Random_Source) return Boolean
+   is
+      use type CryptoLib.Errors.Status;
+      package BN renames CryptoLib.Bignum;
+
+      N_Minus_1 : constant Octets := BN.Subtract_Small (Candidate, 1);
+      Odd_Part  : Octets := N_Minus_1;
+      Twos      : Natural := 0;
+      One       : constant Octets := [1 => 1];
+   begin
+      for P of Small_Primes loop
+         if BN.Mod_Small (Candidate, P) = 0 then
+            --  Divisible by a small prime, and not that prime itself: every
+            --  candidate here is far larger than the table.
+            return False;
+         end if;
+      end loop;
+
+      --  n - 1 = Odd_Part * 2**Twos
+      loop
+         exit when (Odd_Part (Odd_Part'Last) and 1) = 1;
+         declare
+            Halved    : Octets (Odd_Part'Range);
+            Remainder : Natural;
+         begin
+            BN.Divide_Small (Odd_Part, 2, Halved, Remainder);
+            Odd_Part := Halved;
+            Twos := Twos + 1;
+         end;
+      end loop;
+
+      for Round in 1 .. Rabin_Rounds loop
+         declare
+            Base : Octets (Candidate'Range);
+            X    : Octets (Candidate'Range);
+         begin
+            if CryptoLib.Random.Fill (Rng, Base) /= CryptoLib.Errors.Ok then
+               return False;
+            end if;
+            --  Bring the base below n. The candidate's top two bits are set,
+            --  so a draw of the same width needs at most one subtraction.
+            if BN.Compare (Base, Candidate) >= 0 then
+               Base := BN.Subtract (Base, Candidate);
+            end if;
+            if BN.Compare (Base, One) <= 0 then
+               Base := [others => 0];
+               Base (Base'Last) := 2;
+            end if;
+
+            X := CryptoLib.Modexp.Mod_Exp (Base, Odd_Part, Candidate);
+            if BN.Compare (X, One) /= 0
+              and then BN.Compare (X, N_Minus_1) /= 0
+            then
+               declare
+                  Witnessed : Boolean := True;
+                  Square    : constant Octets := [1 => 2];
+               begin
+                  for Step in 1 .. Twos - 1 loop
+                     X := CryptoLib.Modexp.Mod_Exp (X, Square, Candidate);
+                     if BN.Compare (X, N_Minus_1) = 0 then
+                        Witnessed := False;
+                        exit;
+                     end if;
+                  end loop;
+                  if Witnessed then
+                     return False;
+                  end if;
+               end;
+            end if;
+         end;
+      end loop;
+      return True;
+   end Probably_Prime;
+
+   --  Draw a prime of the given width, with the top two bits set so the
+   --  product of two of them has exactly twice the width.
+   function Draw_Prime
+     (Width : Offset;
+      Rng   : in out CryptoLib.Random.Random_Source;
+      Value : out Octets) return Boolean
+   is
+      use type CryptoLib.Errors.Status;
+      package BN renames CryptoLib.Bignum;
+      Attempts : constant := 20_000;
+   begin
+      Value := [others => 0];
+      for Attempt in 1 .. Attempts loop
+         if CryptoLib.Random.Fill (Rng, Value) /= CryptoLib.Errors.Ok then
+            Value := [others => 0];
+            return False;
+         end if;
+         Value (Value'First) := Value (Value'First) or 16#C0#;
+         Value (Value'Last) := Value (Value'Last) or 1;
+
+         --  e must be coprime to p - 1, or no private exponent exists.
+         if BN.Mod_Small (BN.Subtract_Small (Value, 1),
+                          Generated_Public_Exponent) /= 0
+           and then Probably_Prime (Value, Rng)
+         then
+            return True;
+         end if;
+      end loop;
+      Value := [others => 0];
+      return False;
+   end Draw_Prime;
+
+   --  The private exponent is the inverse of the public one modulo Phi.
+   function Inverse_Of_E (Phi : Octets; D : out Octets) return Boolean is
+      Ok : Boolean;
+   begin
+      CryptoLib.Bignum.Mod_Inverse_Small
+        (Generated_Public_Exponent, Phi, D, Ok);
+      return Ok;
+   end Inverse_Of_E;
+
+   function Generate_Keypair
+     (Size             : Modulus_Size;
+      Rng              : in out CryptoLib.Random.Random_Source;
+      Modulus          : out Octets;
+      Public_Exponent  : out Octets;
+      Private_Exponent : out Octets) return CryptoLib.Errors.Status
+   is
+      package BN renames CryptoLib.Bignum;
+      use type CryptoLib.Errors.Status;
+
+      K        : constant Natural := Modulus_Octets (Size);
+      Half     : constant Offset := Offset (K) / 2;
+      Attempts : constant := 200;
+   begin
+      Modulus := [others => 0];
+      Public_Exponent := [others => 0];
+      Private_Exponent := [others => 0];
+
+      if Natural (Modulus'Length) /= K
+        or else Natural (Private_Exponent'Length) /= K
+        or else Public_Exponent'Length /= 3
+      then
+         return CryptoLib.Errors.Handshake_Failed;
+      end if;
+
+      for Attempt in 1 .. Attempts loop
+         declare
+            P, Q : Octets (1 .. Half) := [others => 0];
+
+            procedure Scrub_Primes is
+            begin
+               CryptoLib.Secure_Wipe.Wipe (P'Address, P'Length);
+               CryptoLib.Secure_Wipe.Wipe (Q'Address, Q'Length);
+            end Scrub_Primes;
+         begin
+            if not Draw_Prime (Half, Rng, P)
+              or else not Draw_Prime (Half, Rng, Q)
+            then
+               Scrub_Primes;
+               return CryptoLib.Errors.Internal_Error;
+            end if;
+
+            --  Primes too close together are found by Fermat's method in
+            --  moments. With both top bits set they never should be; checked
+            --  rather than assumed.
+            declare
+               Difference : constant Octets :=
+                 (if BN.Compare (P, Q) >= 0
+                  then BN.Subtract (P, Q) else BN.Subtract (Q, P));
+            begin
+               if BN.Bit_Length (Difference)
+                 < Natural (Half) * 8 - 100
+               then
+                  Scrub_Primes;
+                  goto Continue;
+               end if;
+            end;
+
+            declare
+               N   : constant Octets := BN.Multiply (P, Q);
+               Phi : constant Octets :=
+                 BN.Multiply (BN.Subtract_Small (P, 1),
+                              BN.Subtract_Small (Q, 1));
+               D    : Octets (1 .. Offset (K)) := [others => 0];
+               Fits : Boolean;
+
+               procedure Scrub_All is
+               begin
+                  CryptoLib.Secure_Wipe.Wipe (D'Address, D'Length);
+                  Scrub_Primes;
+               end Scrub_All;
+            begin
+               if BN.Bit_Length (N) /= K * 8 then
+                  Scrub_All;
+                  goto Continue;
+               end if;
+               if not Inverse_Of_E (Phi, D) then
+                  Scrub_All;
+                  goto Continue;
+               end if;
+               --  A private exponent below the square root of the modulus is
+               --  recoverable by Wiener's continued-fraction attack.
+               if BN.Bit_Length (D) <= Natural (Half) * 8 then
+                  Scrub_All;
+                  goto Continue;
+               end if;
+
+               BN.Resize (N, Modulus'Length, Modulus, Fits);
+               if not Fits then
+                  Scrub_All;
+                  goto Continue;
+               end if;
+               Private_Exponent := D;
+               Public_Exponent := [16#01#, 16#00#, 16#01#];
+               Scrub_All;
+
+               --  The key has to work. Signing and verifying once here costs
+               --  one key generation and catches a modulus, exponent or
+               --  inverse that is subtly wrong -- which a caller would
+               --  otherwise discover as a signature nobody accepts.
+               declare
+                  Probe : constant Octets := [1 .. 8 => 16#5A#];
+                  Sig   : Octets (1 .. Offset (K));
+               begin
+                  if Sign_PKCS1_V1_5
+                       (Modulus, Public_Exponent, Private_Exponent,
+                        SHA256, Probe, Sig) /= CryptoLib.Errors.Ok
+                    or else Verify_PKCS1_V1_5
+                       (Modulus, Public_Exponent, SHA256, Probe, Sig)
+                         /= CryptoLib.Errors.Ok
+                  then
+                     Modulus := [others => 0];
+                     Public_Exponent := [others => 0];
+                     CryptoLib.Secure_Wipe.Wipe
+                       (Private_Exponent'Address, Private_Exponent'Length);
+                     Private_Exponent := [others => 0];
+                     goto Continue;
+                  end if;
+               end;
+               return CryptoLib.Errors.Ok;
+            end;
+         end;
+         <<Continue>>
+      end loop;
+
+      Modulus := [others => 0];
+      Public_Exponent := [others => 0];
+      Private_Exponent := [others => 0];
+      return CryptoLib.Errors.Internal_Error;
+   exception
+      when others =>
+         Modulus := [others => 0];
+         Public_Exponent := [others => 0];
+         CryptoLib.Secure_Wipe.Wipe
+           (Private_Exponent'Address, Private_Exponent'Length);
+         Private_Exponent := [others => 0];
+         return CryptoLib.Errors.Internal_Error;
+   end Generate_Keypair;
 
 end CryptoLib.RSA;

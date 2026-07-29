@@ -179,4 +179,55 @@ package CryptoLib.RSA is
       Signature        : out Ada.Streams.Stream_Element_Array)
       return CryptoLib.Errors.Status;
 
+   --  The modulus sizes this will generate.
+   --
+   --  Nothing below 2048 bits: a smaller RSA key is not a key with a smaller
+   --  margin, it is one that is factored. Offering it would be offering a
+   --  footgun with a size argument.
+   type Modulus_Size is (RSA_2048, RSA_3072, RSA_4096);
+
+   --  The public exponent every generated key uses, 65537.
+   --
+   --  Not a parameter. A caller who could choose would eventually choose 3,
+   --  and a small public exponent turns several implementation slips --
+   --  unpadded messages, related messages, a verifier that parses rather than
+   --  compares -- into practical attacks. 65537 has one bit more than the
+   --  minimum useful Hamming weight, verifies fast, and has no such history.
+   Generated_Public_Exponent : constant := 65537;
+
+   --  Generate an RSA keypair.
+   --
+   --  Two primes are drawn with their top two bits set, so the modulus has
+   --  exactly the requested width and the primes cannot be close enough for
+   --  Fermat factorisation. Each candidate is trial-divided by the small
+   --  primes and then put through Miller-Rabin. The private exponent is
+   --  checked to be large enough that Wiener's attack does not apply, and the
+   --  key is checked to work -- a signature is made and verified -- before it
+   --  is returned.
+   --
+   --  This is not fast. Nothing here is optimised for key generation, and a
+   --  4096-bit key can take a while; it is a thing done once per key, not per
+   --  operation.
+   --  @param Size             which modulus width to generate
+   --  @param Rng              the random source the primes are drawn from
+   --  @param Modulus          out: the modulus n, Size octets, zeroed on
+   --    failure
+   --  @param Public_Exponent  out: 65537 as three octets, zeroed on failure
+   --  @param Private_Exponent out: the private exponent d, the same width as
+   --    the modulus, zeroed on failure
+   --  @return Ok, Handshake_Failed on a wrong-length output buffer,
+   --    Internal_Error when the random source fails or no key is found
+   function Generate_Keypair
+     (Size             : Modulus_Size;
+      Rng              : in out CryptoLib.Random.Random_Source;
+      Modulus          : out Ada.Streams.Stream_Element_Array;
+      Public_Exponent  : out Ada.Streams.Stream_Element_Array;
+      Private_Exponent : out Ada.Streams.Stream_Element_Array)
+      return CryptoLib.Errors.Status;
+
+   --  The modulus width in octets for a size.
+   --  @param Size which modulus width
+   --  @return 256, 384 or 512
+   function Modulus_Octets (Size : Modulus_Size) return Positive;
+
 end CryptoLib.RSA;

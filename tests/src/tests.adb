@@ -60,6 +60,7 @@ with CryptoLib.SHA3;
 with CryptoLib.Buffers;
 with CryptoLib.Diffie_Hellman;
 with CryptoLib.Modexp;
+with CryptoLib.Bignum;
 with CryptoLib.Random;
 with CryptoLib.RSA;
 
@@ -9334,6 +9335,256 @@ procedure Tests is
                 Bytes_From_String ("a different message"), Signature)
                /= CryptoLib.Errors.Ok,
              "a v1.5 signature does not verify over another message");
+
+      --  A PKCS#8 RSA key, parsed and then used. The private exponent was not
+      --  surfaced before signing existed, so a caller could read a key and
+      --  still not sign with it. Checked end to end: what the parser hands
+      --  back must be the exponent that makes a signature verify under the
+      --  modulus beside it.
+      declare
+         package P8 renames CryptoLib.PKCS8;
+         Key_DER : constant Ada.Streams.Stream_Element_Array := Bytes_From_Hex
+           ("30820278020100300d06092a864886f70d0101010500048202623082025e02"
+         & "010002818100b8ffa2b48d2870fa4fe289746b0cc49dc4123f35cabbab2726"
+         & "81c8fd3675588f43026d65d138a4c38c48feebf0076e1ebfac510093545086"
+         & "3b8cdf4a2dc0258f7ab0ad8d7cc610904493cbb1c99e834b964270dedd0024"
+         & "90d1015dd432befc865d188d7813b990431278e18e5873a49e0d1337d45653"
+         & "abc4bab6ea06c977dbdf020301000102818100b3ab4ab8f193024e88812a20"
+         & "0fcba1b4db752140bbf991daff11f342c0be2cd94e2a30573f6034dcda0516"
+         & "d7cc115b48afbcca1ab5fba00d0e0eddd96c1f7e19764e4d9a97d3f81c1d94"
+         & "ffefdcf5b0ead97009201743691c0eeec8d58c2dc15eb2ba88021d87f5f9eb"
+         & "349e1a2e7038104726235ad91dc1e3ea1016d5f29429e9024100f501b54b53"
+         & "2c04339e351ee73df1f873c7d210a4e16e24b368f8cac0e3dff34c4b3b9d39"
+         & "814d1763ca6a448948cb6a231fe172a5524431b168c20f83ba7df583024100"
+         & "c14ca38ad0b32eb0997a89a6a94524ce22cd56e8290fd1ed535524b46c74ce"
+         & "a7e236797c8cba69e0e1ab5e29f1fe2b75b68d9679bd62ed2f1ff4476079a5"
+         & "0d750241008ac56cea3d31b12f8b6c8b146f019eb7f57605f75db805119963"
+         & "5173ef9de9304d6c76a11b9b8ea3f70239cf886baeb2365c7b932805782004"
+         & "35e693b60da2010240237e7121524534b394db1d5f8f01754aacb54bda0180"
+         & "3829fdfd4a6a1ee82bf243e580d54ffa02eb1a451f5b50663d90b5deb5dcd0"
+         & "dbd375adc66b3cd9d966e9024100a432b9dc357fee7e0dacfa14059c627b94"
+         & "b044240f2f8a5a58ba1f370a2040160077e07bc4e5d468dfdd9fa10009811e"
+         & "65fb42c636339caf6cfcb11eaead89c4");
+         Want_N : constant Ada.Streams.Stream_Element_Array := Bytes_From_Hex
+           ("b8ffa2b48d2870fa4fe289746b0cc49dc4123f35cabbab272681c8fd367558"
+         & "8f43026d65d138a4c38c48feebf0076e1ebfac5100935450863b8cdf4a2dc0"
+         & "258f7ab0ad8d7cc610904493cbb1c99e834b964270dedd002490d1015dd432"
+         & "befc865d188d7813b990431278e18e5873a49e0d1337d45653abc4bab6ea06"
+         & "c977dbdf");
+         Want_D : constant Ada.Streams.Stream_Element_Array := Bytes_From_Hex
+           ("b3ab4ab8f193024e88812a200fcba1b4db752140bbf991daff11f342c0be2c"
+         & "d94e2a30573f6034dcda0516d7cc115b48afbcca1ab5fba00d0e0eddd96c1f"
+         & "7e19764e4d9a97d3f81c1d94ffefdcf5b0ead97009201743691c0eeec8d58c"
+         & "2dc15eb2ba88021d87f5f9eb349e1a2e7038104726235ad91dc1e3ea1016d5"
+         & "f29429e9");
+         Key    : P8.Private_Key;
+         Status : CryptoLib.ASN1.Errors.Decode_Status;
+      begin
+         P8.Decode_DER (Key_DER, CryptoLib.ASN1.Default_Limits, Key, Status);
+         Check (P8.Is_Present (Key), "the PKCS#8 RSA key decodes");
+         --  DER INTEGERs may carry a leading zero, so compare numerically.
+         Check (CryptoLib.Bignum.Compare (P8.RSA_Modulus (Key), Want_N) = 0,
+                "and its modulus is the one OpenSSL wrote");
+         Check (CryptoLib.Bignum.Compare
+                  (P8.RSA_Private_Exponent (Key), Want_D) = 0,
+                "and its private exponent too");
+
+         --  The real test: sign with what came out of the parser.
+         declare
+            Sig : Ada.Streams.Stream_Element_Array (1 .. 128);
+         begin
+            Check (R.Sign_PKCS1_V1_5
+                     (P8.RSA_Modulus (Key), P8.RSA_Exponent (Key),
+                      P8.RSA_Private_Exponent (Key), R.SHA256, Message, Sig)
+                     = CryptoLib.Errors.Ok
+                   and then R.Verify_PKCS1_V1_5
+                     (P8.RSA_Modulus (Key), P8.RSA_Exponent (Key),
+                      R.SHA256, Message, Sig) = CryptoLib.Errors.Ok,
+                   "a parsed PKCS#8 RSA key signs and verifies");
+         end;
+      end;
+
+      --  Bignum's own operations, against answers this test computes a
+      --  different way. Multiply_Small is the one key generation leans on for
+      --  the large-by-small step in the inverse.
+      declare
+         package BN renames CryptoLib.Bignum;
+         Value : constant Ada.Streams.Stream_Element_Array :=
+           Bytes_From_Hex ("0123456789abcdef0123456789abcdef");
+         Repeated : Ada.Streams.Stream_Element_Array (1 .. 20) :=
+           [others => 0];
+      begin
+         --  Multiplying by n is adding n times, for a small n.
+         for I in 1 .. 7 loop
+            declare
+               Sum : constant Ada.Streams.Stream_Element_Array :=
+                 BN.Add (Repeated, Value);
+               Fits : Boolean;
+            begin
+               BN.Resize (Sum, Repeated'Length, Repeated, Fits);
+               Check (Fits, "the running sum still fits");
+            end;
+         end loop;
+         declare
+            Product : constant Ada.Streams.Stream_Element_Array :=
+              BN.Multiply_Small (Value, 7);
+            Sized   : Ada.Streams.Stream_Element_Array (1 .. 20);
+            Fits    : Boolean;
+         begin
+            BN.Resize (Product, Sized'Length, Sized, Fits);
+            Check (Fits and then Sized = Repeated,
+                   "multiplying by a small number is repeated addition");
+         end;
+         --  And the general multiply agrees with the small one.
+         declare
+            Seven : constant Ada.Streams.Stream_Element_Array := [1 => 7];
+            Wide  : constant Ada.Streams.Stream_Element_Array :=
+              BN.Multiply (Value, Seven);
+            Sized : Ada.Streams.Stream_Element_Array (1 .. 20);
+            Fits  : Boolean;
+         begin
+            BN.Resize (Wide, Sized'Length, Sized, Fits);
+            Check (Fits and then Sized = Repeated,
+                   "the general multiply agrees with the small one");
+         end;
+      end;
+
+      --  The modular inverse on its own, both ways round.
+      --
+      --  Key generation calls this to turn 65537 into the private exponent,
+      --  but it cannot be tested through key generation: the sign-and-verify
+      --  check inside Generate_Keypair discards a key built on a wrong
+      --  inverse and draws another, so a half-broken inverse shows up as the
+      --  generator being slower rather than as anything failing. Breaking the
+      --  negative fold and running the suite proved exactly that -- nothing
+      --  noticed. So it is checked here directly, on two moduli chosen to
+      --  send it down each branch: one where the intermediate comes out
+      --  positive, one where it comes out negative and has to be folded back
+      --  into range. Both are about equally common in real use.
+      declare
+         Neg_Modulus : constant Ada.Streams.Stream_Element_Array :=
+           Bytes_From_Hex
+             ("8000000000000000000000000000000000000000000000000000000000000003");
+         Neg_Inverse : constant Ada.Streams.Stream_Element_Array :=
+           Bytes_From_Hex
+             ("36db4924b6db4924b6db4924b6db4924b6db4924b6db4924b6db4924b6db4926");
+         Pos_Modulus : constant Ada.Streams.Stream_Element_Array :=
+           Bytes_From_Hex
+             ("8000000000000000000000000000000000000000000000000000000000000005");
+         Pos_Inverse : constant Ada.Streams.Stream_Element_Array :=
+           Bytes_From_Hex
+             ("68ba1745e8ba1745e8ba1745e8ba1745e8ba1745e8ba1745e8ba1745e8ba174a");
+         Result : Ada.Streams.Stream_Element_Array (1 .. 32);
+         Fine   : Boolean;
+      begin
+         CryptoLib.Bignum.Mod_Inverse_Small
+           (65537, Neg_Modulus, Result, Fine);
+         Check (Fine and then Result = Neg_Inverse,
+                "the inverse of 65537 is right where the intermediate is "
+                & "negative");
+         CryptoLib.Bignum.Mod_Inverse_Small
+           (65537, Pos_Modulus, Result, Fine);
+         Check (Fine and then Result = Pos_Inverse,
+                "and where it is positive");
+
+         --  A modulus sharing a factor with the value has no inverse.
+         declare
+            Even : constant Ada.Streams.Stream_Element_Array :=
+              Bytes_From_Hex ("0000000000000000000000000000000000000000000000000000000000020002");
+            Small_Result : Ada.Streams.Stream_Element_Array (1 .. 32);
+         begin
+            CryptoLib.Bignum.Mod_Inverse_Small (2, Even, Small_Result, Fine);
+            Check (not Fine, "a value sharing a factor with the modulus has "
+                   & "no inverse");
+            Check (Small_Result = [Small_Result'Range => 0],
+                   "and the buffer is left zero");
+         end;
+      end;
+
+      --  Key generation. Kept to 2048 bits: the larger sizes work but cost
+      --  seconds each, and what is being checked here is the construction,
+      --  not the width.
+      declare
+         N : Ada.Streams.Stream_Element_Array (1 .. 256);
+         E : Ada.Streams.Stream_Element_Array (1 .. 3);
+         D : Ada.Streams.Stream_Element_Array (1 .. 256);
+         Sig : Ada.Streams.Stream_Element_Array (1 .. 256);
+      begin
+         Check (R.Modulus_Octets (R.RSA_2048) = 256
+                and then R.Modulus_Octets (R.RSA_3072) = 384
+                and then R.Modulus_Octets (R.RSA_4096) = 512,
+                "each size names its own width in octets");
+         Check (R.Generate_Keypair (R.RSA_2048, Rng, N, E, D)
+                  = CryptoLib.Errors.Ok,
+                "RSA generates a 2048-bit keypair");
+         Check (E = [16#01#, 16#00#, 16#01#],
+                "the generated public exponent is 65537");
+         Check (N (N'First) >= 16#80#,
+                "the modulus has exactly the requested width -- the top octet "
+                & "is set, which is what drawing primes with their top two "
+                & "bits set is for");
+         Check ((N (N'Last) and 1) = 1, "the modulus is odd");
+
+         --  d is the real private exponent, checked without knowing p or q:
+         --  raising to d and then to e returns the input exactly when
+         --  e*d = 1 mod lambda(n). A modulus or inverse that was subtly wrong
+         --  fails here even though every length and shape looks right.
+         declare
+            Base : Ada.Streams.Stream_Element_Array (1 .. 256) :=
+              [others => 0];
+            Once, Twice : Ada.Streams.Stream_Element_Array (1 .. 256);
+         begin
+            Base (Base'Last) := 42;
+            Once := CryptoLib.Modexp.Mod_Exp (Base, D, N);
+            Twice := CryptoLib.Modexp.Mod_Exp (Once, E, N);
+            Check (Twice = Base,
+                   "raising to d and then to e is the identity mod n");
+            Check (Once /= Base,
+                   "and d is not doing nothing");
+         end;
+
+         --  The generated key must actually sign.
+         Check (R.Sign_PSS (N, E, D, R.SHA256, 32, Message, Rng, Sig)
+                  = CryptoLib.Errors.Ok
+                and then R.Verify_PSS (N, E, R.SHA256, 32, Message, Sig)
+                  = CryptoLib.Errors.Ok,
+                "a generated key signs and verifies under PSS");
+         Check (R.Sign_PKCS1_V1_5 (N, E, D, R.SHA256, Message, Sig)
+                  = CryptoLib.Errors.Ok
+                and then R.Verify_PKCS1_V1_5 (N, E, R.SHA256, Message, Sig)
+                  = CryptoLib.Errors.Ok,
+                "and under PKCS#1 v1.5");
+
+         --  Two keys must not be the same key.
+         declare
+            N2 : Ada.Streams.Stream_Element_Array (1 .. 256);
+            E2 : Ada.Streams.Stream_Element_Array (1 .. 3);
+            D2 : Ada.Streams.Stream_Element_Array (1 .. 256);
+         begin
+            Check (R.Generate_Keypair (R.RSA_2048, Rng, N2, E2, D2)
+                     = CryptoLib.Errors.Ok,
+                   "a second keypair generates");
+            Check (N2 /= N and then D2 /= D,
+                   "and it is a different key");
+         end;
+
+         --  Wrong-width buffers are refused.
+         declare
+            Short_N : Ada.Streams.Stream_Element_Array (1 .. 128) :=
+              [others => 16#A5#];
+            Short_E : Ada.Streams.Stream_Element_Array (1 .. 2) :=
+              [others => 16#A5#];
+         begin
+            Check (R.Generate_Keypair (R.RSA_2048, Rng, Short_N, E, D)
+                     /= CryptoLib.Errors.Ok,
+                   "a modulus buffer of the wrong width is refused");
+            Check (Short_N = [Short_N'Range => 0], "and left zero");
+            Check (R.Generate_Keypair (R.RSA_2048, Rng, N, Short_E, D)
+                     /= CryptoLib.Errors.Ok,
+                   "an exponent buffer of the wrong width is refused");
+            Check (Short_E = [Short_E'Range => 0], "and left zero");
+         end;
+      end;
 
       --  Refusals, each leaving the buffer zero.
       declare
