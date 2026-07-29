@@ -204,7 +204,10 @@ every status reading `Ok` while every key it produces is predictable.
   required. The three initial inputs are in `Validation_Policy.Policy_Options`
   and all default off, and the user-initial-policy-set is
   `Validation_Policy.Accepted_Policies`, empty by default, so a caller that has
-  not thought about policies sees no change in behaviour. Naming policies there
+  not thought about policies sees no change in behaviour. The set is read in the trust anchor's policy
+  domain, not the leaf's: under a policy mapping, asking for the policy the
+  anchor granted is satisfied by a leaf asserting what it was mapped to, and
+  asking for the mapped-to policy is not. Naming policies there
   only decides the outcome when some certificate required an explicit policy:
   otherwise §6.1.5 succeeds on the `explicit_policy` counter alone and the set
   is reported rather than enforced. That is the RFC's behaviour and OpenSSL's,

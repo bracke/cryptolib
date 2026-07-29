@@ -3510,6 +3510,42 @@ procedure Tests is
                          = XV.Policy_Not_Established,
                 "and one asking for a policy it does not is refused, got "
                 & XV.Failure_Image (Asking (Other, With_Policy).Failure));
+
+         --  The caller's set is read in the trust anchor's policy domain,
+         --  not the leaf's, and a mapping is what connects the two. Asking
+         --  for the policy the anchor granted must therefore be satisfied by
+         --  a leaf asserting what that policy was mapped to.
+         --
+         --  Filtering every node against the caller's set breaks exactly
+         --  this: the leaf's node names the subject-domain policy, which is
+         --  not what was asked for, and deleting it rejects the chain that
+         --  policy mapping exists to allow. Section 6.1.5 (g)(iii) matches
+         --  only nodes whose parent is anyPolicy for that reason.
+         declare
+            function Through_Map (Encoded : String)
+              return XV.Validation_Result
+            is (XV.Validate_Path
+                  (Chain'(Inter => Map, Leaf => Mapped), At_Time,
+                   (Maximum_Path_Length       => 8,
+                    Require_Basic_Constraints => True,
+                    Require_Key_Cert_Sign     => True,
+                    Reject_Unknown_Critical   => True,
+                    Policy_Options            => PP.Default_Options,
+                    Accepted_Policies         => Only (Encoded))));
+
+            Anchor_Policy  : constant String := "2b06010401868d1f01";
+            Subject_Policy : constant String := "2b0601040185b63801";
+         begin
+            Check (Through_Map (Anchor_Policy).Valid,
+                   "a mapped chain satisfies a caller asking for the policy "
+                   & "the anchor granted, got "
+                   & XV.Failure_Image (Through_Map (Anchor_Policy).Failure));
+
+            --  And not the other way round: what the leaf asserts is in the
+            --  subject's domain, which is not the domain the caller spoke in.
+            Check (not Through_Map (Subject_Policy).Valid,
+                   "and not one asking for the policy it was mapped to");
+         end;
       end;
    end Check_Policy_Processing;
 

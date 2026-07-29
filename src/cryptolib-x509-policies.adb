@@ -458,6 +458,27 @@ package body CryptoLib.X509.Policies is
       end loop;
    end Prune;
 
+   --  Remove a node and everything below it. Deleting a node while leaving
+   --  its children would leave them reachable from nothing, and the pruning
+   --  pass only removes nodes without children -- an orphan has them.
+   procedure Delete_Subtree (Item : in out Engine; Root : Natural) is
+      Changed : Boolean := True;
+   begin
+      Item.Nodes (Root).In_Use := False;
+      while Changed loop
+         Changed := False;
+         for I in Item.Nodes'Range loop
+            if Item.Nodes (I).In_Use
+              and then Item.Nodes (I).Parent /= 0
+              and then not Item.Nodes (Item.Nodes (I).Parent).In_Use
+            then
+               Item.Nodes (I).In_Use := False;
+               Changed := True;
+            end if;
+         end loop;
+      end loop;
+   end Delete_Subtree;
+
    procedure Start (Item : out Engine; Options : Policy_Options) is
       Root_Expected : constant Policy_Array (1 .. 1) := [1 => Any_Policy];
    begin
@@ -735,35 +756,52 @@ package body CryptoLib.X509.Policies is
 
       --  (g) intersect with what the caller will accept. An empty Wanted is
       --  the RFC's any-policy, and intersecting with it is the whole tree.
+      --
+      --  Only nodes whose parent is anyPolicy are matched against the
+      --  caller's set, which is section 6.1.5 (g)(iii)(1)(2) and is not a
+      --  detail. A node deeper than that earned its place by matching what
+      --  its parent expected, and after a policy mapping the policy it names
+      --  is in the subject's domain while the caller's set is in the
+      --  anchor's. Filtering those too rejects exactly the chains policy
+      --  mapping exists to allow: a leaf asserting the mapped policy, under
+      --  a caller asking for the policy it was mapped from.
       if Wanted'Length > 0 and then not Item.Tree_Empty then
          declare
             Wildcard : Natural := 0;
          begin
             for I in Item.Nodes'Range loop
                if Item.Nodes (I).In_Use
-                 and then Item.Nodes (I).Depth = Depth
+                 and then Item.Nodes (I).Parent /= 0
+                 and then Item.Nodes (Item.Nodes (I).Parent).In_Use
+                 and then Is_Any (Item.Nodes (Item.Nodes (I).Parent).Valid)
+                 and then not Is_Any (Item.Nodes (I).Valid)
                then
-                  if Is_Any (Item.Nodes (I).Valid) then
-                     Wildcard := I;
-                  else
-                     declare
-                        Kept : Boolean := False;
-                     begin
-                        for W in Wanted'Range loop
-                           if Same (Item.Nodes (I).Valid, Wanted (W)) then
-                              Kept := True;
-                           end if;
-                        end loop;
-                        if not Kept then
-                           Item.Nodes (I).In_Use := False;
+                  declare
+                     Kept : Boolean := False;
+                  begin
+                     for W in Wanted'Range loop
+                        if Same (Item.Nodes (I).Valid, Wanted (W)) then
+                           Kept := True;
                         end if;
-                     end;
-                  end if;
+                     end loop;
+                     if not Kept then
+                        Delete_Subtree (Item, I);
+                     end if;
+                  end;
                end if;
             end loop;
 
-            --  A surviving anyPolicy at the bottom stands for each policy
-            --  the caller asked for that nothing else already provides.
+            --  (iii)(3) a surviving anyPolicy at the bottom stands for each
+            --  policy the caller asked for that nothing else provides.
+            for I in Item.Nodes'Range loop
+               if Item.Nodes (I).In_Use
+                 and then Item.Nodes (I).Depth = Depth
+                 and then Is_Any (Item.Nodes (I).Valid)
+               then
+                  Wildcard := I;
+               end if;
+            end loop;
+
             if Wildcard /= 0 then
                for W in Wanted'Range loop
                   declare
