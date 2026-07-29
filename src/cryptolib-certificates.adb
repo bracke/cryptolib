@@ -836,8 +836,93 @@ package body CryptoLib.Certificates is
               elsif CryptoLib.PKCS8.Algorithm_Of (Item)
                    = CryptoLib.X509.Ed448
               then Ed448_Key
+              elsif CryptoLib.PKCS8.Algorithm_Of (Item) = CryptoLib.X509.RSA
+              then RSA_Key
               else Ed25519_Key);
    end Algorithm_Of_Private_Key;
+
+   --  A CA's key material, held in a slot wide enough for any of them with the
+   --  used length attached.
+   --
+   --  The widths here do not come from the algorithm's name. An Ed25519 seed is
+   --  32 octets and a 4096-bit RSA private exponent is 512, and the only way to
+   --  know which is to have parsed the key. CryptoLib.EC_Curves does the same
+   --  thing for the three prime curves, whose moduli share one 66-octet slot
+   --  with a length beside them.
+   --
+   --  The length lives in the record rather than in a separate variable
+   --  because a slot and a loose length invite reading the whole slot where
+   --  only a prefix means anything, and that class of mistake has cost real
+   --  time in this crate. Value is the only way to read it.
+   Max_CA_Private : constant := 512;   --  d for a 4096-bit modulus
+   Max_CA_Public  : constant := 600;   --  RSAPublicKey DER at that size
+
+   type CA_Private_Material is record
+      Slot : Ada.Streams.Stream_Element_Array (1 .. Max_CA_Private) :=
+        [others => 0];
+      Used : Ada.Streams.Stream_Element_Offset := 0;
+   end record;
+
+   type CA_Public_Material is record
+      Slot : Ada.Streams.Stream_Element_Array (1 .. Max_CA_Public) :=
+        [others => 0];
+      Used : Ada.Streams.Stream_Element_Offset := 0;
+   end record;
+
+   function Value (Item : CA_Private_Material)
+     return Ada.Streams.Stream_Element_Array
+   is (Item.Slot (1 .. Item.Used));
+
+   function Value (Item : CA_Public_Material)
+     return Ada.Streams.Stream_Element_Array
+   is (Item.Slot (1 .. Item.Used));
+
+   --  Drop leading zero octets, which a DER INTEGER's contents may carry and
+   --  which are not part of the value.
+   function Significant (Bytes : Ada.Streams.Stream_Element_Array)
+     return Ada.Streams.Stream_Element_Array
+   is
+      use type Ada.Streams.Stream_Element;
+      First : Ada.Streams.Stream_Element_Offset := Bytes'First;
+   begin
+      while First <= Bytes'Last
+        and then Bytes (First) = 0
+      loop
+         First := First + 1;
+      end loop;
+      return Bytes (First .. Bytes'Last);
+   end Significant;
+
+   --  Place a value in a slot, refusing one too wide rather than truncating it.
+   --  A truncated private exponent would sign, and produce signatures nothing
+   --  verifies.
+   function Place
+     (Item  : out CA_Private_Material;
+      Bytes : Ada.Streams.Stream_Element_Array) return Boolean is
+   begin
+      Item.Slot := [others => 0];
+      Item.Used := 0;
+      if Bytes'Length = 0 or else Bytes'Length > Max_CA_Private then
+         return False;
+      end if;
+      Item.Slot (1 .. Bytes'Length) := Bytes;
+      Item.Used := Bytes'Length;
+      return True;
+   end Place;
+
+   function Place
+     (Item  : out CA_Public_Material;
+      Bytes : Ada.Streams.Stream_Element_Array) return Boolean is
+   begin
+      Item.Slot := [others => 0];
+      Item.Used := 0;
+      if Bytes'Length = 0 or else Bytes'Length > Max_CA_Public then
+         return False;
+      end if;
+      Item.Slot (1 .. Bytes'Length) := Bytes;
+      Item.Used := Bytes'Length;
+      return True;
+   end Place;
 
    --  The private scalar or seed, at the width the caller is prepared for.
    function Value_From_Private_Key_PEM
@@ -1233,6 +1318,145 @@ package body CryptoLib.Certificates is
 
       return Explicit (3, Seq (To_String (Items)));
    end Extensions_DER;
+
+   --  Read a CA's signing material, whatever kind of key it is.
+   --
+   --  One reader for every algorithm, so a path that signs does not need to
+   --  know which. For RSA the public part is the RSAPublicKey DER, because
+   --  that is what a certificate's BIT STRING holds and what the authority key
+   --  identifier is a hash of; the modulus and exponent come back separately
+   --  as well, because signing needs them as numbers rather than as an
+   --  encoding.
+   function Read_CA_Material
+     (CA_Private_Key_PEM : String;
+      Algorithm          : Key_Algorithm;
+      Private_Part       : out CA_Private_Material;
+      Public_Part        : out CA_Public_Material;
+      Modulus            : out CA_Public_Material;
+      Exponent           : out CA_Public_Material) return Boolean
+   is
+   begin
+      Private_Part := (Slot => [others => 0], Used => 0);
+      Public_Part := (Slot => [others => 0], Used => 0);
+      Modulus := (Slot => [others => 0], Used => 0);
+      Exponent := (Slot => [others => 0], Used => 0);
+
+      case Algorithm is
+         when RSA_Key =>
+            declare
+               Item   : CryptoLib.PKCS8.Private_Key;
+               Parsed : Boolean;
+            begin
+               Decode_Private_Key (CA_Private_Key_PEM, Item, Parsed);
+               if not Parsed then
+                  return False;
+               end if;
+               --  These come out of the key as DER INTEGER contents, so a
+               --  modulus whose top bit is set carries a leading zero octet --
+               --  257 for a 2048-bit modulus, not 256. Signing sizes the
+               --  signature from the modulus, so the padding has to come off
+               --  here or every signature is one octet too wide and refused.
+               --  Integer_From_Bytes puts it back when the key is re-encoded.
+               if not Place (Private_Part,
+                             Significant
+                               (CryptoLib.PKCS8.RSA_Private_Exponent (Item)))
+                 or else not Place (Modulus,
+                                    Significant
+                                      (CryptoLib.PKCS8.RSA_Modulus (Item)))
+                 or else not Place (Exponent,
+                                    Significant
+                                      (CryptoLib.PKCS8.RSA_Exponent (Item)))
+               then
+                  return False;
+               end if;
+               --  The BIT STRING contents of an RSA subjectPublicKey.
+               declare
+                  Info : constant String :=
+                    Seq (Integer_From_Bytes (To_String (Value (Modulus)))
+                         & Integer_From_Bytes
+                             (To_String (Value (Exponent))));
+                  Bytes : Ada.Streams.Stream_Element_Array
+                    (1 .. Ada.Streams.Stream_Element_Offset (Info'Length));
+               begin
+                  for I in Bytes'Range loop
+                     Bytes (I) :=
+                       Character'Pos (Info (Info'First + Natural (I - 1)));
+                  end loop;
+                  return Place (Public_Part, Bytes);
+               end;
+            end;
+
+         when P256_Key | P384_Key =>
+            declare
+               Width : constant Ada.Streams.Stream_Element_Offset :=
+                 Ada.Streams.Stream_Element_Offset
+                   (Seed_Length_For (if Algorithm = P256_Key
+                                     then P256_Key else P384_Key));
+               Scalar : Ada.Streams.Stream_Element_Array (1 .. Width);
+               Point  : Ada.Streams.Stream_Element_Array
+                 (1 .. Ada.Streams.Stream_Element_Offset
+                         (Public_Length_For (if Algorithm = P256_Key
+                                             then P256_Key else P384_Key)));
+               Curve  : constant CryptoLib.ECDSA.Curve_Id :=
+                 (if Algorithm = P256_Key
+                  then CryptoLib.ECDSA.Nistp256
+                  else CryptoLib.ECDSA.Nistp384);
+            begin
+               if not Scalar_From_Private_Key_PEM
+                        (CA_Private_Key_PEM, Scalar,
+                         (if Algorithm = P256_Key then P256_Key else P384_Key))
+                 or else CryptoLib.ECDSA.Public_Key_Raw (Curve, Scalar, Point)
+                           /= CryptoLib.Errors.Ok
+               then
+                  CryptoLib.Secure_Wipe.Wipe (Scalar'Address, Scalar'Length);
+                  return False;
+               end if;
+               if not Place (Private_Part, Scalar)
+                 or else not Place (Public_Part, Point)
+               then
+                  CryptoLib.Secure_Wipe.Wipe (Scalar'Address, Scalar'Length);
+                  return False;
+               end if;
+               CryptoLib.Secure_Wipe.Wipe (Scalar'Address, Scalar'Length);
+               return True;
+            end;
+
+         when Ed25519_Key | Ed448_Key =>
+            declare
+               Kind : constant Generatable_Key_Algorithm :=
+                 (if Algorithm = Ed448_Key then Ed448_Key else Ed25519_Key);
+               Seed : Ada.Streams.Stream_Element_Array
+                 (1 .. Ada.Streams.Stream_Element_Offset
+                         (Seed_Length_For (Kind)));
+               Point : Ada.Streams.Stream_Element_Array
+                 (1 .. Ada.Streams.Stream_Element_Offset
+                         (Public_Length_For (Kind)));
+               Fine : Boolean;
+            begin
+               if not Seed_From_Private_Key_PEM
+                        (CA_Private_Key_PEM, Seed, Kind)
+               then
+                  CryptoLib.Secure_Wipe.Wipe (Seed'Address, Seed'Length);
+                  return False;
+               end if;
+               Fine :=
+                 (if Kind = Ed448_Key
+                  then CryptoLib.Ed448.Public_Key_From_Seed (Seed, Point)
+                         = CryptoLib.Errors.Ok
+                  else CryptoLib.Ed25519.Public_Key_From_Seed (Seed, Point)
+                         = CryptoLib.Errors.Ok);
+               if not Fine
+                 or else not Place (Private_Part, Seed)
+                 or else not Place (Public_Part, Point)
+               then
+                  CryptoLib.Secure_Wipe.Wipe (Seed'Address, Seed'Length);
+                  return False;
+               end if;
+               CryptoLib.Secure_Wipe.Wipe (Seed'Address, Seed'Length);
+               return True;
+            end;
+      end case;
+   end Read_CA_Material;
 
    function Sign_Certificate
      (Serial      : String;
@@ -1821,17 +2045,18 @@ package body CryptoLib.Certificates is
       Algorithm : constant Key_Algorithm :=
         Algorithm_Of_Private_Key (CA_Private_Key_PEM);
 
-      --  An RSA CA cannot be read into a fixed-width seed, so this path
-      --  refuses it below; the declarations still have to name a width, and
-      --  the leaf's is the one that is generated here.
+      --  The leaf carries the same kind of key as the CA where this crate can
+      --  generate that kind. An RSA CA cannot have an RSA leaf generated here,
+      --  so it gets a P-256 one -- an ordinary mixed chain, and the curve most
+      --  certificates use. A caller wanting an RSA leaf under an RSA CA brings
+      --  the key to Issue_*_For_Key.
       Signing : constant Generatable_Key_Algorithm :=
         (if Algorithm in Generatable_Key_Algorithm then Algorithm
-         else Ed25519_Key);
-      CA_Seed   : Ada.Streams.Stream_Element_Array
-        (1 .. Ada.Streams.Stream_Element_Offset (Seed_Length_For (Signing)));
-      CA_Public : Ada.Streams.Stream_Element_Array
-        (1 .. Ada.Streams.Stream_Element_Offset
-                (Public_Length_For (Signing)));
+         else P256_Key);
+      CA_Priv : CA_Private_Material;
+      CA_Pub  : CA_Public_Material;
+      CA_N    : CA_Public_Material;
+      CA_E    : CA_Public_Material;
       Seed      : Ada.Streams.Stream_Element_Array
         (1 .. Ada.Streams.Stream_Element_Offset (Seed_Length_For (Signing)));
       Public    : Ada.Streams.Stream_Element_Array
@@ -1844,7 +2069,8 @@ package body CryptoLib.Certificates is
       --  and only inside Private_Key_PEM.
       procedure Scrub is
       begin
-         CryptoLib.Secure_Wipe.Wipe (CA_Seed'Address, CA_Seed'Length);
+         CryptoLib.Secure_Wipe.Wipe
+           (CA_Priv.Slot'Address, CA_Priv.Slot'Length);
          CryptoLib.Secure_Wipe.Wipe (Seed'Address, Seed'Length);
       end Scrub;
    begin
@@ -1870,71 +2096,15 @@ package body CryptoLib.Certificates is
          end if;
       end loop;
 
-      --  An RSA CA is not read here. Its private key is nine values whose
-      --  width comes from the key rather than from the algorithm name, and
-      --  everything on this path is sized from the name. Signing with an RSA
-      --  CA is done through Sign_Certificate directly, which takes the
-      --  material as unconstrained arrays.
-      if Algorithm = RSA_Key then
+      --  One reader for every kind of CA key, RSA included: the material comes
+      --  back in slots wide enough for any of them with the used length
+      --  attached, so nothing here is sized from the algorithm's name.
+      if not Read_CA_Material
+               (CA_Private_Key_PEM, Algorithm, CA_Priv, CA_Pub, CA_N, CA_E)
+      then
          Scrub;
-         return Unsupported_Key_Algorithm;
+         return Invalid_Input;
       end if;
-
-      case Algorithm is
-         when RSA_Key =>
-            Scrub;
-            return Unsupported_Key_Algorithm;
-         when P256_Key =>
-            if not Scalar_From_Private_Key_PEM
-                     (CA_Private_Key_PEM, CA_Seed, P256_Key)
-            then
-               Scrub;
-               return Invalid_Input;
-            end if;
-            if CryptoLib.ECDSA.Public_Key_Raw
-                 (CryptoLib.ECDSA.Nistp256, CA_Seed, CA_Public)
-              /= CryptoLib.Errors.Ok
-            then
-               Scrub;
-               return Internal_Error;
-            end if;
-         when P384_Key =>
-            if not Scalar_From_Private_Key_PEM (CA_Private_Key_PEM, CA_Seed)
-            then
-               Scrub;
-               return Invalid_Input;
-            end if;
-            if CryptoLib.ECDSA.Public_Nistp384_Raw (CA_Seed, CA_Public)
-              /= CryptoLib.Errors.Ok
-            then
-               Scrub;
-               return Internal_Error;
-            end if;
-         when Ed448_Key =>
-            if not Seed_From_Private_Key_PEM
-                     (CA_Private_Key_PEM, CA_Seed, Ed448_Key)
-            then
-               Scrub;
-               return Invalid_Input;
-            end if;
-            if CryptoLib.Ed448.Public_Key_From_Seed (CA_Seed, CA_Public)
-              /= CryptoLib.Errors.Ok
-            then
-               Scrub;
-               return Internal_Error;
-            end if;
-         when Ed25519_Key =>
-            if not Seed_From_Private_Key_PEM (CA_Private_Key_PEM, CA_Seed) then
-               Scrub;
-               return Invalid_Input;
-            end if;
-            if CryptoLib.Ed25519.Public_Key_From_Seed (CA_Seed, CA_Public)
-              /= CryptoLib.Errors.Ok
-            then
-               Scrub;
-               return Internal_Error;
-            end if;
-      end case;
 
       CryptoLib.Random.Initialize_Production (Rng);
       --  A case rather than an if-chain, so the compiler names every
@@ -1988,15 +2158,19 @@ package body CryptoLib.Certificates is
                  Issuer_CN   => To_String (Issuer_Name),
                  Subject_CN  => Common_Name,
                  Subject_Key => Public,
-                 Sign_Seed   => CA_Seed,
-                 Sign_Public => CA_Public,
+                 Sign_Seed   => Value (CA_Priv),
+                 Sign_Public => Value (CA_Pub),
                  Profile     => Profile,
                  Names       => Names,
+                 --  The signer is the CA's algorithm, which may be RSA; the
+                 --  subject's is the leaf's, which never is.
                  Algorithm   => Algorithm,
-                 Subject_Algorithm => Algorithm,
+                 Subject_Algorithm => Signing,
                  Valid_Days  => Valid_Days,
                  Limit_Present   => CA_Ends_Known,
-                 Not_After_Limit => CA_Ends));
+                 Not_After_Limit => CA_Ends,
+                 Sign_Modulus    => Value (CA_N),
+                 Sign_Exponent   => Value (CA_E)));
       end;
 
       if Length (Cert) = 0 then
@@ -2092,16 +2266,16 @@ package body CryptoLib.Certificates is
       Issuer_Name : Unbounded_String;
       Have_Issuer : constant Boolean :=
         Certificate_Subject_CN (CA_Certificate_PEM, Issuer_Name);
-      CA_Seed   : Ada.Streams.Stream_Element_Array
-        (1 .. Ada.Streams.Stream_Element_Offset (Seed_Length_For (Algorithm)));
-      CA_Public : Ada.Streams.Stream_Element_Array
-        (1 .. Ada.Streams.Stream_Element_Offset
-                (Public_Length_For (Algorithm)));
+      CA_Priv : CA_Private_Material;
+      CA_Pub  : CA_Public_Material;
+      CA_N    : CA_Public_Material;
+      CA_E    : CA_Public_Material;
 
       --  The CA's private key, recovered from its PEM to sign with.
       procedure Scrub is
       begin
-         CryptoLib.Secure_Wipe.Wipe (CA_Seed'Address, CA_Seed'Length);
+         CryptoLib.Secure_Wipe.Wipe
+           (CA_Priv.Slot'Address, CA_Priv.Slot'Length);
       end Scrub;
 
       Subject   : Unbounded_String;
@@ -2118,63 +2292,12 @@ package body CryptoLib.Certificates is
          Scrub;
          return Invalid_Input;
       end if;
-      case Algorithm is
-         when RSA_Key =>
-            --  See Issue_Profile_Certificate: an RSA CA's key does not fit the
-            --  fixed-width reading this path is built on.
-            Scrub;
-            return Unsupported_Key_Algorithm;
-         when P256_Key =>
-            if not Scalar_From_Private_Key_PEM
-                     (CA_Private_Key_PEM, CA_Seed, P256_Key)
-            then
-               Scrub;
-               return Invalid_Input;
-            end if;
-            if CryptoLib.ECDSA.Public_Key_Raw
-                 (CryptoLib.ECDSA.Nistp256, CA_Seed, CA_Public)
-              /= CryptoLib.Errors.Ok
-            then
-               Scrub;
-               return Internal_Error;
-            end if;
-         when P384_Key =>
-            if not Scalar_From_Private_Key_PEM (CA_Private_Key_PEM, CA_Seed)
-            then
-               Scrub;
-               return Invalid_Input;
-            end if;
-            if CryptoLib.ECDSA.Public_Nistp384_Raw (CA_Seed, CA_Public)
-              /= CryptoLib.Errors.Ok
-            then
-               Scrub;
-               return Internal_Error;
-            end if;
-         when Ed448_Key =>
-            if not Seed_From_Private_Key_PEM
-                     (CA_Private_Key_PEM, CA_Seed, Ed448_Key)
-            then
-               Scrub;
-               return Invalid_Input;
-            end if;
-            if CryptoLib.Ed448.Public_Key_From_Seed (CA_Seed, CA_Public)
-              /= CryptoLib.Errors.Ok
-            then
-               Scrub;
-               return Internal_Error;
-            end if;
-         when Ed25519_Key =>
-            if not Seed_From_Private_Key_PEM (CA_Private_Key_PEM, CA_Seed) then
-               Scrub;
-               return Invalid_Input;
-            end if;
-            if CryptoLib.Ed25519.Public_Key_From_Seed (CA_Seed, CA_Public)
-              /= CryptoLib.Errors.Ok
-            then
-               Scrub;
-               return Internal_Error;
-            end if;
-      end case;
+      if not Read_CA_Material
+               (CA_Private_Key_PEM, Algorithm, CA_Priv, CA_Pub, CA_N, CA_E)
+      then
+         Scrub;
+         return Invalid_Input;
+      end if;
 
       --  One path for every request. The subject's key goes in exactly as
       --  the request encoded it, so nothing here needs to recognise the
@@ -2217,15 +2340,17 @@ package body CryptoLib.Certificates is
                     Issuer_CN   => To_String (Issuer_Name),
                     Subject_CN  => To_String (Subject),
                     Subject_Key => Empty_Key,
-                    Sign_Seed   => CA_Seed,
-                    Sign_Public => CA_Public,
+                    Sign_Seed   => Value (CA_Priv),
+                    Sign_Public => Value (CA_Pub),
                     Profile     => Server_Profile,
                     Names       => [1 => Subject],
                     Algorithm   => Algorithm,
                     Valid_Days  => Valid_Days,
                     Limit_Present   => CA_Ends_Known,
                     Not_After_Limit => CA_Ends,
-                    Subject_SPKI    => To_String (Key_Info)));
+                    Subject_SPKI    => To_String (Key_Info),
+                    Sign_Modulus    => Value (CA_N),
+                    Sign_Exponent   => Value (CA_E)));
          end;
       end;
 
@@ -2590,6 +2715,84 @@ package body CryptoLib.Certificates is
    --  Issue for a public key the caller brought. No key generation, so none of
    --  the fixed-width sizing that keeps RSA out of the other paths applies to
    --  the subject here; the CA still has to be one this crate can read.
+   function Create_CA_For_Key
+     (Common_Name        : String;
+      CA_Private_Key_PEM : String;
+      Certificate_PEM    : out Unbounded_String;
+      Valid_Days         : Positive := Default_CA_Days)
+      return Certificate_Status
+   is
+      Rng  : CryptoLib.Random.Random_Source;
+      Cert : Unbounded_String;
+
+      Algorithm : constant Key_Algorithm :=
+        Algorithm_Of_Private_Key (CA_Private_Key_PEM);
+      CA_Priv : CA_Private_Material;
+      CA_Pub  : CA_Public_Material;
+      CA_N    : CA_Public_Material;
+      CA_E    : CA_Public_Material;
+
+      procedure Scrub is
+      begin
+         CryptoLib.Secure_Wipe.Wipe
+           (CA_Priv.Slot'Address, CA_Priv.Slot'Length);
+      end Scrub;
+   begin
+      Certificate_PEM := Null_Unbounded_String;
+
+      if not Valid_Name (Common_Name) or else CA_Private_Key_PEM = "" then
+         Scrub;
+         return Invalid_Input;
+      end if;
+      if not Read_CA_Material
+               (CA_Private_Key_PEM, Algorithm, CA_Priv, CA_Pub, CA_N, CA_E)
+      then
+         Scrub;
+         return Invalid_Input;
+      end if;
+
+      CryptoLib.Random.Initialize_Production (Rng);
+      declare
+         Serial_Value : constant String := Random_Serial (Rng);
+      begin
+         if Serial_Value = "" then
+            Scrub;
+            return Internal_Error;
+         end if;
+         --  Signed by the key it certifies, so issuer and subject are the
+         --  same name and the same key.
+         Cert :=
+           To_Unbounded_String
+             (Sign_Certificate
+                (Serial      => Serial_Value,
+                 Issuer_CN   => Common_Name,
+                 Subject_CN  => Common_Name,
+                 Subject_Key => Value (CA_Pub),
+                 Sign_Seed   => Value (CA_Priv),
+                 Sign_Public => Value (CA_Pub),
+                 Profile     => CA_Profile,
+                 Names       => [1 => To_Unbounded_String (Common_Name)],
+                 Algorithm   => Algorithm,
+                 Subject_Algorithm => Algorithm,
+                 Valid_Days  => Valid_Days,
+                 Sign_Modulus    => Value (CA_N),
+                 Sign_Exponent   => Value (CA_E)));
+      end;
+
+      if Length (Cert) = 0 then
+         Scrub;
+         return Internal_Error;
+      end if;
+      Certificate_PEM := PEM ("CERTIFICATE", To_String (Cert));
+      Scrub;
+      return Ok;
+   exception
+      when others =>
+         Certificate_PEM := Null_Unbounded_String;
+         Scrub;
+         return Internal_Error;
+   end Create_CA_For_Key;
+
    function Issue_For_Supplied_Key
      (CA_Certificate_PEM : String;
       CA_Private_Key_PEM : String;
@@ -2612,19 +2815,16 @@ package body CryptoLib.Certificates is
 
       Algorithm : constant Key_Algorithm :=
         Algorithm_Of_Private_Key (CA_Private_Key_PEM);
-      Signing : constant Generatable_Key_Algorithm :=
-        (if Algorithm in Generatable_Key_Algorithm then Algorithm
-         else Ed25519_Key);
-      CA_Seed   : Ada.Streams.Stream_Element_Array
-        (1 .. Ada.Streams.Stream_Element_Offset (Seed_Length_For (Signing)));
-      CA_Public : Ada.Streams.Stream_Element_Array
-        (1 .. Ada.Streams.Stream_Element_Offset
-                (Public_Length_For (Signing)));
+      CA_Priv : CA_Private_Material;
+      CA_Pub  : CA_Public_Material;
+      CA_N    : CA_Public_Material;
+      CA_E    : CA_Public_Material;
       Cert : Unbounded_String;
 
       procedure Scrub is
       begin
-         CryptoLib.Secure_Wipe.Wipe (CA_Seed'Address, CA_Seed'Length);
+         CryptoLib.Secure_Wipe.Wipe
+           (CA_Priv.Slot'Address, CA_Priv.Slot'Length);
       end Scrub;
    begin
       Certificate_PEM := Null_Unbounded_String;
@@ -2645,48 +2845,12 @@ package body CryptoLib.Certificates is
             return Invalid_Input;
          end if;
       end loop;
-      if Algorithm = RSA_Key then
+      if not Read_CA_Material
+               (CA_Private_Key_PEM, Algorithm, CA_Priv, CA_Pub, CA_N, CA_E)
+      then
          Scrub;
-         return Unsupported_Key_Algorithm;
+         return Invalid_Input;
       end if;
-
-      case Signing is
-         when P256_Key =>
-            if not Scalar_From_Private_Key_PEM
-                     (CA_Private_Key_PEM, CA_Seed, P256_Key)
-              or else CryptoLib.ECDSA.Public_Key_Raw
-                        (CryptoLib.ECDSA.Nistp256, CA_Seed, CA_Public)
-                        /= CryptoLib.Errors.Ok
-            then
-               Scrub;
-               return Invalid_Input;
-            end if;
-         when P384_Key =>
-            if not Scalar_From_Private_Key_PEM (CA_Private_Key_PEM, CA_Seed)
-              or else CryptoLib.ECDSA.Public_Nistp384_Raw (CA_Seed, CA_Public)
-                        /= CryptoLib.Errors.Ok
-            then
-               Scrub;
-               return Invalid_Input;
-            end if;
-         when Ed448_Key =>
-            if not Seed_From_Private_Key_PEM
-                     (CA_Private_Key_PEM, CA_Seed, Ed448_Key)
-              or else CryptoLib.Ed448.Public_Key_From_Seed (CA_Seed, CA_Public)
-                        /= CryptoLib.Errors.Ok
-            then
-               Scrub;
-               return Invalid_Input;
-            end if;
-         when Ed25519_Key =>
-            if not Seed_From_Private_Key_PEM (CA_Private_Key_PEM, CA_Seed)
-              or else CryptoLib.Ed25519.Public_Key_From_Seed
-                        (CA_Seed, CA_Public) /= CryptoLib.Errors.Ok
-            then
-               Scrub;
-               return Invalid_Input;
-            end if;
-      end case;
 
       CryptoLib.Random.Initialize_Production (Rng);
       declare
@@ -2703,16 +2867,18 @@ package body CryptoLib.Certificates is
                  Issuer_CN   => To_String (Issuer_Name),
                  Subject_CN  => Common_Name,
                  Subject_Key => Subject_SPKI,
-                 Sign_Seed   => CA_Seed,
-                 Sign_Public => CA_Public,
+                 Sign_Seed   => Value (CA_Priv),
+                 Sign_Public => Value (CA_Pub),
                  Profile     => Profile,
                  Names       => Names,
-                 Algorithm   => Signing,
-                 Subject_Algorithm => Signing,
+                 Algorithm   => Algorithm,
+                 Subject_Algorithm => Algorithm,
                  Valid_Days  => Valid_Days,
                  Limit_Present   => CA_Ends_Known,
                  Not_After_Limit => CA_Ends,
-                 Subject_SPKI    => To_String (Subject_SPKI)));
+                 Subject_SPKI    => To_String (Subject_SPKI),
+                 Sign_Modulus    => Value (CA_N),
+                 Sign_Exponent   => Value (CA_E)));
       end;
 
       if Length (Cert) = 0 then

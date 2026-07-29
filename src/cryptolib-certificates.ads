@@ -207,6 +207,30 @@ package CryptoLib.Certificates is
       Exponent_Q       : Ada.Streams.Stream_Element_Array;
       Coefficient      : Ada.Streams.Stream_Element_Array) return String;
 
+   --  Make a self-signed CA certificate for a key the caller already holds.
+   --
+   --  The counterpart of Create_Local_CA for a key that was not generated
+   --  here. This is what an RSA CA needs: Create_Local_CA generates its key
+   --  and cannot generate an RSA one, and the Issue_*_For_Key entry points
+   --  deliberately refuse the CA profile, so without this a key you hold can
+   --  be certified but can never become an issuer.
+   --
+   --  The certificate is signed by the key it certifies, so the private key
+   --  must be the one whose public half goes in. Nothing is returned but the
+   --  certificate: the caller already has the key.
+   --  @param Common_Name        the CA's common name, used as issuer and
+   --    subject
+   --  @param CA_Private_Key_PEM the key to certify and sign with, PEM
+   --  @param Certificate_PEM    receives the CA certificate in PEM form
+   --  @param Valid_Days         how long the CA is valid, counted from now
+   --  @return Ok on success, otherwise a deterministic failure status
+   function Create_CA_For_Key
+     (Common_Name        : String;
+      CA_Private_Key_PEM : String;
+      Certificate_PEM    : out Unbounded_String;
+      Valid_Days         : Positive := Default_CA_Days)
+      return Certificate_Status;
+
    --  Issue a certificate for a public key the caller already holds.
    --
    --  No key is generated and none is returned: the caller has the private
