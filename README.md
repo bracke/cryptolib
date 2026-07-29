@@ -32,7 +32,7 @@ Do not run plain system `gnat*`, `gnatmake`, `gnatls`, `gnatprove`,
 | `CryptoLib.HKDF` | HKDF (RFC 5869) extract-and-expand over HMAC-SHA-256/384/512, for deriving keys from material that is already unguessable |
 | `CryptoLib.TLS13_KDF` | The TLS 1.3 key-schedule derivations (RFC 8446 §7.1): HKDF-Expand-Label and Derive-Secret |
 | `CryptoLib.ECDH` | ECDH key agreement on P-256/P-384/P-521, with full peer-point validation |
-| `CryptoLib.RSA` | RSASSA-PKCS1-v1_5 and RSASSA-PSS, signing and verification, SHA-256/384/512; 2048/3072/4096-bit key generation |
+| `CryptoLib.RSA` | RSASSA-PKCS1-v1_5 and RSASSA-PSS, blinded signing and verification, SHA-256/384/512; 2048/3072/4096-bit key generation |
 | `CryptoLib.Bignum` | The fixed-width big-integer operations key generation needs, on arrays the caller can scrub |
 | `CryptoLib.EC_Curves` | The NIST prime curves' constants, complete point addition and constant-time ladder, shared by `ECDSA` and `ECDH` |
 | `CryptoLib.UMAC` | UMAC-64/128 (RFC 4418) |

@@ -27,4 +27,21 @@ package CryptoLib.Modexp is
       Modulus  : Ada.Streams.Stream_Element_Array)
       return Ada.Streams.Stream_Element_Array;
 
+   --  Returns (Left * Right) mod Modulus.
+   --
+   --  The same Montgomery arithmetic Mod_Exp runs on, exposed because RSA
+   --  blinding needs a modular multiply and nothing else here provides one.
+   --  Modulus must be odd and nonzero, as Montgomery requires; both operands
+   --  are reduced first, so neither has to be below the modulus already.
+   --  @param Left     the first factor, unsigned big-endian
+   --  @param Right    the second factor, unsigned big-endian
+   --  @param Modulus  the odd, nonzero modulus as an unsigned big-endian
+   --    string
+   --  @return Left * Right mod Modulus, big-endian, as long as Modulus
+   function Mod_Mul
+     (Left     : Ada.Streams.Stream_Element_Array;
+      Right    : Ada.Streams.Stream_Element_Array;
+      Modulus  : Ada.Streams.Stream_Element_Array)
+      return Ada.Streams.Stream_Element_Array;
+
 end CryptoLib.Modexp;

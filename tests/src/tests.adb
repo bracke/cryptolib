@@ -9254,7 +9254,7 @@ procedure Tests is
 
       --  PKCS#1 v1.5 is deterministic, so it is pinned byte for byte.
       St := R.Sign_PKCS1_V1_5
-        (Modulus, Public_Exponent, Private_Exponent, R.SHA256, Message,
+        (Modulus, Public_Exponent, Private_Exponent, R.SHA256, Message, Rng,
          Signature);
       Check (St = CryptoLib.Errors.Ok, "RSA v1.5 signing succeeds");
       Check (Signature = Want_PKCS1, "RSA v1.5 signature is byte for byte");
@@ -9317,7 +9317,7 @@ procedure Tests is
                      = CryptoLib.Errors.Ok,
                    "RSA PSS round-trips under " & Hash'Image);
             Check (R.Sign_PKCS1_V1_5 (Modulus, Public_Exponent,
-                                      Private_Exponent, Hash, Message, Sig)
+                                      Private_Exponent, Hash, Message, Rng, Sig)
                      = CryptoLib.Errors.Ok
                    and then R.Verify_PKCS1_V1_5 (Modulus, Public_Exponent,
                                                  Hash, Message, Sig)
@@ -9328,7 +9328,7 @@ procedure Tests is
 
       --  A signature must not verify over a message it does not cover.
       St := R.Sign_PKCS1_V1_5
-        (Modulus, Public_Exponent, Private_Exponent, R.SHA256, Message,
+        (Modulus, Public_Exponent, Private_Exponent, R.SHA256, Message, Rng,
          Signature);
       Check (R.Verify_PKCS1_V1_5
                (Modulus, Public_Exponent, R.SHA256,
@@ -9395,7 +9395,7 @@ procedure Tests is
          begin
             Check (R.Sign_PKCS1_V1_5
                      (P8.RSA_Modulus (Key), P8.RSA_Exponent (Key),
-                      P8.RSA_Private_Exponent (Key), R.SHA256, Message, Sig)
+                      P8.RSA_Private_Exponent (Key), R.SHA256, Message, Rng, Sig)
                      = CryptoLib.Errors.Ok
                    and then R.Verify_PKCS1_V1_5
                      (P8.RSA_Modulus (Key), P8.RSA_Exponent (Key),
@@ -9549,7 +9549,7 @@ procedure Tests is
                 and then R.Verify_PSS (N, E, R.SHA256, 32, Message, Sig)
                   = CryptoLib.Errors.Ok,
                 "a generated key signs and verifies under PSS");
-         Check (R.Sign_PKCS1_V1_5 (N, E, D, R.SHA256, Message, Sig)
+         Check (R.Sign_PKCS1_V1_5 (N, E, D, R.SHA256, Message, Rng, Sig)
                   = CryptoLib.Errors.Ok
                 and then R.Verify_PKCS1_V1_5 (N, E, R.SHA256, Message, Sig)
                   = CryptoLib.Errors.Ok,
@@ -9586,6 +9586,30 @@ procedure Tests is
          end;
       end;
 
+      --  Blinding cannot be seen in the output -- that is the point of it,
+      --  the signature is identical either way, and the byte-exact vectors
+      --  above would pass with it removed. What can be seen is that the
+      --  private operation now needs randomness: with a source that refuses
+      --  to yield bytes, signing must fail rather than quietly proceed
+      --  unblinded. That is the only black-box evidence the blinding is
+      --  actually being done, so it is what this checks.
+      declare
+         Dead : CryptoLib.Random.Random_Source;
+         Sig  : Ada.Streams.Stream_Element_Array (1 .. 256) :=
+           [others => 16#A5#];
+      begin
+         CryptoLib.Random.Initialize_Failing (Dead);
+         Check (R.Sign_PKCS1_V1_5
+                  (Modulus, Public_Exponent, Private_Exponent, R.SHA256,
+                   Message, Dead, Sig) /= CryptoLib.Errors.Ok,
+                "signing fails closed when no blinding factor can be drawn");
+         Check (Sig = [Sig'Range => 0], "and leaves no signature behind");
+         Check (R.Sign_PSS
+                  (Modulus, Public_Exponent, Private_Exponent, R.SHA256, 0,
+                   Message, Dead, Sig) /= CryptoLib.Errors.Ok,
+                "and so does PSS, even at a salt length needing no randomness");
+      end;
+
       --  Refusals, each leaving the buffer zero.
       declare
          Wrong_D : constant Ada.Streams.Stream_Element_Array (1 .. 256) :=
@@ -9599,19 +9623,19 @@ procedure Tests is
          --  The wrong private exponent produces a signature that does not
          --  verify, and the verify-after-sign check refuses to hand it back.
          Check (R.Sign_PKCS1_V1_5 (Modulus, Public_Exponent, Wrong_D,
-                                   R.SHA256, Message, Sig)
+                                   R.SHA256, Message, Rng, Sig)
                   /= CryptoLib.Errors.Ok,
                 "a signature that does not verify is not returned");
          Check (Sig = [Sig'Range => 0], "and the buffer is left zero");
 
          Even_N (Even_N'Last) := Even_N (Even_N'Last) and 16#FE#;
          Check (R.Sign_PKCS1_V1_5 (Even_N, Public_Exponent, Private_Exponent,
-                                   R.SHA256, Message, Sig)
+                                   R.SHA256, Message, Rng, Sig)
                   /= CryptoLib.Errors.Ok,
                 "an even modulus is not an RSA modulus");
 
          Check (R.Sign_PKCS1_V1_5 (Modulus, Public_Exponent, Private_Exponent,
-                                   R.SHA256, Message, Short)
+                                   R.SHA256, Message, Rng, Short)
                   /= CryptoLib.Errors.Ok,
                 "the output must be exactly as long as the modulus");
          Check (Short = [Short'Range => 0], "and it too is left zero");

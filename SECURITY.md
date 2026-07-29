@@ -258,19 +258,28 @@ every status reading `Ok` while every key it produces is predictable.
   certificate, say, which is not a signing key at all -- reports
   `Unsupported_Key` rather than `Ok`, so an unchecked identity is never
   mistaken for a checked one.
-- **RSA generates keys but does not blind.** PKCS#1 v1.5 and PSS both sign
-  and verify, and keys are generated at 2048, 3072 and 4096 bits; there is no
-  CRT. The private exponentiation goes through `CryptoLib.Modexp`, which is
+- **RSA signs blinded, generates keys, and has no CRT.** PKCS#1 v1.5 and PSS
+  both sign and verify, and keys are generated at 2048, 3072 and 4096 bits.
+  The private exponentiation goes through `CryptoLib.Modexp`, which is
   word-serial constant-time Montgomery, and every signature is verified
   against the public exponent before it is returned -- a faulty RSA signature
   released beside a correct one can give up the factorisation, so nothing
-  leaves unchecked. There is still **no blinding**: the implementation relies
-  on the exponentiation being constant-time by construction rather than
-  randomising its input. That is the weaker of the two positions and is the
-  known next step, not a judgement that the defence is unnecessary. Omitting
-  CRT costs roughly a factor of four in signing speed and removes the fault
-  mode CRT is notorious for; it is also why the CRT parameters in a PKCS#8 key
-  are parsed past rather than surfaced.
+  leaves unchecked.
+
+  The private operation is **blinded**: a fresh random r is drawn per
+  signature, the input is multiplied by r^e before exponentiating and the
+  result by r^-1 after, so what the exponentiation sees is uniformly random
+  and unrelated to the message while the signature is unchanged. Signing
+  **fails closed** if no blinding factor can be drawn rather than falling back
+  to unblinded. Blinding cannot be observed in the output -- the signature is
+  identical with or without it, and the byte-exact vectors pass either way --
+  so that fail-closed behaviour is the only black-box evidence it is being
+  done, and it is what the suite checks. Removing the blinding fails there and
+  nowhere else.
+
+  Omitting CRT costs roughly a factor of four in signing speed and removes the
+  fault mode CRT is notorious for; it is also why the CRT parameters in a
+  PKCS#8 key are parsed past rather than surfaced.
 
   Key generation draws two primes with their top two bits set, trial-divides
   by the primes below 1000, and runs 24 Miller-Rabin rounds. The private
@@ -290,10 +299,13 @@ every status reading `Ok` while every key it produces is predictable.
   arrays rather than GNAT's Big_Integers, because a Big_Integer holds its
   digits in controlled storage this crate cannot reach: a prime or a private
   exponent living there could not be scrubbed. It has no general big division
-  and needs none -- with a public exponent of 65537 the only division is by a
+  and needs none. With a public exponent of 65537 the only division is by a
   machine integer, and one such division makes the extended Euclid small
-  enough to finish in Integer arithmetic. Every operation in it was checked
-  against Python over random inputs before anything was built on it.
+  enough to finish in Integer arithmetic; the inverse blinding needs, where
+  the value is as large as the modulus, uses the binary extended Euclid
+  instead -- halvings, additions and comparisons, and no division either.
+  Every operation was checked against Python over random inputs before
+  anything was built on it.
 
   `X509.Signatures` reports
   `Unsupported_Algorithm` rather than a failure whenever it cannot check a

@@ -208,6 +208,36 @@ package body CryptoLib.Modexp is
       end;
    end Mont_Mul;
 
+   function Mod_Mul
+     (Left     : Stream_Element_Array;
+      Right    : Stream_Element_Array;
+      Modulus  : Stream_Element_Array)
+      return Stream_Element_Array
+   is
+      N  : constant Natural := Word_Count (Modulus);
+      M  : constant Word_Array := To_Words (Modulus, N);
+      N0 : constant Word := N0_Inverse (M (0));
+      A  : Word_Array := To_Words (Left, N);
+      B  : Word_Array := To_Words (Right, N);
+      R2 : Word_Array (0 .. N - 1) := [others => 0];
+   begin
+      R2 (0) := 1;
+      for Count in 1 .. 64 * N loop
+         R2 := Double_Mod (R2, M);
+      end loop;
+      if Geq (A, M) then
+         A := Sub (A, M);
+      end if;
+      if Geq (B, M) then
+         B := Sub (B, M);
+      end if;
+      --  Mont_Mul gives A*B*R**-1; multiplying that by R**2 the same way
+      --  gives A*B*R**-1*R**2*R**-1 = A*B, without ever leaving Montgomery
+      --  arithmetic or needing a division.
+      return To_Bytes
+        (Mont_Mul (Mont_Mul (A, B, M, N0), R2, M, N0), Modulus'Length);
+   end Mod_Mul;
+
    function Mod_Exp
      (Base     : Stream_Element_Array;
       Exponent : Stream_Element_Array;

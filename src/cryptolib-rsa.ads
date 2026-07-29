@@ -25,14 +25,14 @@ with CryptoLib.Random;
 --    faulty RSA signature is not merely wrong: released next to a correct one
 --    it can reveal the factorisation. Nothing leaves here unchecked.
 --
---  * There is **no blinding**. A blinded implementation randomises the input
---    to the private operation so that even a leak correlated with that input
---    reveals nothing; this one relies on the exponentiation being
---    constant-time by construction instead. That is the weaker of the two
---    positions, and it is the known next step rather than a decision that
---    the defence is unnecessary. Callers doing high-volume signing where an
---    attacker can supply messages and measure timing precisely should weigh
---    that.
+--  * The private operation is **blinded**. A fresh random r is drawn per
+--    signature and the input is multiplied by r**e before exponentiating,
+--    then the result by r**-1 after; both cancel, so the signature is
+--    unchanged while what the exponentiation actually sees is uniformly
+--    random and unrelated to the message. A leak correlated with the input
+--    therefore reveals nothing about the message or the key. Signing fails
+--    rather than falling back to unblinded if the random source will not
+--    yield bytes.
 --
 --  There is no key generation and no CRT. Without p and q there is no CRT
 --  path to get wrong, which removes the fault mode CRT is notorious for, at
@@ -118,7 +118,12 @@ package CryptoLib.RSA is
 
    --  Sign under RSASSA-PKCS1-v1_5.
    --
-   --  Deterministic: the same key and message always give the same signature.
+   --  Deterministic in its output: the same key and message always give the
+   --  same signature. It still needs a random source, because the private
+   --  operation is blinded -- the randomness changes what the exponentiation
+   --  sees, not what it produces. Signing fails rather than proceeding
+   --  unblinded if the source will not yield bytes.
+   --
    --  Public_Exponent is required because the signature is verified against
    --  it before being returned; a caller who does not have it does not get an
    --  unchecked signature instead.
@@ -127,18 +132,21 @@ package CryptoLib.RSA is
    --  @param Private_Exponent the private exponent d, unsigned big-endian
    --  @param Hash             which digest to sign under
    --  @param Message          the message to sign; hashed here
+   --  @param Rng              the source the blinding factor is drawn from
    --  @param Signature        out: the signature, exactly as long as the
    --    modulus, zeroed on failure
    --  @return Ok, Handshake_Failed when an argument cannot be used or the
    --    modulus is too small to hold the block, Authentication_Failed when
    --    the signature produced does not verify under the public exponent,
-   --    Internal_Error on a fault
+   --    Internal_Error on a fault or when the blinding factor cannot be
+   --    drawn
    function Sign_PKCS1_V1_5
      (Modulus          : Ada.Streams.Stream_Element_Array;
       Public_Exponent  : Ada.Streams.Stream_Element_Array;
       Private_Exponent : Ada.Streams.Stream_Element_Array;
       Hash             : Hash_Algorithm;
       Message          : Ada.Streams.Stream_Element_Array;
+      Rng              : in out CryptoLib.Random.Random_Source;
       Signature        : out Ada.Streams.Stream_Element_Array)
       return CryptoLib.Errors.Status;
 

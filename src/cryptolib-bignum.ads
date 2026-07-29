@@ -122,6 +122,26 @@ package CryptoLib.Bignum is
       Inverse : out Octets;
       Ok      : out Boolean);
 
+   --  The inverse of a large value modulo an odd one.
+   --
+   --  The binary extended Euclid: halvings, additions, subtractions and
+   --  comparisons, and no division at all -- which is why it belongs here.
+   --  The modulus must be odd, which an RSA modulus is, and that is exactly
+   --  the case this form of the algorithm covers.
+   --
+   --  Used for RSA blinding, where a fresh inverse is wanted per signature.
+   --  @param Value the value to invert, unsigned big-endian
+   --  @param Modulus the odd modulus, unsigned big-endian
+   --  @param Inverse out: the inverse reduced into [0, Modulus), zeroed when
+   --    there is none
+   --  @param Ok out: False when Value and Modulus share a factor, when the
+   --    modulus is even or zero, or when the result does not fit
+   procedure Mod_Inverse
+     (Value   : Octets;
+      Modulus : Octets;
+      Inverse : out Octets;
+      Ok      : out Boolean);
+
    --  The number of significant bits.
    --  @param Value the number to measure
    --  @return the position of its highest set bit, or zero when it is zero

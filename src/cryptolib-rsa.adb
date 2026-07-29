@@ -441,23 +441,81 @@ package body CryptoLib.RSA is
       Modulus          : Octets;
       Public_Exponent  : Octets;
       Private_Exponent : Octets;
+      Rng              : in out CryptoLib.Random.Random_Source;
       Signature        : out Octets) return CryptoLib.Errors.Status
    is
-      Candidate : constant Octets :=
-        CryptoLib.Modexp.Mod_Exp (Block, Private_Exponent, Modulus);
-      Round_Trip : constant Octets :=
-        CryptoLib.Modexp.Mod_Exp (Candidate, Public_Exponent, Modulus);
+      use type CryptoLib.Errors.Status;
+
+      R       : Octets (Modulus'Range) := [others => 0];
+      R_Inv   : Octets (Modulus'Range) := [others => 0];
+      Have_R  : Boolean := False;
+      Tries   : constant := 16;
+
+      procedure Scrub is
+      begin
+         CryptoLib.Secure_Wipe.Wipe (R'Address, R'Length);
+         CryptoLib.Secure_Wipe.Wipe (R_Inv'Address, R_Inv'Length);
+      end Scrub;
    begin
       Signature := [others => 0];
-      if Candidate'Length /= Signature'Length
-        or else Round_Trip'Length /= Block'Length
-      then
+
+      --  Draw a blinding factor and its inverse. Anything sharing a factor
+      --  with the modulus has no inverse -- which for an RSA modulus means
+      --  having stumbled on a prime factor, so it never happens, but it is
+      --  answered rather than assumed.
+      for Attempt in 1 .. Tries loop
+         if CryptoLib.Random.Fill (Rng, R) /= CryptoLib.Errors.Ok then
+            Scrub;
+            return CryptoLib.Errors.Internal_Error;
+         end if;
+         --  Keep it below the modulus and away from zero and one, where it
+         --  would blind nothing.
+         if CryptoLib.Bignum.Compare (R, Modulus) >= 0 then
+            R := CryptoLib.Bignum.Subtract (R, Modulus);
+         end if;
+         if CryptoLib.Bignum.Bit_Length (R) > 1 then
+            CryptoLib.Bignum.Mod_Inverse (R, Modulus, R_Inv, Have_R);
+            exit when Have_R;
+         end if;
+      end loop;
+
+      if not Have_R then
+         --  Signing unblinded would be the wrong way to recover here.
+         Scrub;
          return CryptoLib.Errors.Internal_Error;
       end if;
-      if not CryptoLib.Constant_Time.Equal (Round_Trip, Block) then
-         return CryptoLib.Errors.Authentication_Failed;
-      end if;
-      Signature := Candidate;
+
+      declare
+         --  r**e costs one cheap exponentiation: e is 65537 at most three
+         --  octets wide, and it is public.
+         R_To_E  : constant Octets :=
+           CryptoLib.Modexp.Mod_Exp (R, Public_Exponent, Modulus);
+         --  What the secret exponentiation actually sees is the message
+         --  multiplied by a uniformly random value, so nothing correlated
+         --  with its input tells an observer anything about the message.
+         Blinded : constant Octets :=
+           CryptoLib.Modexp.Mod_Mul (Block, R_To_E, Modulus);
+         Raw     : constant Octets :=
+           CryptoLib.Modexp.Mod_Exp (Blinded, Private_Exponent, Modulus);
+         --  m**d * r * r**-1 = m**d: the blinding cancels exactly.
+         Candidate : constant Octets :=
+           CryptoLib.Modexp.Mod_Mul (Raw, R_Inv, Modulus);
+         Round_Trip : constant Octets :=
+           CryptoLib.Modexp.Mod_Exp (Candidate, Public_Exponent, Modulus);
+      begin
+         if Candidate'Length /= Signature'Length
+           or else Round_Trip'Length /= Block'Length
+         then
+            Scrub;
+            return CryptoLib.Errors.Internal_Error;
+         end if;
+         if not CryptoLib.Constant_Time.Equal (Round_Trip, Block) then
+            Scrub;
+            return CryptoLib.Errors.Authentication_Failed;
+         end if;
+         Signature := Candidate;
+      end;
+      Scrub;
       return CryptoLib.Errors.Ok;
    end Private_Operation;
 
@@ -503,6 +561,7 @@ package body CryptoLib.RSA is
       Private_Exponent : Octets;
       Hash             : Hash_Algorithm;
       Message          : Octets;
+      Rng              : in out CryptoLib.Random.Random_Source;
       Signature        : out Octets) return CryptoLib.Errors.Status
    is
       N_First, E_First, D_First : Offset;
@@ -529,7 +588,7 @@ package body CryptoLib.RSA is
             Modulus (N_First .. Modulus'Last),
             Public_Exponent (E_First .. Public_Exponent'Last),
             Private_Exponent (D_First .. Private_Exponent'Last),
-            Signature);
+            Rng, Signature);
       end;
    exception
       when others =>
@@ -643,7 +702,7 @@ package body CryptoLib.RSA is
                   Modulus (N_First .. Modulus'Last),
                   Public_Exponent (E_First .. Public_Exponent'Last),
                   Private_Exponent (D_First .. Private_Exponent'Last),
-                  Signature);
+                  Rng, Signature);
             end;
          end;
       end;
@@ -905,7 +964,7 @@ package body CryptoLib.RSA is
                begin
                   if Sign_PKCS1_V1_5
                        (Modulus, Public_Exponent, Private_Exponent,
-                        SHA256, Probe, Sig) /= CryptoLib.Errors.Ok
+                        SHA256, Probe, Rng, Sig) /= CryptoLib.Errors.Ok
                     or else Verify_PKCS1_V1_5
                        (Modulus, Public_Exponent, SHA256, Probe, Sig)
                          /= CryptoLib.Errors.Ok
