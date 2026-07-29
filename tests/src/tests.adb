@@ -2695,6 +2695,108 @@ procedure Tests is
       end;
    end Check_PKCS12_Work_Factor;
 
+   --  A certificate longer than 65_535 octets.
+   --
+   --  The DER length encoder stopped at a two-octet long form, and Byte
+   --  truncates rather than complains, so anything larger was given a length
+   --  with its high bits dropped. Issuance reported Ok and produced a
+   --  certificate no parser could read -- OpenSSL refused it outright. A
+   --  subject alternative name list is unbounded, so a caller with enough
+   --  names reaches this with no indication that anything went wrong.
+   --
+   --  Decoding is the whole check: the reader refuses trailing data, so a
+   --  certificate whose outer length is short by any amount cannot decode.
+   procedure Check_Large_Certificate is
+      use type CryptoLib.ASN1.Errors.Decode_Status;
+      use type CryptoLib.PEM.Decode_Status;
+
+      package X509C renames CryptoLib.X509.Certificates;
+
+      --  Long names rather than many, because the reader bounds a sequence
+      --  at 1024 items and the point here is the byte count, not the count.
+      Count : constant := 1000;
+
+      function Long_Name (Index : Positive) return Unbounded_String is
+         Number : constant String := Positive'Image (Index);
+      begin
+         return To_Unbounded_String
+           ("h" & Number (Number'First + 1 .. Number'Last) & "."
+            & [1 .. 60 => 'a'] & ".example");
+      end Long_Name;
+
+      CA_PEM, CA_Key, Leaf_PEM, Leaf_Key : Unbounded_String;
+      Names   : CryptoLib.Certificates.Subject_Alternative_Name_List
+        (1 .. Count);
+      Outcome : CryptoLib.Certificates.Certificate_Status;
+   begin
+      Outcome :=
+        CryptoLib.Certificates.Create_Local_CA
+          ("large-ca", CA_PEM, CA_Key, CryptoLib.Certificates.P384_Key);
+      Check (Outcome = CryptoLib.Certificates.Ok, "fixture: CA created");
+
+      for I in Names'Range loop
+         Names (I) := Long_Name (I);
+      end loop;
+
+      Outcome :=
+        CryptoLib.Certificates.Issue_Server_Certificate
+          (To_String (CA_PEM), To_String (CA_Key), "large.example", Names,
+           Leaf_PEM, Leaf_Key);
+      Check (Outcome = CryptoLib.Certificates.Ok,
+             "a certificate with a great many names is issued");
+
+      declare
+         Text   : constant String := To_String (Leaf_PEM);
+         Buffer : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset
+                   (CryptoLib.PEM.Maximum_Decoded_Length (Text)));
+         Last   : Ada.Streams.Stream_Element_Offset;
+         From   : Positive := Text'First;
+         P      : CryptoLib.PEM.Decode_Status;
+         Status : CryptoLib.ASN1.Errors.Decode_Status;
+      begin
+         CryptoLib.PEM.Decode_Block
+           (Text, CryptoLib.PEM.Certificate_Label, From, Buffer, Last, P);
+         Check (P = CryptoLib.PEM.Ok, "its armour decodes");
+
+         --  Past the two-octet long form, which is the case that was wrong.
+         Check (Last > 65_535,
+                "and it really is larger than a two-octet length can hold,"
+                & Ada.Streams.Stream_Element_Offset'Image (Last)
+                & " octets");
+
+         --  Read back under limits that admit a certificate this size. The
+         --  default caps a single string at 64 KB, which is a deliberate
+         --  bound on what a caller is willing to decode rather than
+         --  anything about the encoding -- and it is why the default limits
+         --  will not read a certificate this crate can now write. What is
+         --  under test is the length octets, so the bound is lifted here and
+         --  left alone everywhere else.
+         declare
+            Roomy : constant CryptoLib.ASN1.Decode_Limits :=
+              (Maximum_Input_Size     => 1024 * 1024,
+               Maximum_Nesting_Depth  => 16,
+               Maximum_Sequence_Items => 2048,
+               Maximum_String_Length  => 1024 * 1024);
+            Item  : constant X509C.Certificate :=
+              X509C.Decode_DER
+                (Buffer (Buffer'First .. Last), Roomy, Status);
+         begin
+            Check (Status = CryptoLib.ASN1.Errors.Ok
+                   and then X509C.Is_Present (Item),
+                   "and it decodes, got "
+                   & CryptoLib.ASN1.Errors.Status_Image (Status));
+
+            --  The reader refuses trailing data, so decoding at all proves
+            --  the outer length octets named the whole certificate. Under
+            --  the old encoder this came back short and the remainder read
+            --  as trailing rubbish.
+            Check (X509C.Extension_Count (Item) >= 4,
+                   "with its extensions intact");
+         end;
+      end;
+   end Check_Large_Certificate;
+
    procedure Check_X509_Extensions is
       use type CryptoLib.ASN1.Errors.Decode_Status;
       use type CryptoLib.PEM.Decode_Status;
@@ -7543,6 +7645,7 @@ begin
    Check_Validity_Window;
    Check_Key_Identifiers;
    Check_PKCS12_Work_Factor;
+   Check_Large_Certificate;
    Check_Decoder_Robustness;
    Check_Certificate_Ambiguity;
    Check_X509_Access_Locations;

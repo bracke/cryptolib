@@ -104,15 +104,36 @@ package body CryptoLib.Certificates is
            (CryptoLib.Hashes.SHA256 (To_Bytes (Text))));
    end Digest_Hex;
 
+   --  A DER length, in the shortest form that holds it.
+   --
+   --  The long form used to stop at two octets, and Byte truncates rather
+   --  than complains, so a structure longer than 65_535 was given a length
+   --  with its high bits quietly dropped. Nothing rejected it: issuance
+   --  reported Ok and handed back a certificate no parser could read. A
+   --  subject alternative name list is unbounded, so reaching that size takes
+   --  a caller with a lot of names and no warning that anything is wrong.
    function DER_Length (Length : Natural) return String is
    begin
       if Length < 128 then
          return "" & Byte (Length);
-      elsif Length < 256 then
-         return Byte (16#81#) & Byte (Length);
-      else
-         return Byte (16#82#) & Byte (Length / 256) & Byte (Length mod 256);
       end if;
+
+      declare
+         Digits_Out : String (1 .. 4);
+         First      : Natural := Digits_Out'Last;
+         Rest       : Natural := Length;
+      begin
+         Digits_Out (First) := Byte (Rest mod 256);
+         Rest := Rest / 256;
+         while Rest > 0 loop
+            First := First - 1;
+            Digits_Out (First) := Byte (Rest mod 256);
+            Rest := Rest / 256;
+         end loop;
+
+         return Byte (16#80# + (Digits_Out'Last - First + 1))
+                & Digits_Out (First .. Digits_Out'Last);
+      end;
    end DER_Length;
 
    function TLV (Tag : Natural; Content : String) return String is

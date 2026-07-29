@@ -200,6 +200,15 @@ The RNG **fails closed**: if no OS source is available it returns
   something other than the password's protection is being exercised.
   OpenSSL opens the result and reports both counts; a wrong password is
   refused.
+- **DER lengths are emitted for the size they describe.** The long form
+  stopped at two octets and `Byte` truncates rather than complains, so
+  anything past 65,535 octets was given a length with its high bits dropped.
+  Issuance reported `Ok` and produced a certificate OpenSSL refused to read
+  at all. A subject alternative name list is unbounded, so a caller with
+  enough names reached this with no sign that anything had gone wrong. Note
+  that the *default* decode limits cap a single string at 64 KB, so reading a
+  certificate this large back needs limits chosen for it -- that bound is a
+  caller's policy about what it will decode, not a property of the encoding.
 - **DER integers are emitted in the shortest form.** The encoder wrote a
   fixed four octets for any value at or above `16#8000#`, so 600,000 came out
   as `00 09 27 C0` -- a leading zero DER permits only when the next octet
