@@ -7662,6 +7662,120 @@ procedure Tests is
              "and a proposal with no generator at all");
    end Check_Gex_Group_Selection;
 
+   --  How a packet sequence number becomes a UMAC nonce.
+   --
+   --  The RFC 4418 vectors go through Generate_With_Nonce, which takes the
+   --  nonce ready-made. Production goes through Generate, which builds one
+   --  from the sequence number: eight bytes, big-endian, the high four zero
+   --  because an SSH sequence is 32 bits. Nothing checked that conversion on
+   --  either side of the interface -- the vectors never reach it, and
+   --  ssh_lib round-trips its own packets, where both ends would agree on a
+   --  wrong nonce just as readily as a right one.
+   --
+   --  Wrong here means every packet fails authentication against a real
+   --  server while every test in both crates passes.
+   procedure Check_UMAC_Sequence_Nonce is
+      Key : constant CryptoLib.UMAC.UMAC_Key := [others => 16#3C#];
+      Message : constant Ada.Streams.Stream_Element_Array (1 .. 5) :=
+        [1, 2, 3, 4, 5];
+
+      --  A sequence number whose four bytes all differ, so reversing them
+      --  cannot land on the same value.
+      Sequence : constant Interfaces.Unsigned_32 := 16#01020304#;
+
+      Big_Endian : constant Ada.Streams.Stream_Element_Array (1 .. 8) :=
+        [0, 0, 0, 0, 16#01#, 16#02#, 16#03#, 16#04#];
+      Little_Endian : constant Ada.Streams.Stream_Element_Array (1 .. 8) :=
+        [16#04#, 16#03#, 16#02#, 16#01#, 0, 0, 0, 0];
+
+      From_Sequence : constant Ada.Streams.Stream_Element_Array :=
+        CryptoLib.UMAC.Generate
+          ("umac-64@openssh.com", Key, Sequence, Message);
+   begin
+      Check (From_Sequence'Length = 8,
+             "a umac-64 tag is eight bytes, got"
+             & Natural'Image (Natural (From_Sequence'Length)));
+
+      Check (From_Sequence
+             = CryptoLib.UMAC.Generate_With_Nonce
+                 ("umac-64@openssh.com", Key, Big_Endian, Message),
+             "the sequence number becomes the low four bytes of a big-endian "
+             & "eight-byte nonce");
+
+      --  The same four bytes the other way round must not produce the same
+      --  tag, or the test above would hold whichever way it was built.
+      Check (From_Sequence
+             /= CryptoLib.UMAC.Generate_With_Nonce
+                  ("umac-64@openssh.com", Key, Little_Endian, Message),
+             "and not the same bytes reversed");
+
+      --  Sequence numbers are per packet, so two of them must not agree.
+      Check (From_Sequence
+             /= CryptoLib.UMAC.Generate
+                  ("umac-64@openssh.com", Key, Sequence + 1, Message),
+             "consecutive sequence numbers give different tags");
+   end Check_UMAC_Sequence_Nonce;
+
+   --  Two ways of encrypting the same four bytes, made to agree.
+   --
+   --  chacha20-poly1305@openssh.com encrypts the packet length with K_1 --
+   --  the second half of the 64-byte key -- at counter zero, separately from
+   --  the body. Seal does that inline. Encrypt_Length does it again, for a
+   --  caller that has to read a length off the wire before it knows how much
+   --  more to read; ssh_lib calls it for exactly that.
+   --
+   --  They are two copies of one operation. Seal is covered by the
+   --  cross-check against pyca; Encrypt_Length was covered by nothing, so a
+   --  change to one that missed the other would leave this crate's tests
+   --  passing while ssh_lib read a length no peer had written.
+   procedure Check_Chacha_Length_Agreement is
+      --  The two halves must differ, or reading the wrong one gives the same
+      --  answer and this tests nothing. K_2 is the first thirty-two bytes and
+      --  K_1 the second.
+      Key : constant Ada.Streams.Stream_Element_Array
+        (1 .. Ada.Streams.Stream_Element_Offset
+                (CryptoLib.ChaCha20_Poly1305.Key_Length)) :=
+        [1 .. 32 => 16#7E#, 33 .. 64 => 16#B3#];
+
+      --  A packet whose first four bytes are the length field.
+      Plain : constant Ada.Streams.Stream_Element_Array (1 .. 20) :=
+        [16#00#, 16#00#, 16#00#, 16#10#,
+         others => 16#AA#];
+
+      Sequence : constant Interfaces.Unsigned_32 := 16#0000_002A#;
+
+      Wire : Ada.Streams.Stream_Element_Array
+        (1 .. Plain'Length
+              + Ada.Streams.Stream_Element_Offset
+                  (CryptoLib.ChaCha20_Poly1305.Tag_Length));
+      Sealed_Status : CryptoLib.Errors.Status;
+
+      Separately : Ada.Streams.Stream_Element_Array (1 .. 4);
+      Length_Status : CryptoLib.Errors.Status;
+   begin
+      Sealed_Status :=
+        CryptoLib.ChaCha20_Poly1305.Seal (Key, Sequence, Plain, Wire);
+      Check (Sealed_Status = CryptoLib.Errors.Ok, "a packet seals");
+
+      Length_Status :=
+        CryptoLib.ChaCha20_Poly1305.Encrypt_Length
+          (Key, Sequence, Plain (1 .. 4), Separately);
+      Check (Length_Status = CryptoLib.Errors.Ok,
+             "and its length encrypts on its own");
+
+      Check (Separately = Wire (1 .. 4),
+             "the length encrypted on its own is the length Seal put on the "
+             & "wire, so the two copies of that step agree");
+
+      --  The sequence number is the nonce, so the same length under a
+      --  different one must not come out the same.
+      Check (CryptoLib.ChaCha20_Poly1305.Encrypt_Length
+               (Key, Sequence + 1, Plain (1 .. 4), Separately)
+             = CryptoLib.Errors.Ok
+             and then Separately /= Wire (1 .. 4),
+             "and a different sequence number encrypts it differently");
+   end Check_Chacha_Length_Agreement;
+
    procedure Check_X509_Extensions is
       use type CryptoLib.ASN1.Errors.Decode_Status;
       use type CryptoLib.PEM.Decode_Status;
@@ -12668,6 +12782,8 @@ begin
    Check_DH_Group1;
    Check_DH_Generators;
    Check_Gex_Group_Selection;
+   Check_UMAC_Sequence_Nonce;
+   Check_Chacha_Length_Agreement;
    Check_Cipher_Names;
    Check_X25519_Shared_Secret;
    Check_Chain_Constraint_Bypasses;
