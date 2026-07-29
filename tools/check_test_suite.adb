@@ -46,10 +46,68 @@ begin
       Text       : constant String := Project_Tools.Files.Read_Raw_File (Suite_Path);
       Primitives : constant Natural := Count (Text, "with CryptoLib.");
       Assertions : constant Natural := Count (Text, "Check (");
+
+      --  A test procedure that nobody calls passes every time. The suite
+      --  keeps its procedures and its calls to them in two hand-maintained
+      --  lists, and a name missing from the second reads as coverage while
+      --  testing nothing.
+      --
+      --  Compared by name rather than by count: some checks take parameters
+      --  and are written across several lines, so the two totals differ for
+      --  reasons that are nobody's mistake.
+      Defined  : Natural := 0;
+      Uncalled : Natural := 0;
+
+      Marker : constant String := ASCII.LF & "   procedure Check_";
+      Cursor : Natural := Text'First;
+      Found  : Natural;
    begin
+      loop
+         Found := Ada.Strings.Fixed.Index (Text (Cursor .. Text'Last), Marker);
+         exit when Found = 0;
+
+         declare
+            First : constant Natural := Found + Marker'Length - 6;
+            Stop  : Natural := First;
+         begin
+            while Stop <= Text'Last
+              and then (Text (Stop) in 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9'
+                        or else Text (Stop) = '_')
+            loop
+               Stop := Stop + 1;
+            end loop;
+
+            declare
+               Name : constant String := Text (First .. Stop - 1);
+               --  A call sits at statement level; the declaration does not,
+               --  because "procedure " comes between the indent and the name.
+               Call : constant String := ASCII.LF & "   " & Name;
+            begin
+               Defined := Defined + 1;
+               if Ada.Strings.Fixed.Index (Text, Call) = 0 then
+                  Uncalled := Uncalled + 1;
+                  Ada.Text_IO.Put_Line
+                    (Ada.Text_IO.Standard_Error,
+                     "error: " & Name & " is defined but never called");
+               end if;
+            end;
+            Cursor := Stop;
+         end;
+      end loop;
+
+      if Uncalled > 0 then
+         Ada.Text_IO.Put_Line
+           (Ada.Text_IO.Standard_Error,
+            "a test procedure that is never called passes without testing "
+            & "anything");
+         Ada.Command_Line.Set_Exit_Status (Ada.Command_Line.Failure);
+         return;
+      end if;
+
       Ada.Text_IO.Put_Line
         ("cryptolib test suite:" & Primitives'Image & " primitive packages,"
-         & Assertions'Image & " assertions");
+         & Assertions'Image & " assertions," & Defined'Image
+         & " checks, all of them called");
       if Primitives < Min_Primitives or else Assertions < Min_Assertions then
          Ada.Text_IO.Put_Line
            (Ada.Text_IO.Standard_Error,
