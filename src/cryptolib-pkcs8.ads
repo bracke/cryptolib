@@ -134,16 +134,45 @@ package CryptoLib.PKCS8 is
    --  valid only while the key is, and a caller that copies it elsewhere has
    --  taken responsibility for scrubbing the copy.
    --
-   --  Empty for a key that is not RSA. The CRT parameters that follow d in an
-   --  RSAPrivateKey are still not surfaced, though the reason has changed:
-   --  CryptoLib.RSA does CRT now, and does it behind a check against the
-   --  public exponent that refuses a faulty result, so the fault mode this
-   --  comment used to cite is answered. What remains is only that nothing has
-   --  needed them from a parsed key yet -- a caller that generated the key has
-   --  them from Generate_Keypair_With_Primes.
+   --  Empty for a key that is not RSA.
    --  @param Item the decoded private key
    --  @return the private exponent as unsigned big-endian octets, or empty
    function RSA_Private_Exponent (Item : Private_Key) return Octets;
+
+   --  The CRT parameters of an RSA key: the two primes, d modulo each prime
+   --  less one, and q inverse modulo p.
+   --
+   --  Secret, like the private exponent, and valid only while the key is.
+   --  Surfaced because CryptoLib.RSA signs with them about twice as fast, and
+   --  does so behind a check against the public exponent that refuses a faulty
+   --  result -- which is the countermeasure to the fault attack CRT is
+   --  notorious for. Without that check these would be better left hidden.
+   --
+   --  All five are empty for a key that is not RSA, and a caller should treat
+   --  a partial set as no set: signing takes all five or none.
+   --  @param Item the decoded private key
+   --  @return the first prime, unsigned big-endian, or empty
+   function RSA_Prime_P (Item : Private_Key) return Octets;
+
+   --  See RSA_Prime_P.
+   --  @param Item the decoded private key
+   --  @return the second prime, or empty
+   function RSA_Prime_Q (Item : Private_Key) return Octets;
+
+   --  See RSA_Prime_P.
+   --  @param Item the decoded private key
+   --  @return d mod (p-1), or empty
+   function RSA_Exponent_P (Item : Private_Key) return Octets;
+
+   --  See RSA_Prime_P.
+   --  @param Item the decoded private key
+   --  @return d mod (q-1), or empty
+   function RSA_Exponent_Q (Item : Private_Key) return Octets;
+
+   --  See RSA_Prime_P.
+   --  @param Item the decoded private key
+   --  @return q inverse mod p, or empty
+   function RSA_Coefficient (Item : Private_Key) return Octets;
 
    --  Overwrite the key's storage now rather than at end of scope.
    --  @param Item the key to scrub
@@ -168,6 +197,11 @@ private
          Modulus   : Span;
          Exponent  : Span;
          Private_D : Span;
+         Prime_P   : Span;
+         Prime_Q   : Span;
+         Exp_P     : Span;
+         Exp_Q     : Span;
+         Coeff     : Span;
          Held      : Offset := 0;
          DER       : Octets (1 .. Maximum_Key_Size) := [others => 0];
       end record;

@@ -428,6 +428,64 @@ package body CryptoLib.RSA is
       end;
    end Verify_PSS;
 
+   --  Draw a blinding factor and store the pair: r**e, which the input is
+   --  multiplied by, and r inverse, which undoes it. This is where the one
+   --  modular inverse gets paid.
+   function Draw_Pair
+     (Modulus         : Octets;
+      Public_Exponent : Octets;
+      Rng             : in out CryptoLib.Random.Random_Source;
+      Pair            : in out Blinding_Pair) return Boolean
+   is
+      use type CryptoLib.Errors.Status;
+      Tries : constant := 16;
+      R     : Octets (Modulus'Range) := [others => 0];
+      R_Inv : Octets (Modulus'Range) := [others => 0];
+      Found : Boolean := False;
+
+      procedure Scrub is
+      begin
+         CryptoLib.Secure_Wipe.Wipe (R'Address, R'Length);
+         CryptoLib.Secure_Wipe.Wipe (R_Inv'Address, R_Inv'Length);
+      end Scrub;
+   begin
+      if Natural (Modulus'Length) > Maximum_Pair_Width then
+         return False;
+      end if;
+      for Attempt in 1 .. Tries loop
+         if CryptoLib.Random.Fill (Rng, R) /= CryptoLib.Errors.Ok then
+            Scrub;
+            return False;
+         end if;
+         --  Below the modulus, and away from zero and one where it would blind
+         --  nothing. Anything sharing a factor with the modulus has no
+         --  inverse, which for an RSA modulus means having stumbled on a prime
+         --  factor -- it never happens, and it is answered rather than
+         --  assumed.
+         if CryptoLib.Bignum.Compare (R, Modulus) >= 0 then
+            R := CryptoLib.Bignum.Subtract (R, Modulus);
+         end if;
+         if CryptoLib.Bignum.Bit_Length (R) > 1 then
+            CryptoLib.Bignum.Mod_Inverse (R, Modulus, R_Inv, Found);
+            exit when Found;
+         end if;
+      end loop;
+      if not Found then
+         Scrub;
+         return False;
+      end if;
+
+      Pair.Factor := [others => 0];
+      Pair.Inverse := [others => 0];
+      Pair.Width := Modulus'Length;
+      Pair.Factor (1 .. Modulus'Length) :=
+        CryptoLib.Modexp.Mod_Exp (R, Public_Exponent, Modulus);
+      Pair.Inverse (1 .. Modulus'Length) := R_Inv;
+      Pair.Ready := True;
+      Scrub;
+      return True;
+   end Draw_Pair;
+
    --  The private operation, plus the check that it worked.
    --
    --  Exponentiating with d is the only place a secret is touched; Modexp is
@@ -442,6 +500,7 @@ package body CryptoLib.RSA is
       Public_Exponent  : Octets;
       Private_Exponent : Octets;
       Rng              : in out CryptoLib.Random.Random_Source;
+      Pair             : in out Blinding_Pair;
       Signature        : out Octets;
       Prime_P          : Octets := [1 .. 0 => 0];
       Prime_Q          : Octets := [1 .. 0 => 0];
@@ -530,50 +589,35 @@ package body CryptoLib.RSA is
          end;
       end CRT_Exponentiate;
 
-      R       : Octets (Modulus'Range) := [others => 0];
-      R_Inv   : Octets (Modulus'Range) := [others => 0];
-      Have_R  : Boolean := False;
-      Tries   : constant := 16;
-
       procedure Scrub is
       begin
-         CryptoLib.Secure_Wipe.Wipe (R'Address, R'Length);
-         CryptoLib.Secure_Wipe.Wipe (R_Inv'Address, R_Inv'Length);
+         --  The pair itself is the caller's to wipe; nothing secret is held
+         --  locally here any more.
+         null;
       end Scrub;
    begin
       Signature := [others => 0];
 
-      --  Draw a blinding factor and its inverse. Anything sharing a factor
-      --  with the modulus has no inverse -- which for an RSA modulus means
-      --  having stumbled on a prime factor, so it never happens, but it is
-      --  answered rather than assumed.
-      for Attempt in 1 .. Tries loop
-         if CryptoLib.Random.Fill (Rng, R) /= CryptoLib.Errors.Ok then
+      --  A pair already started is reused and squared; one that is not is
+      --  drawn here. A caller passing a throwaway pair therefore behaves
+      --  exactly as it did before pairs existed, and one that keeps a pair
+      --  pays the inverse once instead of every time.
+      if Pair.Ready then
+         if Pair.Width /= Modulus'Length then
+            --  A pair from another key would blind with a factor whose
+            --  inverse does not undo it.
             Scrub;
-            return CryptoLib.Errors.Internal_Error;
+            return CryptoLib.Errors.Handshake_Failed;
          end if;
-         --  Keep it below the modulus and away from zero and one, where it
-         --  would blind nothing.
-         if CryptoLib.Bignum.Compare (R, Modulus) >= 0 then
-            R := CryptoLib.Bignum.Subtract (R, Modulus);
-         end if;
-         if CryptoLib.Bignum.Bit_Length (R) > 1 then
-            CryptoLib.Bignum.Mod_Inverse (R, Modulus, R_Inv, Have_R);
-            exit when Have_R;
-         end if;
-      end loop;
-
-      if not Have_R then
+      elsif not Draw_Pair (Modulus, Public_Exponent, Rng, Pair) then
          --  Signing unblinded would be the wrong way to recover here.
          Scrub;
          return CryptoLib.Errors.Internal_Error;
       end if;
 
       declare
-         --  r**e costs one cheap exponentiation: e is 65537 at most three
-         --  octets wide, and it is public.
-         R_To_E  : constant Octets :=
-           CryptoLib.Modexp.Mod_Exp (R, Public_Exponent, Modulus);
+         R_To_E  : constant Octets := Pair.Factor (1 .. Pair.Width);
+         R_Undo  : constant Octets := Pair.Inverse (1 .. Pair.Width);
          --  What the secret exponentiation actually sees is the message
          --  multiplied by a uniformly random value, so nothing correlated
          --  with its input tells an observer anything about the message.
@@ -586,7 +630,7 @@ package body CryptoLib.RSA is
                    (Blinded, Private_Exponent, Modulus));
          --  m**d * r * r**-1 = m**d: the blinding cancels exactly.
          Candidate : constant Octets :=
-           CryptoLib.Modexp.Mod_Mul (Raw, R_Inv, Modulus);
+           CryptoLib.Modexp.Mod_Mul (Raw, R_Undo, Modulus);
          Round_Trip : constant Octets :=
            CryptoLib.Modexp.Mod_Exp (Candidate, Public_Exponent, Modulus);
       begin
@@ -603,6 +647,20 @@ package body CryptoLib.RSA is
          end if;
          Signature := Candidate;
       end;
+
+      --  Refresh by squaring both halves. Squaring r and r inverse leaves them
+      --  inverses of each other, so the pair stays consistent while the factor
+      --  a watcher would have to guess changes on every signature. Two
+      --  multiplications where a fresh pair would cost an inverse.
+      Pair.Factor (1 .. Pair.Width) :=
+        CryptoLib.Modexp.Mod_Mul
+          (Pair.Factor (1 .. Pair.Width), Pair.Factor (1 .. Pair.Width),
+           Modulus);
+      Pair.Inverse (1 .. Pair.Width) :=
+        CryptoLib.Modexp.Mod_Mul
+          (Pair.Inverse (1 .. Pair.Width), Pair.Inverse (1 .. Pair.Width),
+           Modulus);
+
       Scrub;
       return CryptoLib.Errors.Ok;
    end Private_Operation;
@@ -650,6 +708,7 @@ package body CryptoLib.RSA is
       Hash             : Hash_Algorithm;
       Message          : Octets;
       Rng              : in out CryptoLib.Random.Random_Source;
+      Pair             : in out Blinding_Pair;
       Signature        : out Octets;
       Prime_P          : Octets := [1 .. 0 => 0];
       Prime_Q          : Octets := [1 .. 0 => 0];
@@ -681,7 +740,7 @@ package body CryptoLib.RSA is
             Modulus (N_First .. Modulus'Last),
             Public_Exponent (E_First .. Public_Exponent'Last),
             Private_Exponent (D_First .. Private_Exponent'Last),
-            Rng, Signature,
+            Rng, Pair, Signature,
             Prime_P, Prime_Q, Exponent_P, Exponent_Q, Coefficient);
       end;
    exception
@@ -698,6 +757,7 @@ package body CryptoLib.RSA is
       Salt_Length      : Natural;
       Message          : Octets;
       Rng              : in out CryptoLib.Random.Random_Source;
+      Pair             : in out Blinding_Pair;
       Signature        : out Octets;
       Prime_P          : Octets := [1 .. 0 => 0];
       Prime_Q          : Octets := [1 .. 0 => 0];
@@ -801,7 +861,7 @@ package body CryptoLib.RSA is
                   Modulus (N_First .. Modulus'Last),
                   Public_Exponent (E_First .. Public_Exponent'Last),
                   Private_Exponent (D_First .. Private_Exponent'Last),
-                  Rng, Signature,
+                  Rng, Pair, Signature,
                   Prime_P, Prime_Q, Exponent_P, Exponent_Q, Coefficient);
             end;
          end;
@@ -810,6 +870,96 @@ package body CryptoLib.RSA is
       when others =>
          Signature := [others => 0];
          return CryptoLib.Errors.Internal_Error;
+   end Sign_PSS;
+
+
+   procedure Wipe (Pair : in out Blinding_Pair) is
+   begin
+      CryptoLib.Secure_Wipe.Wipe (Pair.Factor'Address, Pair.Factor'Length);
+      CryptoLib.Secure_Wipe.Wipe (Pair.Inverse'Address, Pair.Inverse'Length);
+      Pair.Width := 0;
+      Pair.Ready := False;
+   end Wipe;
+
+   function Start_Blinding
+     (Modulus         : Octets;
+      Public_Exponent : Octets;
+      Rng             : in out CryptoLib.Random.Random_Source;
+      Pair            : out Blinding_Pair) return CryptoLib.Errors.Status
+   is
+      N_First : constant Offset := Value_First (Modulus);
+      E_First : constant Offset := Value_First (Public_Exponent);
+   begin
+      Wipe (Pair);
+      if N_First > Modulus'Last or else E_First > Public_Exponent'Last then
+         return CryptoLib.Errors.Handshake_Failed;
+      end if;
+      if Modulus (Modulus'Last) mod 2 = 0 then
+         return CryptoLib.Errors.Handshake_Failed;
+      end if;
+      if not Draw_Pair
+               (Modulus (N_First .. Modulus'Last),
+                Public_Exponent (E_First .. Public_Exponent'Last), Rng, Pair)
+      then
+         Wipe (Pair);
+         return CryptoLib.Errors.Internal_Error;
+      end if;
+      return CryptoLib.Errors.Ok;
+   end Start_Blinding;
+
+   --  The forms without a pair: a throwaway pair per call, which is one
+   --  inverse per signature and exactly what these did before pairs existed.
+   function Sign_PKCS1_V1_5
+     (Modulus          : Octets;
+      Public_Exponent  : Octets;
+      Private_Exponent : Octets;
+      Hash             : Hash_Algorithm;
+      Message          : Octets;
+      Rng              : in out CryptoLib.Random.Random_Source;
+      Signature        : out Octets;
+      Prime_P          : Octets := [1 .. 0 => 0];
+      Prime_Q          : Octets := [1 .. 0 => 0];
+      Exponent_P       : Octets := [1 .. 0 => 0];
+      Exponent_Q       : Octets := [1 .. 0 => 0];
+      Coefficient      : Octets := [1 .. 0 => 0])
+      return CryptoLib.Errors.Status
+   is
+      Once   : Blinding_Pair;
+      Result : constant CryptoLib.Errors.Status :=
+        Sign_PKCS1_V1_5
+          (Modulus, Public_Exponent, Private_Exponent, Hash, Message, Rng,
+           Once, Signature, Prime_P, Prime_Q, Exponent_P, Exponent_Q,
+           Coefficient);
+   begin
+      Wipe (Once);
+      return Result;
+   end Sign_PKCS1_V1_5;
+
+   function Sign_PSS
+     (Modulus          : Octets;
+      Public_Exponent  : Octets;
+      Private_Exponent : Octets;
+      Hash             : Hash_Algorithm;
+      Salt_Length      : Natural;
+      Message          : Octets;
+      Rng              : in out CryptoLib.Random.Random_Source;
+      Signature        : out Octets;
+      Prime_P          : Octets := [1 .. 0 => 0];
+      Prime_Q          : Octets := [1 .. 0 => 0];
+      Exponent_P       : Octets := [1 .. 0 => 0];
+      Exponent_Q       : Octets := [1 .. 0 => 0];
+      Coefficient      : Octets := [1 .. 0 => 0])
+      return CryptoLib.Errors.Status
+   is
+      Once   : Blinding_Pair;
+      Result : constant CryptoLib.Errors.Status :=
+        Sign_PSS
+          (Modulus, Public_Exponent, Private_Exponent, Hash, Salt_Length,
+           Message, Rng, Once, Signature, Prime_P, Prime_Q, Exponent_P,
+           Exponent_Q, Coefficient);
+   begin
+      Wipe (Once);
+      return Result;
    end Sign_PSS;
 
    function Modulus_Octets (Size : Modulus_Size) return Positive

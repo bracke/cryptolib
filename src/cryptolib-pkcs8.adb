@@ -31,6 +31,11 @@ package body CryptoLib.PKCS8 is
       Item.Modulus := (First => 1, Last => 0);
       Item.Exponent := (First => 1, Last => 0);
       Item.Private_D := (First => 1, Last => 0);
+      Item.Prime_P := (First => 1, Last => 0);
+      Item.Prime_Q := (First => 1, Last => 0);
+      Item.Exp_P := (First => 1, Last => 0);
+      Item.Exp_Q := (First => 1, Last => 0);
+      Item.Coeff := (First => 1, Last => 0);
       Item.Held := 0;
    end Wipe;
 
@@ -310,6 +315,33 @@ package body CryptoLib.PKCS8 is
                      end if;
                      Item.Private_D :=
                        (First => Number.First, Last => Number.Last);
+
+                     --  prime1, prime2, exponent1, exponent2, coefficient, in
+                     --  the order RFC 3447 fixes. A key missing any of them is
+                     --  not a two-prime RSAPrivateKey, so a short read is a
+                     --  refusal rather than a partial set.
+                     for Field_Of in 1 .. 5 loop
+                        DER_Reader.Read_Integer
+                          (Work, Part, Key.Last, 3, Limits, Number, Minus,
+                           Status);
+                        if Status /= Ok or else Minus then
+                           Wipe (Item);
+                           Status := Invalid_Value;
+                           return;
+                        end if;
+                        case Field_Of is
+                           when 1 => Item.Prime_P :=
+                             (First => Number.First, Last => Number.Last);
+                           when 2 => Item.Prime_Q :=
+                             (First => Number.First, Last => Number.Last);
+                           when 3 => Item.Exp_P :=
+                             (First => Number.First, Last => Number.Last);
+                           when 4 => Item.Exp_Q :=
+                             (First => Number.First, Last => Number.Last);
+                           when others => Item.Coeff :=
+                             (First => Number.First, Last => Number.Last);
+                        end case;
+                     end loop;
                   end;
                end;
 
@@ -343,6 +375,31 @@ package body CryptoLib.PKCS8 is
    is (if not Item.Present or else Item.Private_D.Last < Item.Private_D.First
        then Empty_Octets
        else Item.DER (Item.Private_D.First .. Item.Private_D.Last));
+
+   function RSA_Prime_P (Item : Private_Key) return Octets
+   is (if not Item.Present or else Item.Prime_P.Last < Item.Prime_P.First
+       then Empty_Octets
+       else Item.DER (Item.Prime_P.First .. Item.Prime_P.Last));
+
+   function RSA_Prime_Q (Item : Private_Key) return Octets
+   is (if not Item.Present or else Item.Prime_Q.Last < Item.Prime_Q.First
+       then Empty_Octets
+       else Item.DER (Item.Prime_Q.First .. Item.Prime_Q.Last));
+
+   function RSA_Exponent_P (Item : Private_Key) return Octets
+   is (if not Item.Present or else Item.Exp_P.Last < Item.Exp_P.First
+       then Empty_Octets
+       else Item.DER (Item.Exp_P.First .. Item.Exp_P.Last));
+
+   function RSA_Exponent_Q (Item : Private_Key) return Octets
+   is (if not Item.Present or else Item.Exp_Q.Last < Item.Exp_Q.First
+       then Empty_Octets
+       else Item.DER (Item.Exp_Q.First .. Item.Exp_Q.Last));
+
+   function RSA_Coefficient (Item : Private_Key) return Octets
+   is (if not Item.Present or else Item.Coeff.Last < Item.Coeff.First
+       then Empty_Octets
+       else Item.DER (Item.Coeff.First .. Item.Coeff.Last));
 
    function Private_Value (Item : Private_Key) return Octets
    is (if not Item.Present or else Item.Value.Last < Item.Value.First

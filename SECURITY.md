@@ -280,11 +280,18 @@ every status reading `Ok` while every key it produces is predictable.
   nowhere else.
 
   CRT is used when the caller supplies the primes and their exponents, and the
-  plain exponentiation when it does not. Measured here, a 2048-bit signature
-  goes from 27 milliseconds to 14 -- a little under twice as fast, not the four
-  times the halved exponentiations alone would suggest, because the blinding
-  factor's inverse, the unblinding multiply and the check against the public
-  exponent are all full width and unchanged.
+  plain exponentiation when it does not; the CRT parameters in a PKCS#8 key are
+  surfaced now, so a CA key read from a file signs with CRT as well.
+
+  Measured as ratios, because the absolute figures moved by a factor of two
+  between runs on the same machine under different load -- milliseconds in a
+  document would be wrong somewhere else. CRT alone makes a 2048-bit signature
+  a little over twice as fast, not the four times halved exponentiations
+  suggest, because the blinding factor's inverse, the unblinding multiply and
+  the check against the public exponent are full width and untouched by it.
+  Reusing a blinding pair takes off another factor of about 1.8, the inverse
+  having been the largest single cost. Together they are roughly a factor of
+  four over drawing a fresh pair and exponentiating at full width.
 
   What makes CRT safe here is that check, which predates it. A fault in either
   half yields a signature that does not verify, and releasing a faulty CRT
@@ -318,10 +325,24 @@ every status reading `Ok` while every key it produces is predictable.
   modular inverse is about 7 -- half of it. The binary extended Euclid runs a
   full-width pass per bit, and nothing else comes close: the check against the
   public exponent is 0.45 milliseconds, each `Mod_Reduce` 0.39, the unblinding
-  multiply 0.22. Cutting it means keeping a blinding pair between signatures
-  and refreshing it by squaring, which is what OpenSSL does and which needs
-  state the signing calls here do not have; it is a larger lever than CRT was
-  and a change to the shape of the API, so it is recorded rather than done.
+  multiply 0.22.
+
+  That cost is now optional. `Start_Blinding` produces a `Blinding_Pair` -- r
+  raised to e, and r inverse -- which the signing calls take and refresh by
+  squaring both halves: two multiplications instead of an inverse. Squaring
+  leaves them inverses of each other, so the pair stays consistent while the
+  factor an observer would have to guess changes on every signature. A pair is
+  checked to belong to the modulus it was started for and refused with a
+  distinct status otherwise, and the suite asserts that status by name --
+  without the guard the signature merely comes out wrong and the check against
+  the public exponent refuses it, so a test accepting any failure would pass
+  with the guard deleted. Four signatures from one refreshed pair are required
+  to equal one made with no pair at all, which is what catches a refresh that
+  squared only one half.
+
+  Worth using for repeated signing with one key. Issuing a certificate signs
+  once and gains nothing, so the calls without a pair remain and draw a
+  throwaway one -- the same work as before pairs existed.
 
   The CRT parameters in a PKCS#8 key are still not surfaced, so CRT is
   available to a caller who kept what key generation returned and not to one

@@ -10319,6 +10319,111 @@ procedure Tests is
                 "an incomplete CRT set signs the plain way");
       end;
 
+      --  A reused blinding pair. The pair changes what the exponentiation
+      --  sees on every signature and must change nothing about the signature,
+      --  so the test is that a run of them are all identical to one made
+      --  without a pair at all.
+      declare
+         N  : Ada.Streams.Stream_Element_Array (1 .. 256);
+         Ex : Ada.Streams.Stream_Element_Array (1 .. 3);
+         D  : Ada.Streams.Stream_Element_Array (1 .. 256);
+         P, Q, DP, DQ, QI : Ada.Streams.Stream_Element_Array (1 .. 128);
+         Reference, With_Pair : Ada.Streams.Stream_Element_Array (1 .. 256);
+         Pair : R.Blinding_Pair;
+         All_Same : Boolean := True;
+      begin
+         Check (R.Generate_Keypair_With_Primes
+                  (R.RSA_2048, Rng, N, Ex, D, P, Q, DP, DQ, QI)
+                  = CryptoLib.Errors.Ok,
+                "a key for the blinding-pair test");
+         Check (R.Sign_PKCS1_V1_5 (N, Ex, D, R.SHA256, Message, Rng,
+                                   Reference, P, Q, DP, DQ, QI)
+                  = CryptoLib.Errors.Ok,
+                "a reference signature without a pair");
+
+         Check (R.Start_Blinding (N, Ex, Rng, Pair) = CryptoLib.Errors.Ok,
+                "a blinding pair starts");
+         --  Several signatures from one pair: it is squared after each, so a
+         --  refresh that broke the inverse relation would show up on the
+         --  second and not the first.
+         for Round in 1 .. 4 loop
+            if R.Sign_PKCS1_V1_5 (N, Ex, D, R.SHA256, Message, Rng, Pair,
+                                  With_Pair, P, Q, DP, DQ, QI)
+                 /= CryptoLib.Errors.Ok
+              or else With_Pair /= Reference
+            then
+               All_Same := False;
+            end if;
+         end loop;
+         Check (All_Same,
+                "four signatures from one refreshed pair all equal the "
+                & "reference");
+
+         --  A pair belongs to the modulus it was started for.
+         declare
+            Other_N  : Ada.Streams.Stream_Element_Array (1 .. 256);
+            Other_E  : Ada.Streams.Stream_Element_Array (1 .. 3);
+            Other_D  : Ada.Streams.Stream_Element_Array (1 .. 256);
+            O_P, O_Q, O_DP, O_DQ, O_QI :
+              Ada.Streams.Stream_Element_Array (1 .. 128);
+            Wrong    : Ada.Streams.Stream_Element_Array (1 .. 256) :=
+              [others => 16#A5#];
+            Narrow   : R.Blinding_Pair;
+            Small_N  : Ada.Streams.Stream_Element_Array (1 .. 128) :=
+              [others => 0];
+         begin
+            Check (R.Generate_Keypair_With_Primes
+                     (R.RSA_2048, Rng, Other_N, Other_E, Other_D,
+                      O_P, O_Q, O_DP, O_DQ, O_QI) = CryptoLib.Errors.Ok,
+                   "a second key");
+            --  Same width, different modulus: the pair is accepted by width
+            --  and the signature simply will not verify, which the check
+            --  against the public exponent turns into a refusal rather than a
+            --  bad signature. That is the important half.
+            Check (R.Sign_PKCS1_V1_5 (Other_N, Other_E, Other_D, R.SHA256,
+                                      Message, Rng, Pair, Wrong,
+                                      O_P, O_Q, O_DP, O_DQ, O_QI)
+                     /= CryptoLib.Errors.Ok,
+                   "a pair from another key of the same width is caught by "
+                   & "the check against the public exponent");
+            Check (Wrong = [Wrong'Range => 0], "and no signature is returned");
+
+            --  A different width is refused outright, before any arithmetic.
+            Small_N (Small_N'Last) := 3;
+            Small_N (Small_N'First) := 16#80#;
+            Check (R.Start_Blinding (Small_N, Ex, Rng, Narrow)
+                     = CryptoLib.Errors.Ok,
+                   "a pair for a narrower modulus starts");
+            --  Named status, not merely "not Ok". Without the width guard the
+            --  signature comes out wrong and the check against the public
+            --  exponent refuses it anyway -- so a test that accepted any
+            --  failure would pass with the guard deleted. What the guard buys
+            --  is saying which thing went wrong, and that is what is asserted.
+            Check (R.Sign_PKCS1_V1_5 (N, Ex, D, R.SHA256, Message, Rng,
+                                      Narrow, Wrong, P, Q, DP, DQ, QI)
+                     = CryptoLib.Errors.Handshake_Failed,
+                   "and a wider modulus is refused as a mismatched pair, not "
+                   & "as a bad signature");
+            R.Wipe (Narrow);
+         end;
+
+         --  An unstarted pair is drawn rather than refused, so the pair-taking
+         --  form is safe to call without Start_Blinding.
+         declare
+            Unstarted : R.Blinding_Pair;
+            Fresh     : Ada.Streams.Stream_Element_Array (1 .. 256);
+         begin
+            Check (R.Sign_PKCS1_V1_5 (N, Ex, D, R.SHA256, Message, Rng,
+                                      Unstarted, Fresh, P, Q, DP, DQ, QI)
+                     = CryptoLib.Errors.Ok
+                   and then Fresh = Reference,
+                   "an unstarted pair is drawn on first use");
+            R.Wipe (Unstarted);
+         end;
+
+         R.Wipe (Pair);
+      end;
+
       --  Blinding cannot be seen in the output -- that is the point of it,
       --  the signature is identical either way, and the byte-exact vectors
       --  above would pass with it removed. What can be seen is that the

@@ -38,12 +38,14 @@ with CryptoLib.Random;
 --  the plain exponentiation when it does not; both are the same call.
 --
 --  Two exponentiations at half the width cost about a quarter of one at full
---  width, but that is not what a signature costs. Measured here, a 2048-bit
---  signature goes from 27 milliseconds to 14 -- a little under twice as fast,
---  not four times. What CRT does not touch is the rest: the blinding factor's
---  inverse, the unblinding multiply, and the check that raises the result to
---  the public exponent are all at full width and all unchanged. Quoting the
---  fourfold figure for signing would be quoting the part that got faster.
+--  width, but that is not what a signature costs. Measured, CRT makes a
+--  2048-bit signature a little over twice as fast -- not four times, because
+--  the blinding factor's inverse, the unblinding multiply and the check
+--  against the public exponent are all full width and untouched by it.
+--
+--  Ratios rather than milliseconds on purpose: the absolute figures moved by a
+--  factor of two between runs on the same machine under different load, so a
+--  number written here would be a number that is wrong somewhere else.
 --
 --  A fault in either CRT half produces a signature that does not verify, and
 --  releasing a faulty CRT signature next to a correct one gives up the
@@ -131,6 +133,44 @@ package CryptoLib.RSA is
    function Modulus_Bits
      (Modulus : Ada.Streams.Stream_Element_Array) return Natural;
 
+   --  A blinding pair, reused across signatures made with one key.
+   --
+   --  The blinding factor's modular inverse is the most expensive part of a
+   --  signature -- measured, about half of one, and more than the
+   --  exponentiation itself. It need not be paid every time: a pair can be carried forward and refreshed by squaring both
+   --  halves, which costs two modular multiplications instead of an inverse and
+   --  keeps the pair consistent, since squaring r and r inverse leaves them
+   --  inverses of each other.
+   --
+   --  Worth using when signing repeatedly with the same key. Signing once --
+   --  which is what issuing a certificate does -- gains nothing, and the
+   --  entry points without a pair are simpler.
+   --
+   --  This holds secret material and is wiped by Wipe. A pair belongs to the
+   --  modulus it was started for and is refused by any other, because a pair
+   --  from another key would blind with a factor whose inverse does not undo
+   --  it -- which would produce signatures that do not verify rather than
+   --  anything worse, but a clear refusal is better than a puzzle.
+   type Blinding_Pair is limited private;
+
+   --  Start a blinding pair for a key. This is where the one inverse is paid.
+   --  @param Modulus         the modulus the pair will be used with
+   --  @param Public_Exponent the matching public exponent
+   --  @param Rng             the source the first factor is drawn from
+   --  @param Pair            out: the pair, unusable on failure
+   --  @return Ok, Handshake_Failed on an unusable modulus, Internal_Error when
+   --    no factor with an inverse can be drawn
+   function Start_Blinding
+     (Modulus         : Ada.Streams.Stream_Element_Array;
+      Public_Exponent : Ada.Streams.Stream_Element_Array;
+      Rng             : in out CryptoLib.Random.Random_Source;
+      Pair            : out Blinding_Pair)
+      return CryptoLib.Errors.Status;
+
+   --  Scrub a blinding pair.
+   --  @param Pair the pair to wipe
+   procedure Wipe (Pair : in out Blinding_Pair);
+
    --  Sign under RSASSA-PKCS1-v1_5.
    --
    --  Deterministic in its output: the same key and message always give the
@@ -214,6 +254,79 @@ package CryptoLib.RSA is
       Salt_Length      : Natural;
       Message          : Ada.Streams.Stream_Element_Array;
       Rng              : in out CryptoLib.Random.Random_Source;
+      Signature        : out Ada.Streams.Stream_Element_Array;
+      Prime_P          : Ada.Streams.Stream_Element_Array := [1 .. 0 => 0];
+      Prime_Q          : Ada.Streams.Stream_Element_Array := [1 .. 0 => 0];
+      Exponent_P       : Ada.Streams.Stream_Element_Array := [1 .. 0 => 0];
+      Exponent_Q       : Ada.Streams.Stream_Element_Array := [1 .. 0 => 0];
+      Coefficient      : Ada.Streams.Stream_Element_Array := [1 .. 0 => 0])
+      return CryptoLib.Errors.Status;
+
+   --  As Sign_PKCS1_V1_5, reusing a blinding pair instead of drawing one.
+   --
+   --  The pair is refreshed on each use, so one serves any number of
+   --  signatures and the inverse is paid once. An unstarted pair is drawn here,
+   --  so this is safe to call without Start_Blinding -- it just pays the
+   --  inverse on the first signature instead of before the first.
+   --  @param Modulus          the public modulus n
+   --  @param Public_Exponent  the public exponent e
+   --  @param Private_Exponent the private exponent d
+   --  @param Hash             which digest to sign under
+   --  @param Message          the message to sign
+   --  @param Rng              the source a pair is drawn from if needed
+   --  @param Pair             in out: the blinding pair, refreshed here
+   --  @param Signature        out: the signature, zeroed on failure
+   --  @param Prime_P     p, for CRT; omit all five to sign the plain way
+   --  @param Prime_Q     q, for CRT
+   --  @param Exponent_P  d mod (p-1), for CRT
+   --  @param Exponent_Q  d mod (q-1), for CRT
+   --  @param Coefficient q inverse mod p, for CRT
+   --  @return Ok, Handshake_Failed when the pair belongs to another modulus,
+   --    otherwise as the plain form
+   function Sign_PKCS1_V1_5
+     (Modulus          : Ada.Streams.Stream_Element_Array;
+      Public_Exponent  : Ada.Streams.Stream_Element_Array;
+      Private_Exponent : Ada.Streams.Stream_Element_Array;
+      Hash             : Hash_Algorithm;
+      Message          : Ada.Streams.Stream_Element_Array;
+      Rng              : in out CryptoLib.Random.Random_Source;
+      Pair             : in out Blinding_Pair;
+      Signature        : out Ada.Streams.Stream_Element_Array;
+      Prime_P          : Ada.Streams.Stream_Element_Array := [1 .. 0 => 0];
+      Prime_Q          : Ada.Streams.Stream_Element_Array := [1 .. 0 => 0];
+      Exponent_P       : Ada.Streams.Stream_Element_Array := [1 .. 0 => 0];
+      Exponent_Q       : Ada.Streams.Stream_Element_Array := [1 .. 0 => 0];
+      Coefficient      : Ada.Streams.Stream_Element_Array := [1 .. 0 => 0])
+      return CryptoLib.Errors.Status;
+
+   --  As Sign_PSS, reusing a blinding pair. The random source is still drawn
+   --  on for the salt, which is a different randomness from the blinding.
+   --  @param Modulus          the public modulus n
+   --  @param Public_Exponent  the public exponent e
+   --  @param Private_Exponent the private exponent d
+   --  @param Hash             which digest to sign under
+   --  @param Salt_Length      how many salt octets to draw
+   --  @param Message          the message to sign
+   --  @param Rng              the source for the salt, and for a pair if
+   --    one has not been started
+   --  @param Pair             in out: the blinding pair, refreshed here
+   --  @param Signature        out: the signature, zeroed on failure
+   --  @param Prime_P     p, for CRT; omit all five to sign the plain way
+   --  @param Prime_Q     q, for CRT
+   --  @param Exponent_P  d mod (p-1), for CRT
+   --  @param Exponent_Q  d mod (q-1), for CRT
+   --  @param Coefficient q inverse mod p, for CRT
+   --  @return Ok, Handshake_Failed when the pair belongs to another modulus,
+   --    otherwise as the plain form
+   function Sign_PSS
+     (Modulus          : Ada.Streams.Stream_Element_Array;
+      Public_Exponent  : Ada.Streams.Stream_Element_Array;
+      Private_Exponent : Ada.Streams.Stream_Element_Array;
+      Hash             : Hash_Algorithm;
+      Salt_Length      : Natural;
+      Message          : Ada.Streams.Stream_Element_Array;
+      Rng              : in out CryptoLib.Random.Random_Source;
+      Pair             : in out Blinding_Pair;
       Signature        : out Ada.Streams.Stream_Element_Array;
       Prime_P          : Ada.Streams.Stream_Element_Array := [1 .. 0 => 0];
       Prime_Q          : Ada.Streams.Stream_Element_Array := [1 .. 0 => 0];
@@ -311,5 +424,21 @@ package CryptoLib.RSA is
    --  @param Size which modulus width
    --  @return 256, 384 or 512
    function Modulus_Octets (Size : Modulus_Size) return Positive;
+
+private
+
+   --  Wide enough for a 4096-bit modulus, which is the largest key generated
+   --  here and the largest a pair is useful for.
+   Maximum_Pair_Width : constant := 512;
+
+   type Blinding_Pair is limited record
+      Factor  : Ada.Streams.Stream_Element_Array (1 .. Maximum_Pair_Width) :=
+        [others => 0];                 --  r**e mod n, what the input is
+                                       --  multiplied by
+      Inverse : Ada.Streams.Stream_Element_Array (1 .. Maximum_Pair_Width) :=
+        [others => 0];                 --  r inverse mod n, what undoes it
+      Width   : Ada.Streams.Stream_Element_Offset := 0;
+      Ready   : Boolean := False;
+   end record;
 
 end CryptoLib.RSA;

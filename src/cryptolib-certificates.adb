@@ -910,6 +910,16 @@ package body CryptoLib.Certificates is
       Used : Ada.Streams.Stream_Element_Offset := 0;
    end record;
 
+   --  An RSA CA's CRT parameters, when its key file carries them. All five or
+   --  none: signing with a partial set is not a thing.
+   type CA_CRT_Material is record
+      P, Q, DP, DQ, QI :
+        Ada.Streams.Stream_Element_Array (1 .. Max_CA_Private) :=
+          [others => 0];
+      Used  : Ada.Streams.Stream_Element_Offset := 0;
+      Ready : Boolean := False;
+   end record;
+
    type CA_Public_Material is record
       Slot : Ada.Streams.Stream_Element_Array (1 .. Max_CA_Public) :=
         [others => 0];
@@ -923,6 +933,23 @@ package body CryptoLib.Certificates is
    function Value (Item : CA_Public_Material)
      return Ada.Streams.Stream_Element_Array
    is (Item.Slot (1 .. Item.Used));
+
+   --  Each CRT value at the width they share, which is half the modulus.
+   function CRT_P (Item : CA_CRT_Material)
+     return Ada.Streams.Stream_Element_Array
+   is (if Item.Ready then Item.P (1 .. Item.Used) else [1 .. 0 => 0]);
+   function CRT_Q (Item : CA_CRT_Material)
+     return Ada.Streams.Stream_Element_Array
+   is (if Item.Ready then Item.Q (1 .. Item.Used) else [1 .. 0 => 0]);
+   function CRT_DP (Item : CA_CRT_Material)
+     return Ada.Streams.Stream_Element_Array
+   is (if Item.Ready then Item.DP (1 .. Item.Used) else [1 .. 0 => 0]);
+   function CRT_DQ (Item : CA_CRT_Material)
+     return Ada.Streams.Stream_Element_Array
+   is (if Item.Ready then Item.DQ (1 .. Item.Used) else [1 .. 0 => 0]);
+   function CRT_QI (Item : CA_CRT_Material)
+     return Ada.Streams.Stream_Element_Array
+   is (if Item.Ready then Item.QI (1 .. Item.Used) else [1 .. 0 => 0]);
 
    --  Drop leading zero octets, which a DER INTEGER's contents may carry and
    --  which are not part of the value.
@@ -1380,9 +1407,48 @@ package body CryptoLib.Certificates is
       Private_Part       : out CA_Private_Material;
       Public_Part        : out CA_Public_Material;
       Modulus            : out CA_Public_Material;
-      Exponent           : out CA_Public_Material) return Boolean
+      Exponent           : out CA_Public_Material;
+      CRT                : out CA_CRT_Material) return Boolean
    is
+      --  All five CRT values or none, at one shared width. A partial set is
+      --  treated as absent, and signing falls back to the plain
+      --  exponentiation rather than doing something halfway.
+      function Take_CRT
+        (Item : CryptoLib.PKCS8.Private_Key) return CA_CRT_Material
+      is
+         P_Val  : constant Ada.Streams.Stream_Element_Array :=
+           Significant (CryptoLib.PKCS8.RSA_Prime_P (Item));
+         Q_Val  : constant Ada.Streams.Stream_Element_Array :=
+           Significant (CryptoLib.PKCS8.RSA_Prime_Q (Item));
+         DP_Val : constant Ada.Streams.Stream_Element_Array :=
+           Significant (CryptoLib.PKCS8.RSA_Exponent_P (Item));
+         DQ_Val : constant Ada.Streams.Stream_Element_Array :=
+           Significant (CryptoLib.PKCS8.RSA_Exponent_Q (Item));
+         QI_Val : constant Ada.Streams.Stream_Element_Array :=
+           Significant (CryptoLib.PKCS8.RSA_Coefficient (Item));
+         Width  : constant Ada.Streams.Stream_Element_Offset := P_Val'Length;
+         Result : CA_CRT_Material;
+      begin
+         if Width = 0 or else Width > Max_CA_Private
+           or else Q_Val'Length /= Width
+           or else DP_Val'Length > Width or else DQ_Val'Length > Width
+           or else QI_Val'Length > Width
+         then
+            return Result;                --  not ready
+         end if;
+         Result.Used := Width;
+         Result.P (1 .. Width) := P_Val;
+         Result.Q (1 .. Width) := Q_Val;
+         --  These are each below their prime, so they may be shorter; the
+         --  exponentiation wants them at the prime's width.
+         Result.DP (Width - DP_Val'Length + 1 .. Width) := DP_Val;
+         Result.DQ (Width - DQ_Val'Length + 1 .. Width) := DQ_Val;
+         Result.QI (Width - QI_Val'Length + 1 .. Width) := QI_Val;
+         Result.Ready := True;
+         return Result;
+      end Take_CRT;
    begin
+      CRT := (others => <>);
       Private_Part := (Slot => [others => 0], Used => 0);
       Public_Part := (Slot => [others => 0], Used => 0);
       Modulus := (Slot => [others => 0], Used => 0);
@@ -1404,6 +1470,7 @@ package body CryptoLib.Certificates is
                --  signature from the modulus, so the padding has to come off
                --  here or every signature is one octet too wide and refused.
                --  Integer_From_Bytes puts it back when the key is re-encoded.
+               CRT := Take_CRT (Item);
                if not Place (Private_Part,
                              Significant
                                (CryptoLib.PKCS8.RSA_Private_Exponent (Item)))
@@ -1522,7 +1589,12 @@ package body CryptoLib.Certificates is
       Subject_SPKI    : String := "";
       Sign_Modulus    : Ada.Streams.Stream_Element_Array := [1 .. 0 => 0];
       Sign_Exponent   : Ada.Streams.Stream_Element_Array := [1 .. 0 => 0];
-      Use_PSS         : Boolean := False)
+      Use_PSS         : Boolean := False;
+      Sign_P          : Ada.Streams.Stream_Element_Array := [1 .. 0 => 0];
+      Sign_Q          : Ada.Streams.Stream_Element_Array := [1 .. 0 => 0];
+      Sign_DP         : Ada.Streams.Stream_Element_Array := [1 .. 0 => 0];
+      Sign_DQ         : Ada.Streams.Stream_Element_Array := [1 .. 0 => 0];
+      Sign_QI         : Ada.Streams.Stream_Element_Array := [1 .. 0 => 0])
       return String
    is
       --  The signer's algorithm and the subject's need not agree: a CSR brings
@@ -1560,13 +1632,16 @@ package body CryptoLib.Certificates is
                   if CryptoLib.RSA.Sign_PSS
                        (Sign_Modulus, Sign_Exponent, Sign_Seed,
                         CryptoLib.RSA.SHA256, RSA_PSS_Salt_Length,
-                        To_Bytes (TBS), Rng, Sig) /= CryptoLib.Errors.Ok
+                        To_Bytes (TBS), Rng, Sig,
+                        Sign_P, Sign_Q, Sign_DP, Sign_DQ, Sign_QI)
+                       /= CryptoLib.Errors.Ok
                   then
                      return "";
                   end if;
                elsif CryptoLib.RSA.Sign_PKCS1_V1_5
                        (Sign_Modulus, Sign_Exponent, Sign_Seed,
-                        CryptoLib.RSA.SHA256, To_Bytes (TBS), Rng, Sig)
+                        CryptoLib.RSA.SHA256, To_Bytes (TBS), Rng, Sig,
+                        Sign_P, Sign_Q, Sign_DP, Sign_DQ, Sign_QI)
                        /= CryptoLib.Errors.Ok
                then
                   return "";
@@ -2116,6 +2191,7 @@ package body CryptoLib.Certificates is
       CA_Pub  : CA_Public_Material;
       CA_N    : CA_Public_Material;
       CA_E    : CA_Public_Material;
+      CA_CRT  : CA_CRT_Material;
       Seed      : Ada.Streams.Stream_Element_Array
         (1 .. Ada.Streams.Stream_Element_Offset (Seed_Length_For (Signing)));
       Public    : Ada.Streams.Stream_Element_Array
@@ -2159,7 +2235,8 @@ package body CryptoLib.Certificates is
       --  back in slots wide enough for any of them with the used length
       --  attached, so nothing here is sized from the algorithm's name.
       if not Read_CA_Material
-               (CA_Private_Key_PEM, Algorithm, CA_Priv, CA_Pub, CA_N, CA_E)
+               (CA_Private_Key_PEM, Algorithm, CA_Priv, CA_Pub, CA_N, CA_E,
+                CA_CRT)
       then
          Scrub;
          return Invalid_Input;
@@ -2229,7 +2306,12 @@ package body CryptoLib.Certificates is
                  Limit_Present   => CA_Ends_Known,
                  Not_After_Limit => CA_Ends,
                  Sign_Modulus    => Value (CA_N),
-                 Sign_Exponent   => Value (CA_E)));
+                 Sign_Exponent   => Value (CA_E),
+                 Sign_P          => CRT_P (CA_CRT),
+                 Sign_Q          => CRT_Q (CA_CRT),
+                 Sign_DP         => CRT_DP (CA_CRT),
+                 Sign_DQ         => CRT_DQ (CA_CRT),
+                 Sign_QI         => CRT_QI (CA_CRT)));
       end;
 
       if Length (Cert) = 0 then
@@ -2329,6 +2411,7 @@ package body CryptoLib.Certificates is
       CA_Pub  : CA_Public_Material;
       CA_N    : CA_Public_Material;
       CA_E    : CA_Public_Material;
+      CA_CRT  : CA_CRT_Material;
 
       --  The CA's private key, recovered from its PEM to sign with.
       procedure Scrub is
@@ -2352,7 +2435,8 @@ package body CryptoLib.Certificates is
          return Invalid_Input;
       end if;
       if not Read_CA_Material
-               (CA_Private_Key_PEM, Algorithm, CA_Priv, CA_Pub, CA_N, CA_E)
+               (CA_Private_Key_PEM, Algorithm, CA_Priv, CA_Pub, CA_N, CA_E,
+                CA_CRT)
       then
          Scrub;
          return Invalid_Input;
@@ -2409,7 +2493,12 @@ package body CryptoLib.Certificates is
                     Not_After_Limit => CA_Ends,
                     Subject_SPKI    => To_String (Key_Info),
                     Sign_Modulus    => Value (CA_N),
-                    Sign_Exponent   => Value (CA_E)));
+                    Sign_Exponent   => Value (CA_E),
+                    Sign_P          => CRT_P (CA_CRT),
+                    Sign_Q          => CRT_Q (CA_CRT),
+                    Sign_DP         => CRT_DP (CA_CRT),
+                    Sign_DQ         => CRT_DQ (CA_CRT),
+                    Sign_QI         => CRT_QI (CA_CRT)));
          end;
       end;
 
@@ -2565,6 +2654,7 @@ package body CryptoLib.Certificates is
       Priv : CA_Private_Material;
       Pub  : CA_Public_Material;
       N, E : CA_Public_Material;
+      CRT  : CA_CRT_Material;
 
       procedure Scrub is
       begin
@@ -2586,7 +2676,8 @@ package body CryptoLib.Certificates is
       --  including RSA, so there is one path and RSA is no longer the
       --  exception. CryptoLib.Identities has always matched RSA keys; this
       --  refusing them was the two answering the same question differently.
-      if not Read_CA_Material (Private_Key_PEM, Algorithm, Priv, Pub, N, E)
+      if not Read_CA_Material
+               (Private_Key_PEM, Algorithm, Priv, Pub, N, E, CRT)
       then
          Scrub;
          return Invalid_Input;
@@ -2767,6 +2858,7 @@ package body CryptoLib.Certificates is
       CA_Pub  : CA_Public_Material;
       CA_N    : CA_Public_Material;
       CA_E    : CA_Public_Material;
+      CA_CRT  : CA_CRT_Material;
 
       procedure Scrub is
       begin
@@ -2781,7 +2873,8 @@ package body CryptoLib.Certificates is
          return Invalid_Input;
       end if;
       if not Read_CA_Material
-               (CA_Private_Key_PEM, Algorithm, CA_Priv, CA_Pub, CA_N, CA_E)
+               (CA_Private_Key_PEM, Algorithm, CA_Priv, CA_Pub, CA_N, CA_E,
+                CA_CRT)
       then
          Scrub;
          return Invalid_Input;
@@ -2813,7 +2906,12 @@ package body CryptoLib.Certificates is
                  Valid_Days  => Valid_Days,
                  Sign_Modulus    => Value (CA_N),
                  Sign_Exponent   => Value (CA_E),
-                 Use_PSS         => Use_PSS));
+                 Use_PSS         => Use_PSS,
+                 Sign_P          => CRT_P (CA_CRT),
+                 Sign_Q          => CRT_Q (CA_CRT),
+                 Sign_DP         => CRT_DP (CA_CRT),
+                 Sign_DQ         => CRT_DQ (CA_CRT),
+                 Sign_QI         => CRT_QI (CA_CRT)));
       end;
 
       if Length (Cert) = 0 then
@@ -2921,6 +3019,7 @@ package body CryptoLib.Certificates is
       CA_Pub  : CA_Public_Material;
       CA_N    : CA_Public_Material;
       CA_E    : CA_Public_Material;
+      CA_CRT  : CA_CRT_Material;
       Cert : Unbounded_String;
 
       procedure Scrub is
@@ -2948,7 +3047,8 @@ package body CryptoLib.Certificates is
          end if;
       end loop;
       if not Read_CA_Material
-               (CA_Private_Key_PEM, Algorithm, CA_Priv, CA_Pub, CA_N, CA_E)
+               (CA_Private_Key_PEM, Algorithm, CA_Priv, CA_Pub, CA_N, CA_E,
+                CA_CRT)
       then
          Scrub;
          return Invalid_Input;
@@ -2981,7 +3081,12 @@ package body CryptoLib.Certificates is
                  Subject_SPKI    => To_String (Subject_SPKI),
                  Sign_Modulus    => Value (CA_N),
                  Sign_Exponent   => Value (CA_E),
-                 Use_PSS         => Use_PSS));
+                 Use_PSS         => Use_PSS,
+                 Sign_P          => CRT_P (CA_CRT),
+                 Sign_Q          => CRT_Q (CA_CRT),
+                 Sign_DP         => CRT_DP (CA_CRT),
+                 Sign_DQ         => CRT_DQ (CA_CRT),
+                 Sign_QI         => CRT_QI (CA_CRT)));
       end;
 
       if Length (Cert) = 0 then
