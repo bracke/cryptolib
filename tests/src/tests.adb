@@ -21,6 +21,7 @@ with CryptoLib.PKCS8;
 with CryptoLib.PKCS12;
 with CryptoLib.Identities;
 with CryptoLib.X509.Policies;
+with CryptoLib.Fingerprints;
 with CryptoLib.Constant_Time;
 with CryptoLib.BCrypt_PBKDF;
 with CryptoLib.X509.Times;
@@ -6458,6 +6459,151 @@ procedure Tests is
              "as is a public value this crate generated itself");
    end Check_DH_Peer_Validation;
 
+   --  OpenSSH key fingerprints, which nothing here was checking.
+   --
+   --  Two formats a person reads off a terminal and compares by eye before
+   --  trusting a host or a key. Neither was named anywhere in the suite, so
+   --  a fingerprint that came out subtly wrong -- a dropped leading zero, a
+   --  stray base64 pad -- would have been nobody's failing test. Both turn
+   --  out to be right; the vectors are what ssh-keygen prints for the same
+   --  key blobs.
+   procedure Check_OpenSSH_Fingerprints is
+      Ed25519_Blob : constant String :=
+        "0000000b7373682d6564323535313900000020eb6126b8dc505698a087af84a720a8c5aeb063841fa5da" &
+        "508e0b7fe010d74d2e";
+
+      RSA_Blob : constant String :=
+        "000000077373682d727361000000030100010000010100a3c354fc7002a2c2769f65b0c2392f7b45807f" &
+        "1164921fdea956c8d5e60aab71fb74aaf25b235d14ffb3dede12fcbf0db3e8e9a854a30498faeeef5f82" &
+        "3745a2d566f395d194de6dc99b3626deee3bc48e5b8cf751e082eb053fabb0aae812f5335228262dac97" &
+        "baebe3f284b8f858606bcff749baae69df21a6bf9fc2c1d0d27a22e709ad0d5ff1f63305c318f905d77e" &
+        "3906b463ceffcd1b29f9d1597e3c2861197ef2f0cb5fb05249a428ce5636195095e493543db80f42c71d" &
+        "f49d040b5677eb283a94db17ccdb6dc576bea2779883b1ee8eab385adf1e27cb51f5aa877b06691c187e" &
+        "8de9578dd1a60d2b7d4e4384f75832214d84eaf64484721e8947e3";
+
+      function From_Hex
+        (Text : String) return Ada.Streams.Stream_Element_Array
+      is
+         Result : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (Text'Length / 2));
+         function Nibble (C : Character) return Natural
+         is (case C is
+                when '0' .. '9' => Character'Pos (C) - Character'Pos ('0'),
+                when others     => Character'Pos (C) - Character'Pos ('a') + 10);
+      begin
+         for I in Result'Range loop
+            Result (I) :=
+              Ada.Streams.Stream_Element
+                (Nibble (Text (Text'First + 2 * Natural (I - 1))) * 16
+                 + Nibble (Text (Text'First + 2 * Natural (I - 1) + 1)));
+         end loop;
+         return Result;
+      end From_Hex;
+
+      procedure One_Key (Label : String; Blob : String;
+                         Sha : String; Md5 : String)
+      is
+         Rendered : Unbounded_String;
+      begin
+         Check (CryptoLib.Fingerprints.SHA256_OpenSSH
+                  (From_Hex (Blob), Rendered) = CryptoLib.Errors.Ok
+                and then To_String (Rendered) = Sha,
+                Label & " SHA-256 fingerprint matches ssh-keygen, got "
+                & To_String (Rendered));
+         Check (CryptoLib.Fingerprints.MD5_OpenSSH
+                  (From_Hex (Blob), Rendered) = CryptoLib.Errors.Ok
+                and then To_String (Rendered) = Md5,
+                Label & " MD5 fingerprint matches ssh-keygen, got "
+                & To_String (Rendered));
+      end One_Key;
+   begin
+      One_Key ("an Ed25519 key", Ed25519_Blob,
+               "SHA256:BHKvdl5CunT7Uf2fAFIKoEp3Q9WH05aP9/IrGD8ESdw",
+               "MD5:07:bb:7e:50:c1:0d:07:42:26:98:20:16:d4:2b:2b:cd");
+      One_Key ("an RSA key", RSA_Blob,
+               "SHA256:kA5XpZeuWAnvQ13w1n/x3mj1Il9YZ++ykGiDWcum8Cw",
+               "MD5:8b:80:12:64:88:49:71:03:7d:fc:18:9c:4d:ec:41:78");
+
+      --  The SHA-256 form is unpadded base64: 32 bytes is not a multiple of
+      --  three, so a padded rendering would end in "=" and not match what
+      --  anybody compares against.
+      declare
+         Rendered : Unbounded_String;
+      begin
+         Check (CryptoLib.Fingerprints.SHA256_OpenSSH
+                  (From_Hex (Ed25519_Blob), Rendered) = CryptoLib.Errors.Ok
+                and then Element (Rendered, Length (Rendered)) /= '=',
+                "and carries no base64 padding");
+      end;
+   end Check_OpenSSH_Fingerprints;
+
+   --  Group 14, which nothing was checking, against arithmetic done
+   --  elsewhere.
+   --
+   --  The suite tested groups 16 and 18 and left 1 and 14 alone, while the
+   --  table listed all four. Group 14 is the one an SSH client actually
+   --  negotiates most of the time.
+   --
+   --  A round trip between two honest sides is self-consistent and would
+   --  pass with the wrong prime, so this fixes the private exponent and the
+   --  peer value and writes down the answer: 2 raised to 0x012345 modulo the
+   --  RFC 3526 group 14 prime, computed independently. A single wrong digit
+   --  anywhere in that 2048-bit constant changes it.
+   procedure Check_DH_Group14 is
+
+      Expected : constant String :=
+           "00a65579621dbc9f9c2493b937c6e20f4898caeff728c042dd49710c60e201cdd5ec5122cf6938be4eaf"
+           & "e9a8c8cf5bbe6a398bce7d4febcaa0d91299550a00e3356f38539f29bd6004a29149242b31760ece6132"
+           & "9da815e0be47b7ea8c2e4831d8e22dda2eca6458ca9659d5c9921628418cadfc06045bf436cb5c8c32e0"
+           & "cf38cb18a53efb236ba44c7fa0f7d13815b6bcd1c00bb8734cda61c33dc99d958891753223e13d9e40df"
+           & "127b0abacae29e58ccf5f9962e0afc734deb0619fa7335386e4c89d6e2547f46329f79531adac79524ac"
+           & "4d008384edcb9aa9516d7c2ef63ddd2f136d64701af9a37d51c537548e458dc67c3b6fbc52c871ba3357"
+           & "23b34196e2";
+
+      function From_Hex
+        (Text : String) return Ada.Streams.Stream_Element_Array
+      is
+         Result : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (Text'Length / 2));
+         function Nibble (C : Character) return Natural
+         is (case C is
+                when '0' .. '9' => Character'Pos (C) - Character'Pos ('0'),
+                when others     => Character'Pos (C) - Character'Pos ('a') + 10);
+      begin
+         for I in Result'Range loop
+            Result (I) :=
+              Ada.Streams.Stream_Element
+                (Nibble (Text (Text'First + 2 * Natural (I - 1))) * 16
+                 + Nibble (Text (Text'First + 2 * Natural (I - 1) + 1)));
+         end loop;
+         return Result;
+      end From_Hex;
+
+      Fixed_Private : Ada.Streams.Stream_Element_Array (1 .. 256) :=
+        [others => 0];
+      Shared : CryptoLib.Buffers.Packet_Buffer;
+   begin
+      --  0x012345, right aligned in the fixed-width exponent.
+      Fixed_Private (254) := 16#01#;
+      Fixed_Private (255) := 16#23#;
+      Fixed_Private (256) := 16#45#;
+
+      Check (CryptoLib.Diffie_Hellman.Compute_Group14_Shared_Secret
+               (Fixed_Private, [1 => 2], Shared) = CryptoLib.Errors.Ok,
+             "group14 computes a shared secret from a fixed exponent");
+      Check (CryptoLib.Buffers.To_Array (Shared) = From_Hex (Expected),
+             "and it is the value an independent modexp over the RFC 3526 "
+             & "group 14 prime gives");
+
+      --  The same degenerate peers the group16 check refuses.
+      Check (CryptoLib.Diffie_Hellman.Compute_Group14_Shared_Secret
+               (Fixed_Private, [1 => 0], Shared) /= CryptoLib.Errors.Ok,
+             "a peer value of zero is refused here too");
+      Check (CryptoLib.Diffie_Hellman.Compute_Group14_Shared_Secret
+               (Fixed_Private, [1 => 1], Shared) /= CryptoLib.Errors.Ok,
+             "and a peer value of one");
+   end Check_DH_Group14;
+
    procedure Check_X509_Extensions is
       use type CryptoLib.ASN1.Errors.Decode_Status;
       use type CryptoLib.PEM.Decode_Status;
@@ -11386,6 +11532,8 @@ begin
    Check_Bcrypt_PBKDF;
    Check_Constant_Time_Equal;
    Check_DH_Peer_Validation;
+   Check_OpenSSH_Fingerprints;
+   Check_DH_Group14;
    Check_Random_Fails_Closed;
    Check_Off_Curve_Key;
    Check_Ed25519_Encoding;
