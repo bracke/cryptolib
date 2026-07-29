@@ -22,6 +22,7 @@ The reference sources are:
 | AEAD / ciphers | AES-128/192/256 (CTR/CBC/GCM), ChaCha20-Poly1305, 3DES, RC2 | FIPS-197; AES-256-GCM and chacha20-poly1305@openssh.com cross-checked vs pyca/OpenSSL |
 | GHASH | GF(2¹²⁸) for AES-GCM | via the GCM KAT |
 | X25519 | Curve25519 ECDH | RFC 7748 §5.2 |
+| Ed448 | sign / verify | RFC 8032 PureEdDSA over edwards448, SHAKE256. Signatures are deterministic, so agreement with pyca/OpenSSL is byte-for-byte rather than "both verify"; an OpenSSL-issued Ed448 certificate chain verifies here. The curve constants were derived and not transcribed -- the base point was recovered from a real key as `s^-1 * A`, which needs only `p` and `d`, and confirmed by `L * B` reaching the neutral element, so a mistyped digit in any of them would have shown before the port. A public key has one encoding: `y` at or above `p`, spare bits set in the final octet, an `S` at or above the group order, or a non-zero top octet of `S` are each refused |
 | Ed25519 | sign / verify | RFC 8032; a public key has one encoding -- the decoder refuses a non-canonical `y`, requires a real square root, and refuses `x = 0` with the sign bit set (RFC 8032 5.1.3) |
 | ECDSA | P-256 (in `ssh_lib`), P-384 / P-521 sign; P-256 / P-384 / P-521 verify; the public point is checked to be on the curve and within the field before use | **RFC 6979 A.2.5** (P-384, byte-exact) + P-521 (pyca cross-verified); verification against OpenSSL signatures on all three curves, including curve/digest pairings that differ (P-521 with SHA-256, P-384 with SHA-512) |
 | Finite-field DH | groups 1 / 14 / 16 / 18 | live vs OpenSSH; group16/18 pin the exact RFC 3526 primes |
@@ -159,10 +160,11 @@ every status reading `Ok` while every key it produces is predictable.
   confirms a chain decodes, hangs together by issuer and subject name, and
   that the private key belongs to the leaf. It says nothing about whether the
   chain should be believed, which is `X509.Validation`'s question and needs
-  trust anchors. RSA, ECDSA on P-256, P-384 and P-521, and Ed25519 identities
-  are all checked. Anything else -- Ed448 today -- reports `Unsupported_Key`
-  rather than `Ok`, so an unchecked identity is never mistaken for a checked
-  one.
+  trust anchors. RSA, ECDSA on P-256, P-384 and P-521, Ed25519 and Ed448
+  identities are all checked. Anything else -- an X25519 key in a
+  certificate, say, which is not a signing key at all -- reports
+  `Unsupported_Key` rather than `Ok`, so an unchecked identity is never
+  mistaken for a checked one.
 - **RSA is verification only** — there is no RSA signing, key generation, or
   private-key operation, and no RSA-PSS. `X509.Signatures` reports
   `Unsupported_Algorithm` rather than a failure whenever it cannot check a
@@ -175,12 +177,15 @@ every status reading `Ok` while every key it produces is predictable.
   this cannot verify. Collapsing any of them into `Invalid_Signature` fails
   the suite, because that value asserts a certificate was altered -- RSA-PSS whose parameters name a hash this crate does not implement
   lands there. RSA verification touches only public values, so nothing in it needs to
-  be constant-time. That distinction is pinned by an Ed448 certificate
-  OpenSSL made and signed: it decodes, its key algorithm is named, and its
+  be constant-time. That distinction is pinned by certificates
+  OpenSSL made: one signed with `sha1WithRSAEncryption`, which this does not
+  verify, decodes and names its algorithm as one it does not know, and its
   perfectly good self-signature comes back `Unsupported_Algorithm` rather
-  than `Invalid_Signature`. `Identities` reports `Unsupported_Key` for the
-  same pair rather than `Key_Mismatch` -- the key does belong to the
-  certificate, and saying otherwise would be a claim this cannot support.
+  than `Invalid_Signature`. `Identities` reports `Unsupported_Key` for a
+  certificate carrying an X25519 key rather than `Key_Mismatch` -- nothing
+  is wrong with the pair, and saying otherwise would be a claim this cannot
+  support. That test used Ed448 for both until Ed448 became something this
+  crate decides, which is the right way for such an example to go stale.
 - **Path validation checks a supplied path; it does not build one.**
   `X509.Validation` verifies signatures along a chain, issuer/subject linkage,
   validity windows against a caller-supplied time, basic constraints and path

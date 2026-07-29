@@ -4,6 +4,7 @@ with CryptoLib.ASN1.DER;
 with CryptoLib.ASN1.Errors;
 with CryptoLib.ECDSA;
 with CryptoLib.Ed25519;
+with CryptoLib.Ed448;
 with CryptoLib.Errors;
 with CryptoLib.ASN1.OIDs;
 with CryptoLib.RSA;
@@ -26,6 +27,8 @@ package body CryptoLib.X509.Signatures is
    P521_Component : constant := 66;
    P521_Point     : constant := 133;
    Ed25519_Key    : constant := 32;
+   Ed448_Key      : constant := 57;
+   Ed448_Sig      : constant := 114;
    Ed25519_Sig    : constant := 64;
 
    function Result_Image (Result : Verification_Result) return String is
@@ -42,7 +45,7 @@ package body CryptoLib.X509.Signatures is
 
    function Is_Supported (Algorithm : Signature_Algorithm) return Boolean
    is (Algorithm in ECDSA_With_SHA256 | ECDSA_With_SHA384 | ECDSA_With_SHA512
-       | Ed25519_Signature
+       | Ed25519_Signature | Ed448_Signature
        | SHA256_With_RSA | SHA384_With_RSA | SHA512_With_RSA
        | RSASSA_PSS);
 
@@ -509,6 +512,29 @@ package body CryptoLib.X509.Signatures is
                end if;
 
                if CryptoLib.Ed25519.Verify
+                    (Public_Key_Bytes => Key,
+                     Signature_Bytes  => Sig,
+                     Message_Bytes    => Message) = CryptoLib.Errors.Ok
+               then
+                  return Valid;
+               else
+                  return Invalid_Signature;
+               end if;
+
+            when Ed448_Signature =>
+               if Key_Kind /= Ed448 then
+                  return Algorithm_Mismatch;
+               end if;
+
+               if Key'Length /= Ed448_Key then
+                  return Malformed_Signature;
+               end if;
+
+               if Sig'Length /= Ed448_Sig then
+                  return Malformed_Signature;
+               end if;
+
+               if CryptoLib.Ed448.Verify
                     (Public_Key_Bytes => Key,
                      Signature_Bytes  => Sig,
                      Message_Bytes    => Message) = CryptoLib.Errors.Ok

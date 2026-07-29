@@ -35,6 +35,7 @@ Do not run plain system `gnat*`, `gnatmake`, `gnatls`, `gnatprove`,
 | `CryptoLib.ChaCha20_Poly1305` | ChaCha20-Poly1305 AEAD (OpenSSH transport framing) |
 | `CryptoLib.Curve25519` | X25519 key agreement |
 | `CryptoLib.Ed25519` | Ed25519 signatures |
+| `CryptoLib.Ed448` | Ed448 signatures (RFC 8032 PureEdDSA, empty context) |
 | `CryptoLib.ECDSA` | ECDSA P-384/P-521 signing (RFC 6979 deterministic); P-256/P-384/P-521 verification with any of SHA-256/384/512 and public-key derivation |
 | `CryptoLib.Diffie_Hellman` | finite-field DH groups 1/14/16/18 |
 | `CryptoLib.MLKEM768`, `CryptoLib.SNTRUP761`, `CryptoLib.Hybrid_PQ_KEX` | post-quantum KEMs + hybrid x25519 |

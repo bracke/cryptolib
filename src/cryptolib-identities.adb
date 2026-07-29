@@ -3,6 +3,7 @@ with Ada.Streams;
 with CryptoLib.ASN1.Errors;
 with CryptoLib.ECDSA;
 with CryptoLib.Ed25519;
+with CryptoLib.Ed448;
 with CryptoLib.Errors;
 with CryptoLib.ASN1.DER;
 with CryptoLib.PEM;
@@ -168,6 +169,24 @@ package body CryptoLib.Identities is
                return Same_Bytes (Point, X509C.Public_Key (Leaf));
             end;
 
+         when CryptoLib.X509.Ed448 =>
+            declare
+               Seed  : constant Octets :=
+                 CryptoLib.PKCS8.Private_Value (Key_Item);
+               Point : Ada.Streams.Stream_Element_Array (1 .. 57);
+            begin
+               if Seed'Length /= 57 then
+                  return False;
+               end if;
+               if CryptoLib.Ed448.Public_Key_From_Seed (Seed, Point)
+                 /= CryptoLib.Errors.Ok
+               then
+                  return False;
+               end if;
+               Decided := True;
+               return Same_Bytes (Point, X509C.Public_Key (Leaf));
+            end;
+
          when CryptoLib.X509.RSA =>
             --  An RSA private key carries its own public parts, so this is a
             --  comparison rather than a derivation: the modulus and exponent
@@ -224,8 +243,8 @@ package body CryptoLib.Identities is
             end;
 
          when others =>
-            --  Ed448 and anything unrecognised. The match cannot be decided,
-            --  which is reported rather than guessed.
+            --  Anything unrecognised. The match cannot be decided, which is
+            --  reported rather than guessed.
             return False;
       end case;
    end Key_Matches;

@@ -43,6 +43,7 @@ with CryptoLib.MLKEM768;
 with CryptoLib.SNTRUP761;
 with CryptoLib.Curve25519;
 with CryptoLib.Ed25519;
+with CryptoLib.Ed448;
 with CryptoLib.SHA3;
 with CryptoLib.Buffers;
 with CryptoLib.Diffie_Hellman;
@@ -4302,48 +4303,64 @@ procedure Tests is
    --  An algorithm this crate cannot verify says so.
    --
    --  "Could not check" and "the signature is bad" are different answers and
-   --  the second is a claim this has no right to make. Ed448 is the case
-   --  today: the certificate below is perfectly good, signed by OpenSSL, and
-   --  nothing here can verify it.
+   --  the second is a claim this has no right to make. Both certificates
+   --  below are perfectly good and made by OpenSSL: one is signed with
+   --  sha1WithRSAEncryption, which this does not verify and will not start
+   --  verifying, and the other carries an X25519 key, which is not a signing
+   --  key at all. This test used to use Ed448 for both, until Ed448 became
+   --  something this crate can decide -- which is the right way for the
+   --  example to go stale.
    procedure Check_Unsupported_Algorithm is
       package XS renames CryptoLib.X509.Signatures;
       use type CryptoLib.ASN1.Errors.Decode_Status;
       use type CryptoLib.Identities.Identity_Status;
       use type CryptoLib.X509.Public_Key_Algorithm;
+      use type CryptoLib.X509.Signature_Algorithm;
       use type XS.Verification_Result;
 
       package X509C renames CryptoLib.X509.Certificates;
       package ID renames CryptoLib.Identities;
 
-      Ed448_Cert_DER : constant String :=
-        "3082019030820110a0030201020214499b72a92f60b85fae688c2d7b0df77a3783a599300506032b6571301831" &
-        "16301406035504030c0d65643434382e6578616d706c65301e170d3236303732393038313835395a170d323730" &
-        "3532353038313835395a30183116301406035504030c0d65643434382e6578616d706c653043300506032b6571" &
-        "033a00a843c98a9d526246cff10fcdb578e45782bc944079d28d44b81d055b2fc8592ead3229cd8470c9759f48" &
-        "09199c458db9582d0cee1c6413cc80a3533051301d0603551d0e04160414c58ea9ff9d69a59d32de045bf29d96" &
-        "94299ee732301f0603551d23041830168014c58ea9ff9d69a59d32de045bf29d9694299ee732300f0603551d13" &
-        "0101ff040530030101ff300506032b65710373003f53b85bf2e3b390a754665a2301898ea1d0d441abb6bfe792" &
-        "dd83428207a84c1ce5b27c82fe72a69b2a79f204ea49d11d3050adc030651500ec90b47ce66780aad0ff78418f" &
-        "aadfa693bf1d8f553c16db02827eb5a788377eb000f12f1f755e15d6619c9ec9ce8cc5b238eea39031ca3500";
+      SHA1_Cert_DER : constant String :=
+        "308202fc308201e4a003020102021421f332997071016a38d94b94edf8ab92c999e32d300d06092a864886f7" &
+        "0d010105050030163114301206035504030c0b53484131205369676e6564301e170d32363037323930393538" &
+        "34375a170d3334313031353039353834375a30163114301206035504030c0b53484131205369676e65643082" &
+        "0122300d06092a864886f70d01010105000382010f003082010a0282010100da33c333676622516409e1b1c2" &
+        "0b1029a1260b7d3d8c6e535ba9d8c123f2921102a4222477e682bcb7dd7fdd8a3bec2992d630a72967d58c43" &
+        "0982257f34a330dd9e0079f9b43b46470ab57b6399c9d1cd3e5764cb9ef9d2193ca4b6be80d3bfa3eddae0fc" &
+        "44b30ff364b5e47ba5c68105632ac2e665435dd50d79cc7b0197780d4c6e6d5d5c7eb41abc03cbe5cb4db682" &
+        "4dea94e25ac87f2afe22ac9ee871996e65d6f2a2651b96955401ece8863e4255a7048b3932118d08442cb9a4" &
+        "ea5ba7778e4f906c607877d9dc8601b95b09974d67c62d202e68073712dd53025937a6346d0eccced5d5ae9b" &
+        "7dc49d165fdae502e1533b268a2ead1f17bca74e8d185d0203010001a3423040300f0603551d130101ff0405" &
+        "30030101ff300e0603551d0f0101ff040403020204301d0603551d0e04160414ea4007693b0884491bf35172" &
+        "c8a416b868841226300d06092a864886f70d01010505000382010100cb01e18a312a21771da0ed7b487449b8" &
+        "ae2cd45fa7992a22c0c67952753dd03132a4914cfc8111557fc4ea6f0b6778f4c32d029d55f7ac2d20e4131a" &
+        "bb7ece7f5559a5d07bec66ee7f30b2f8e40fcc6c31584da6cf4db6f2a4c398520f9c906ee20e662358c2c6aa" &
+        "83683f9ddbec30fb4e52df39a0110d7c66c3fe1789547f0431c3ff20bcd08c92def66a0f1eeeb8e94821ee45" &
+        "be0ef394ed24821d83762f5c3ba499a410772553600d9575878c3e10e2c8ebb0b4daae1067facee8cb3927f9" &
+        "1c0a34495965f372b45a95a13d649ef2313670c76e768e5b4fdd8151fcf774e8af5ed63f80c3b46d0602cc6d" &
+        "2108a034c370e963bcaa5a25fe3f5ff02d521dbf";
 
-      Ed448_Chain_PEM : constant String :=
+      X25519_Chain_PEM : constant String :=
         "-----BEGIN CERTIFICATE-----" & ASCII.LF &
-        "MIIBkDCCARCgAwIBAgIUSZtyqS9guF+uaIwtew33ejeDpZkwBQYDK2VxMBgxFjAU" & ASCII.LF &
-        "BgNVBAMMDWVkNDQ4LmV4YW1wbGUwHhcNMjYwNzI5MDgxODU5WhcNMjcwNTI1MDgx" & ASCII.LF &
-        "ODU5WjAYMRYwFAYDVQQDDA1lZDQ0OC5leGFtcGxlMEMwBQYDK2VxAzoAqEPJip1S" & ASCII.LF &
-        "YkbP8Q/NtXjkV4K8lEB50o1EuB0FWy/IWS6tMinNhHDJdZ9ICRmcRY25WC0M7hxk" & ASCII.LF &
-        "E8yAo1MwUTAdBgNVHQ4EFgQUxY6p/51ppZ0y3gRb8p2WlCme5zIwHwYDVR0jBBgw" & ASCII.LF &
-        "FoAUxY6p/51ppZ0y3gRb8p2WlCme5zIwDwYDVR0TAQH/BAUwAwEB/zAFBgMrZXED" & ASCII.LF &
-        "cwA/U7hb8uOzkKdUZlojAYmOodDUQau2v+eS3YNCggeoTBzlsnyC/nKmmyp58gTq" & ASCII.LF &
-        "SdEdMFCtwDBlFQDskLR85meAqtD/eEGPqt+mk78dj1U8FtsCgn61p4g3frAA8S8f" & ASCII.LF &
-        "dV4V1mGcnsnOjMWyOO6jkDHKNQA=" & ASCII.LF &
-        "-----END CERTIFICATE-----" & ASCII.LF;
+        "MIICETCB+qADAgECAhQSIUnuxGQXhq2YuXB6IckuDwRUjzANBgkqhkiG9w0BAQsF" & ASCII.LF &
+        "ADAWMRQwEgYDVQQDDAtTSEExIFNpZ25lZDAeFw0yNjA3MjkwOTU4NDdaFw0zMjAx" & ASCII.LF &
+        "MTkwOTU4NDdaMBgxFjAUBgNVBAMMDXgyNTUxOSBob2xkZXIwKjAFBgMrZW4DIQC/" & ASCII.LF &
+        "KhbOXlLYkhUu7UksLji4GlugZT/JYb447bzavK+oXaNQME4wDAYDVR0TAQH/BAIw" & ASCII.LF &
+        "ADAdBgNVHQ4EFgQU+SqUNazzFpun0XnPECp6MhZ8vggwHwYDVR0jBBgwFoAU6kAH" & ASCII.LF &
+        "aTsIhEkb81FyyKQWuGiEEiYwDQYJKoZIhvcNAQELBQADggEBALGX9WDd+laChTfc" & ASCII.LF &
+        "WvYM9mrZpwEowuohuQUZRdIj7FjW0Zju1Vg+RkJpNknlu6dlNaIxNeWDf4p2mDD6" & ASCII.LF &
+        "ujQ5HQHqkyBE/zdc8jMo5U5K2Z3DyQs/rnArcQ4u3jggUOWA/Vfn+83tjJciT5WQ" & ASCII.LF &
+        "k8u/YDheEPE8WzEhb+O1FLVOf7/o45gK+r3BQNavkVy40RAc8VviZxX4sM9bKk11" & ASCII.LF &
+        "bjSPGxOwwyen6+9KYzg6FthFaVglM+O+M3cZjY5i9v6qcna5JFxJtv5HvzeKheHR" & ASCII.LF &
+        "w1s4wNdIDgIr+5i/TsIQeNklB0fwIjgdcf1smCFH5kB1XnmeIlPFrzdG3cZVLOaN" & ASCII.LF &
+        "WnAlpL0=" & ASCII.LF &
+        "-----END CERTIFICATE-----";
 
-      Ed448_Key_PEM : constant String :=
+      X25519_Key_PEM : constant String :=
         "-----BEGIN PRIVATE KEY-----" & ASCII.LF &
-        "MEcCAQAwBQYDK2VxBDsEOci3ZCBNjftMDBeqGGJGuncwUvsWNKRSM6Zbgqe9TkkA" & ASCII.LF &
-        "uIxd9O1mfjnMfIsTwKhGn+MzadUIIx+CPQ==" & ASCII.LF &
-        "-----END PRIVATE KEY-----" & ASCII.LF;
+        "MC4CAQAwBQYDK2VuBCIEIHApGfeg/4Sj6ndg4fW3n6pvFEPUJB26+YZqpezUHah+" & ASCII.LF &
+        "-----END PRIVATE KEY-----";
 
       function From_Hex
         (Text : String) return Ada.Streams.Stream_Element_Array
@@ -4367,20 +4384,25 @@ procedure Tests is
       Status : CryptoLib.ASN1.Errors.Decode_Status;
       Cert   : constant X509C.Certificate :=
         X509C.Decode_DER
-          (From_Hex (Ed448_Cert_DER), CryptoLib.ASN1.Default_Limits, Status);
+          (From_Hex (SHA1_Cert_DER), CryptoLib.ASN1.Default_Limits, Status);
    begin
       --  It decodes. A certificate carrying a key this crate cannot use is
       --  still a certificate, and its other fields still mean what they say.
       Check (Status = CryptoLib.ASN1.Errors.Ok
              and then X509C.Is_Present (Cert),
-             "an Ed448 certificate decodes: "
+             "a certificate signed with an algorithm this does not verify "
+             & "still decodes: "
              & CryptoLib.ASN1.Errors.Status_Image (Status));
-      Check (X509C.Public_Key_Algorithm_Of (Cert) = CryptoLib.X509.Ed448,
-             "and its key algorithm is named rather than guessed at");
+      Check (X509C.Signature_Algorithm_Of (Cert)
+             = CryptoLib.X509.Unknown_Signature_Algorithm,
+             "and the algorithm it was signed with is named as one this does "
+             & "not know rather than guessed at");
 
       --  The signature is genuine -- OpenSSL made it -- and unverifiable
       --  here. Reporting Invalid_Signature would be saying the certificate
       --  was altered, which this cannot know.
+      Check (not XS.Is_Supported (X509C.Signature_Algorithm_Of (Cert)),
+             "the algorithm is not one this claims to decide");
       Check (XS.Verify_Certificate_Signature (Cert, Cert)
              = XS.Unsupported_Algorithm,
              "a self-signature this crate cannot check is reported as "
@@ -4394,7 +4416,7 @@ procedure Tests is
          Item : ID.Local_Identity;
          St   : ID.Identity_Status;
       begin
-         ID.Decode (Ed448_Chain_PEM, Ed448_Key_PEM, Item, St);
+         ID.Decode (X25519_Chain_PEM, X25519_Key_PEM, Item, St);
          Check (St = ID.Unsupported_Key,
                 "an identity whose key this cannot check reports unsupported "
                 & "rather than mismatched, got " & ID.Status_Image (St));
@@ -5435,6 +5457,277 @@ procedure Tests is
                 & XV.Failure_Image (Verdict.Failure));
       end;
    end Check_Unapplicable_Name_Constraint;
+
+   --  Ed448 (RFC 8032 PureEdDSA over edwards448).
+   --
+   --  The vectors were produced by an implementation written from the spec
+   --  and checked against pyca/OpenSSL before any Ada existed, which is the
+   --  order that catches a transcription error rather than enshrining it.
+   --  Ed448 signing is deterministic, so agreement is byte-for-byte and not
+   --  merely "both verify".
+   --
+   --  The curve constants were derived rather than copied. The base point
+   --  was recovered from a real key as s^-1 * A, which only needs p and d,
+   --  and then confirmed by L * B landing on the neutral element -- so a
+   --  mistyped digit in any of p, d, L or B would have shown up before a
+   --  line of this was ported. That check is worth naming because a wrong
+   --  curve order and a mistranscribed point addition have each cost real
+   --  time in this crate before.
+   procedure Check_Ed448 is
+      package E4 renames CryptoLib.Ed448;
+
+      Seed_1 : constant String :=
+        "0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" &
+        "00000000000000000000000000";
+      Pub_1 : constant String :=
+        "5b3afe03878a49b28232d4f1a442aebde109f807acef7dfd9a7f65b962fe52d6547312cacecff04337508f9d" &
+        "2529a8f1669169b21c32c48000";
+      Msg_1 : constant String := "";
+      Sig_1 : constant String :=
+        "ce6ab231690d322c4b4f5249765090bcea87613b7e98c8e22ff868dae0a6141e8a8e59de31db6672f891129f" &
+        "483d8fae3e12e015e36d283580a529127d375a3788843126e3e8d666a2e79ea10c7ae910776e8be9f1c1241c" &
+        "0a70588cffc9610272fc0488c5c877b97c9e51b0ed0d73391200";
+      Seed_2 : constant String :=
+        "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b" &
+        "2c2d2e2f303132333435363738";
+      Pub_2 : constant String :=
+        "18d0a70e42a742dfb561279893385061d7b4dad8f6feed4791eaab66b2f4a4f02fc09462a8bfb1842d0bac60" &
+        "e8a1b3e55ba2407f33226f3800";
+      Msg_2 : constant String :=
+        "616263";
+      Sig_2 : constant String :=
+        "824d0bd89164ff94dc74449cdf96347d22291de67166901ddc348505e37e7185b59580d906b70a9a2dd7c9b7" &
+        "a96c3539faa4d357903ca1a40023c3683b761d292a5854a09f6dd6466f1c1b881e1a621dc04ce89cc156b8fa" &
+        "c7d197f9cb66fbc85d8d8a049b71df4e16e12e9171e66af02b00";
+      Seed_3 : constant String :=
+        "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" &
+        "ffffffffffffffffffffffffff";
+      Pub_3 : constant String :=
+        "b9a5f530a156f166413bf82aeb0137c42376011583fe53f12ed1530300248e808369d2d0672fd7a25cfb5c0f" &
+        "e1220b508248bb226e7e26dc80";
+      Msg_3 : constant String :=
+        "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b" &
+        "2c2d2e2f303132333435363738393a3b3c3d3e3f";
+      Sig_3 : constant String :=
+        "97e2cb5f40b4dd1641c58ae8a1a83ad19b3a5db47412cd0d87cf2bfadfb869bb5b12e33198101b745635d707" &
+        "beef7e707ecd1a4fcbf08ab680fb352ab005c8bbf1968d2ca66f0a53b4bafd776e4e40725281f6c6a3fc125d" &
+        "40185bfdcc473cada899c032ed46749a4b18a728550c82453500";
+
+      function From_Hex
+        (Text : String) return Ada.Streams.Stream_Element_Array
+      is
+         Result : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (Text'Length / 2));
+         function Nibble (C : Character) return Natural
+         is (case C is
+                when '0' .. '9' => Character'Pos (C) - Character'Pos ('0'),
+                when others     => Character'Pos (C) - Character'Pos ('a') + 10);
+      begin
+         for I in Result'Range loop
+            Result (I) :=
+              Ada.Streams.Stream_Element
+                (Nibble (Text (Text'First + 2 * Natural (I - 1))) * 16
+                 + Nibble (Text (Text'First + 2 * Natural (I - 1) + 1)));
+         end loop;
+         return Result;
+      end From_Hex;
+
+      function Hex (Data : Ada.Streams.Stream_Element_Array) return String is
+         Symbols : constant String := "0123456789abcdef";
+         Result  : String (1 .. 2 * Natural (Data'Length));
+         At_Byte : Natural := 0;
+      begin
+         for B of Data loop
+            At_Byte := At_Byte + 1;
+            Result (2 * At_Byte - 1) := Symbols (Natural (B) / 16 + 1);
+            Result (2 * At_Byte) := Symbols (Natural (B) mod 16 + 1);
+         end loop;
+         return Result;
+      end Hex;
+
+      procedure One_Vector
+        (Index : Positive; Seed : String; Pub : String;
+         Msg : String; Sig : String)
+      is
+         Public_Key : Ada.Streams.Stream_Element_Array (1 .. 57);
+         Signature  : Ada.Streams.Stream_Element_Array (1 .. 114);
+         Status     : CryptoLib.Errors.Status;
+      begin
+         Status := E4.Public_Key_From_Seed (From_Hex (Seed), Public_Key);
+         Check (Status = CryptoLib.Errors.Ok and then Hex (Public_Key) = Pub,
+                "Ed448 vector" & Positive'Image (Index)
+                & ": the public key derived from the seed");
+
+         Status :=
+           E4.Sign (From_Hex (Seed), Public_Key, From_Hex (Msg), Signature);
+         Check (Status = CryptoLib.Errors.Ok and then Hex (Signature) = Sig,
+                "Ed448 vector" & Positive'Image (Index)
+                & ": the signature, byte for byte");
+
+         Check (E4.Verify (From_Hex (Pub), From_Hex (Sig), From_Hex (Msg))
+                = CryptoLib.Errors.Ok,
+                "Ed448 vector" & Positive'Image (Index)
+                & ": and it verifies");
+      end One_Vector;
+   begin
+      One_Vector (1, Seed_1, Pub_1, Msg_1, Sig_1);
+      One_Vector (2, Seed_2, Pub_2, Msg_2, Sig_2);
+      One_Vector (3, Seed_3, Pub_3, Msg_3, Sig_3);
+
+      --  A signature is for one message and one key.
+      declare
+         Signature : Ada.Streams.Stream_Element_Array (1 .. 114) :=
+           From_Hex (Sig_2);
+      begin
+         Check (E4.Verify (From_Hex (Pub_2), Signature, From_Hex (Msg_3))
+                /= CryptoLib.Errors.Ok,
+                "a signature does not carry over to another message");
+         Check (E4.Verify (From_Hex (Pub_1), Signature, From_Hex (Msg_2))
+                /= CryptoLib.Errors.Ok,
+                "nor to another key");
+
+         Signature (4) := Signature (4) xor 1;
+         Check (E4.Verify (From_Hex (Pub_2), Signature, From_Hex (Msg_2))
+                /= CryptoLib.Errors.Ok,
+                "and one bit of it is enough to break it");
+      end;
+
+      --  One signature has one encoding. S is reduced mod L, so an S at or
+      --  above L is a second name for a signature that already has one, and
+      --  the spare bits of the final octets are not free space.
+      declare
+         Order_Encoded : constant String :=
+           "f34458ab92c27823558fc58d72c26c219036d6ae49db4ec4e923ca7cffffffff"
+           & "ffffffffffffffffffffffffffffffffffffffffffffff3f00";
+         At_Order  : Ada.Streams.Stream_Element_Array (1 .. 114) :=
+           From_Hex (Sig_2);
+         Spare_Set : Ada.Streams.Stream_Element_Array (1 .. 57) :=
+           From_Hex (Pub_2);
+         Top_Set   : Ada.Streams.Stream_Element_Array (1 .. 114) :=
+           From_Hex (Sig_2);
+      begin
+         At_Order (58 .. 114) := From_Hex (Order_Encoded);
+         Check (E4.Verify (From_Hex (Pub_2), At_Order, From_Hex (Msg_2))
+                /= CryptoLib.Errors.Ok,
+                "an S equal to the group order is refused");
+
+         Spare_Set (57) := Spare_Set (57) or 1;
+         Check (E4.Verify (Spare_Set, From_Hex (Sig_2), From_Hex (Msg_2))
+                /= CryptoLib.Errors.Ok,
+                "so is a public key with spare bits set in its final octet");
+
+         Top_Set (114) := 1;
+         Check (E4.Verify (From_Hex (Pub_2), Top_Set, From_Hex (Msg_2))
+                /= CryptoLib.Errors.Ok,
+                "and an S whose top octet is not zero");
+      end;
+
+      --  Wrong lengths are refused rather than read as far as they go.
+      declare
+         Short_Sig : constant Ada.Streams.Stream_Element_Array (1 .. 113) :=
+           [others => 0];
+      begin
+         Check (E4.Verify (From_Hex (Pub_2), Short_Sig, From_Hex (Msg_2))
+                /= CryptoLib.Errors.Ok,
+                "a signature of the wrong length is refused");
+      end;
+   end Check_Ed448;
+
+   --  An Ed448 certificate, which is the point of having the primitive.
+   --
+   --  OpenSSL issued this chain; the signature this checks is one an
+   --  independent implementation produced over bytes it chose.
+   procedure Check_Ed448_Certificate is
+      package X509C renames CryptoLib.X509.Certificates;
+      package XV renames CryptoLib.X509.Validation;
+      package XS renames CryptoLib.X509.Signatures;
+      use type XS.Verification_Result;
+      use type CryptoLib.X509.Public_Key_Algorithm;
+
+      E448_Root_DER : constant String :=
+        "308201783081f9a00302010202145772562f5003d8e4686dca2c57baa102163cd987300506032b6571301531" &
+        "13301106035504030c0a456434343820526f6f74301e170d3236303732393039353434385a170d3334313031" &
+        "353039353434385a30153113301106035504030c0a456434343820526f6f743043300506032b6571033a0045" &
+        "d2095f56d2bea5572d69c011ed8de923301a8f561ea57ed3e13ed04bd8000dc36b78dea17a1f6e9e2d854971" &
+        "4bc9fe07179d46c3f6b56180a3423040300f0603551d130101ff040530030101ff300e0603551d0f0101ff04" &
+        "0403020204301d0603551d0e04160414c6dd829e140678d7111bbe7a493356c811811b15300506032b657103" &
+        "7300f3c873adf2a0a171f80f20e5b47bef9bc07a1cfe0991ab570b7ddeec0628e5f8afc1857ddfce5e0945c1" &
+        "e448d20f9694e9fd8c0c385c0cbb802352d13e94faa9108b4115e884137593d9b2919ce27a9325fae140a584" &
+        "ac987ec46919dbc1889cde500a9af25c7bc3ef52dfb6263d6d182f00";
+
+      E448_Leaf_DER : constant String :=
+        "308201a430820124a003020102021440b7330d62fb5b0b99a1854ce16b0ba9aeccc162300506032b65713015" &
+        "3113301106035504030c0a456434343820526f6f74301e170d3236303732393039353434385a170d33323031" &
+        "31393039353434385a30183116301406035504030c0d65643434382e6578616d706c653043300506032b6571" &
+        "033a0036c610a7bf542e1ddd4a374c98d985506d7ea364394920972023eaf1452acce601607789ee1345df6a" &
+        "59cda18f063cecd99f926a67efc92d00a36a3068300c0603551d130101ff0402300030180603551d11041130" &
+        "0f820d65643434382e6578616d706c65301d0603551d0e04160414d6f5f3b7722d5f6a0af2060f81774c9474" &
+        "58b52a301f0603551d23041830168014c6dd829e140678d7111bbe7a493356c811811b15300506032b657103" &
+        "7300933357f94c3e810751caf53da1babc46c005a5e9b79627b0b6a7ea07538f006818ccdea1224d804951f9" &
+        "582753384c164b2af516cfcb728580fb00d4e3cfdd1c6b165021b818b87263d18ec9fdd47dc3e8512bb6cc7a" &
+        "6b3019f6d4eb112caed0c0aa30c986c8db8b74428114d24ef9720a00";
+
+      Status : CryptoLib.ASN1.Errors.Decode_Status;
+
+      function From_Hex
+        (Text : String) return Ada.Streams.Stream_Element_Array
+      is
+         Result : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (Text'Length / 2));
+         function Nibble (C : Character) return Natural
+         is (case C is
+                when '0' .. '9' => Character'Pos (C) - Character'Pos ('0'),
+                when others     => Character'Pos (C) - Character'Pos ('a') + 10);
+      begin
+         for I in Result'Range loop
+            Result (I) :=
+              Ada.Streams.Stream_Element
+                (Nibble (Text (Text'First + 2 * Natural (I - 1))) * 16
+                 + Nibble (Text (Text'First + 2 * Natural (I - 1) + 1)));
+         end loop;
+         return Result;
+      end From_Hex;
+
+      function Decoded (Hex : String) return X509C.Certificate
+      is (X509C.Decode_DER
+            (From_Hex (Hex), CryptoLib.ASN1.Default_Limits, Status));
+
+      type Ed448_Chain is limited new XV.Path_Source with null record;
+
+      overriding function Length (Source : Ed448_Chain) return Positive is (2);
+
+      overriding function Certificate_At
+        (Source : Ed448_Chain; Index : Positive) return X509C.Certificate
+      is (if Index = 1 then Decoded (E448_Leaf_DER) else Decoded (E448_Root_DER));
+
+      overriding function Is_Trust_Anchor
+        (Source : Ed448_Chain; Item : X509C.Certificate) return Boolean
+      is (X509C.Subject_Bytes (Item)
+          = X509C.Subject_Bytes (Decoded (E448_Root_DER)));
+
+      At_Time : constant CryptoLib.X509.Certificate_Time :=
+        (Year => 2026, Month => 9, Day => 1,
+         Hour => 12, Minute => 0, Second => 0);
+   begin
+      Check (X509C.Public_Key_Algorithm_Of (Decoded (E448_Leaf_DER))
+             = CryptoLib.X509.Ed448,
+             "the certificate names an Ed448 key");
+      Check (XS.Is_Supported (CryptoLib.X509.Ed448_Signature),
+             "and Ed448 counts as an algorithm this can decide, which is "
+             & "what tells a caller it was checked rather than skipped");
+      Check (XS.Verify_Certificate_Signature
+               (Decoded (E448_Leaf_DER), Decoded (E448_Root_DER)) = XS.Valid,
+             "the issuer's signature over it verifies");
+
+      declare
+         Verdict : constant XV.Validation_Result :=
+           XV.Validate_Path (Ed448_Chain'(null record), At_Time);
+      begin
+         Check (Verdict.Valid,
+                "and the chain validates, got "
+                & XV.Failure_Image (Verdict.Failure));
+      end;
+   end Check_Ed448_Certificate;
 
    procedure Check_X509_Extensions is
       use type CryptoLib.ASN1.Errors.Decode_Status;
@@ -10355,6 +10648,8 @@ begin
    Check_Weak_RSA_Key;
    Check_Serial_Comparison;
    Check_Unapplicable_Name_Constraint;
+   Check_Ed448;
+   Check_Ed448_Certificate;
    Check_Random_Fails_Closed;
    Check_Off_Curve_Key;
    Check_Ed25519_Encoding;
