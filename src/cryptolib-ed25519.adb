@@ -663,6 +663,15 @@ package body CryptoLib.Ed25519 is
          end if;
       end if;
 
+      --  RFC 8032 5.1.3: x = 0 with the sign bit set is not a valid
+      --  encoding. Zero has one square root, not two, so the negative form
+      --  names the same point -- and accepting both means one key has two
+      --  encodings, which is a difference anything identifying a key by its
+      --  bytes would see and the arithmetic would not.
+      if Equal (X_Value, [others => 0]) and then Sign_Bit = 1 then
+         return Handshake_Failed;
+      end if;
+
       if X_Value (0) mod 2 /= Sign_Bit then
          X_Value := Sub_Mod ([others => 0], X_Value);
       end if;

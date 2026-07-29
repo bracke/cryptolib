@@ -3065,6 +3065,42 @@ procedure Tests is
       end;
    end Check_Off_Curve_Key;
 
+   --  One key, one encoding.
+   --
+   --  RFC 8032 5.1.3 fails decoding when x = 0 and the sign bit is set:
+   --  zero has one square root, not two, so the negated form names the same
+   --  point. Accepting both gives one public key two byte strings -- a
+   --  difference that anything identifying a key by its bytes can see and
+   --  that the arithmetic cannot.
+   procedure Check_Ed25519_Encoding is
+      Message : constant Ada.Streams.Stream_Element_Array (1 .. 3) :=
+        [1, 2, 3];
+
+      --  x = 0 happens only at y = 1 and y = -1, so this is the whole of the
+      --  affected set. y = 1 is the identity, and for it the verification
+      --  equation reduces to [S]B = R, which S = 0 and R = the identity
+      --  satisfy for any message at all.
+      Signature : Ada.Streams.Stream_Element_Array (1 .. 64) := [others => 0];
+      Canonical : constant Ada.Streams.Stream_Element_Array (1 .. 32) :=
+        [1 => 1, others => 0];
+      Bent      : Ada.Streams.Stream_Element_Array (1 .. 32) :=
+        [1 => 1, others => 0];
+   begin
+      Signature (1) := 1;
+      Bent (32) := 16#80#;
+
+      --  The premise: this signature really does verify under the canonical
+      --  encoding. Without it the check below would pass on a signature that
+      --  fails for its own reasons and prove nothing.
+      Check (CryptoLib.Ed25519.Verify (Canonical, Signature, Message)
+             = CryptoLib.Errors.Ok,
+             "fixture: the signature verifies under the canonical encoding");
+
+      Check (CryptoLib.Ed25519.Verify (Bent, Signature, Message)
+             /= CryptoLib.Errors.Ok,
+             "the same key with the sign bit set is refused");
+   end Check_Ed25519_Encoding;
+
    procedure Check_X509_Extensions is
       use type CryptoLib.ASN1.Errors.Decode_Status;
       use type CryptoLib.PEM.Decode_Status;
@@ -7910,6 +7946,7 @@ begin
    Check_X509_Verify;
    Check_X509_Extensions;
    Check_Off_Curve_Key;
+   Check_Ed25519_Encoding;
    Check_Serial_Numbers;
    Check_Validity_Window;
    Check_Key_Identifiers;
