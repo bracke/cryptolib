@@ -48,6 +48,21 @@ package CryptoLib.X509.Revocation is
       Malformed);
       --  The statement did not decode, or the certificate did not.
 
+   --  How long a statement that never says when it expires may still be
+   --  believed, counted from when it was issued.
+   --
+   --  nextUpdate is optional in both a CRL and an OCSP response, and without
+   --  it a statement has no window to be outside of -- so a signed "not
+   --  revoked" from years ago read as current, which is the one thing this
+   --  package exists to prevent. Replaying such a statement is how a revoked
+   --  certificate keeps working, and it needs no forgery: the responder
+   --  really did say it, once.
+   --
+   --  Seven days is the cadence a CRL is usually published on. RFC 6960 says
+   --  an OCSP response without a nextUpdate means newer information is
+   --  available all the time, which argues for less rather than more.
+   Default_Maximum_Age_Days : constant := 7;
+
    --  Render an answer as short diagnostic text.
    --  @param Answer the answer to describe
    --  @return lower-case text naming the answer
@@ -62,12 +77,16 @@ package CryptoLib.X509.Revocation is
    --  @param Issuer the certificate that issued it
    --  @param List the revocation list to consult
    --  @param At_Time the time to judge the list's freshness against
+   --  @param Maximum_Age_Days how long a list that names no nextUpdate may
+   --    still be believed, counted from when it was issued
    --  @return what the list says, or why it cannot say
    function Check_Against_CRL
      (Item    : Certificate;
       Issuer  : Certificate;
       List    : CryptoLib.X509.CRLs.Revocation_List;
-      At_Time : Certificate_Time) return Revocation_Answer;
+      At_Time : Certificate_Time;
+      Maximum_Age_Days : Natural := Default_Maximum_Age_Days)
+      return Revocation_Answer;
 
    --  As above, and say when the certificate was revoked and why.
    --
@@ -79,6 +98,8 @@ package CryptoLib.X509.Revocation is
    --  @param Issuer the certificate that issued it
    --  @param List the revocation list to consult
    --  @param At_Time the time to judge the list's freshness against
+   --  @param Maximum_Age_Days how long a list that names no nextUpdate may
+   --    still be believed, counted from when it was issued
    --  @param Details receives when and why, when the answer is Revoked
    --  @return what the list says, or why it cannot say
    function Check_Against_CRL
@@ -86,7 +107,9 @@ package CryptoLib.X509.Revocation is
       Issuer  : Certificate;
       List    : CryptoLib.X509.CRLs.Revocation_List;
       At_Time : Certificate_Time;
-      Details : out Revocation_Details) return Revocation_Answer;
+      Details : out Revocation_Details;
+      Maximum_Age_Days : Natural := Default_Maximum_Age_Days)
+      return Revocation_Answer;
 
    --  Ask an OCSP response about a certificate.
    --
@@ -96,12 +119,16 @@ package CryptoLib.X509.Revocation is
    --  @param Issuer the certificate that issued it
    --  @param Response the response to consult
    --  @param At_Time the time to judge the response's freshness against
+   --  @param Maximum_Age_Days how long a response that names no nextUpdate
+   --    may still be believed, counted from when it was issued
    --  @return what the response says, or why it cannot say
    function Check_Against_OCSP
      (Item     : Certificate;
       Issuer   : Certificate;
       Response : in out CryptoLib.OCSP.Response;
-      At_Time  : Certificate_Time) return Revocation_Answer;
+      At_Time  : Certificate_Time;
+      Maximum_Age_Days : Natural := Default_Maximum_Age_Days)
+      return Revocation_Answer;
 
    --  As above, and say when the certificate was revoked and why.
    --
@@ -113,6 +140,8 @@ package CryptoLib.X509.Revocation is
    --  @param Issuer the certificate that issued it
    --  @param Response the response to consult
    --  @param At_Time the time to judge the response's freshness against
+   --  @param Maximum_Age_Days how long a response that names no nextUpdate
+   --    may still be believed, counted from when it was issued
    --  @param Details receives when and why, when the answer is Revoked
    --  @return what the response says, or why it cannot say
    function Check_Against_OCSP
@@ -120,6 +149,8 @@ package CryptoLib.X509.Revocation is
       Issuer   : Certificate;
       Response : in out CryptoLib.OCSP.Response;
       At_Time  : Certificate_Time;
-      Details  : out Revocation_Details) return Revocation_Answer;
+      Details  : out Revocation_Details;
+      Maximum_Age_Days : Natural := Default_Maximum_Age_Days)
+      return Revocation_Answer;
 
 end CryptoLib.X509.Revocation;

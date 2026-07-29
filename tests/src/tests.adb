@@ -6059,6 +6059,113 @@ procedure Tests is
       Check (Reads ("20261231235959Z"), "and the last second of a year");
    end Check_Impossible_Dates;
 
+   --  A statement that never says when it expires does not last for ever.
+   --
+   --  nextUpdate is optional in a CRL and in an OCSP response, and freshness
+   --  was judged only against it: a list carrying one was refused once it
+   --  passed, and a list carrying none had no window to be outside of. Two
+   --  lists of the same age got opposite answers, the older-looking one
+   --  being the one that admitted when it expired.
+   --
+   --  Nothing has to be forged to use this. The CRL below is genuine and
+   --  correctly signed -- the issuer really did say "nothing revoked", in
+   --  2016 -- and replaying it is how a certificate revoked since keeps
+   --  working. Which is the sentence this package's own summary opens with.
+   procedure Check_Undated_Statement_Ages is
+      package X509C renames CryptoLib.X509.Certificates;
+      package XC renames CryptoLib.X509.CRLs;
+      package RV renames CryptoLib.X509.Revocation;
+      use type RV.Revocation_Answer;
+
+      Old_CRL_No_Next_DER : constant String :=
+        "307c3030020101300506032b657030153113301106035504030c0a416e6369656e74204341170d3136303130" &
+        "313030303030305a300506032b6570034100d42aad219f0f54efd41f288648bbabecc7d2b4433fbe33de7b7f" &
+        "f9043bd6e2f4adf2fb9ee9fcdb37594779c7512c3d7d983c22692d253f62662260dc60710208";
+
+      CRL_CA_DER : constant String :=
+        "3082010e3081c1a0030201020214577aeb858a37d5fd81ef133d2f79f41b352b0865300506032b6570301531" &
+        "13301106035504030c0a416e6369656e74204341301e170d3135303130313030303030305a170d3335303130" &
+        "313030303030305a30153113301106035504030c0a416e6369656e74204341302a300506032b657003210066" &
+        "cac3f61035489eb5047b43fe568288970990887c3b28dfe059572c9d7fc8b9a3233021300f0603551d130101" &
+        "ff040530030101ff300e0603551d0f0101ff040403020106300506032b65700341006c648e89b0c39a67a31f" &
+        "d67e7799560c095dd91d8625d0ec851229ac49a3ffe223a980f08e75f8903eff5e7bb2267bcb1a2b5661dd19" &
+        "af7a9a5bfe53dea8df03";
+
+      CRL_Leaf_DER : constant String :=
+        "3081d930818ca00302010202021092300506032b657030153113301106035504030c0a416e6369656e742043" &
+        "41301e170d3135303130313030303030305a170d3335303130313030303030305a3017311530130603550403" &
+        "0c0c6c6561662e6578616d706c65302a300506032b657003210066cac3f61035489eb5047b43fe5682889709" &
+        "90887c3b28dfe059572c9d7fc8b9300506032b65700341007c3a46fa18d9399201c207d4b39510689c321d00" &
+        "e21238c63b6bf631429e79665f98463750a4792e8c4b887dcda8aaf423a7651b38e5b889186a829c34cf280c";
+
+      Status : CryptoLib.ASN1.Errors.Decode_Status;
+
+      function From_Hex
+        (Text : String) return Ada.Streams.Stream_Element_Array
+      is
+         Result : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (Text'Length / 2));
+         function Nibble (C : Character) return Natural
+         is (case C is
+                when '0' .. '9' => Character'Pos (C) - Character'Pos ('0'),
+                when others     => Character'Pos (C) - Character'Pos ('a') + 10);
+      begin
+         for I in Result'Range loop
+            Result (I) :=
+              Ada.Streams.Stream_Element
+                (Nibble (Text (Text'First + 2 * Natural (I - 1))) * 16
+                 + Nibble (Text (Text'First + 2 * Natural (I - 1) + 1)));
+         end loop;
+         return Result;
+      end From_Hex;
+
+      Leaf : constant X509C.Certificate :=
+        X509C.Decode_DER (From_Hex (CRL_Leaf_DER),
+                          CryptoLib.ASN1.Default_Limits, Status);
+      CA   : constant X509C.Certificate :=
+        X509C.Decode_DER (From_Hex (CRL_CA_DER),
+                          CryptoLib.ASN1.Default_Limits, Status);
+      List : constant XC.Revocation_List :=
+        XC.Decode_DER (From_Hex (Old_CRL_No_Next_DER),
+                       CryptoLib.ASN1.Default_Limits, Status);
+
+      --  The list was issued on the first of January 2016.
+      Ten_Years_On : constant CryptoLib.X509.Certificate_Time :=
+        (Year => 2026, Month => 1, Day => 2,
+         Hour => 0, Minute => 0, Second => 0);
+      Next_Day     : constant CryptoLib.X509.Certificate_Time :=
+        (Year => 2016, Month => 1, Day => 2,
+         Hour => 0, Minute => 0, Second => 0);
+   begin
+      Check (XC.Is_Present (List) and then X509C.Is_Present (Leaf)
+             and then X509C.Is_Present (CA),
+             "fixture: the list, its issuer and a certificate all decode");
+      Check (not XC.Has_Next_Update (List),
+             "fixture: and the list never says when it expires");
+
+      --  The day after it was issued it is worth believing.
+      Check (RV.Check_Against_CRL (Leaf, CA, List, Next_Day) = RV.Not_Revoked,
+             "a list without a nextUpdate is believed while it is fresh, got "
+             & RV.Answer_Image
+                 (RV.Check_Against_CRL (Leaf, CA, List, Next_Day)));
+
+      --  Ten years later it is not, and it says so as staleness rather than
+      --  as an answer about the certificate.
+      Check (RV.Check_Against_CRL (Leaf, CA, List, Ten_Years_On) = RV.Stale,
+             "and is stale ten years on rather than still saying nothing was "
+             & "revoked, got "
+             & RV.Answer_Image
+                 (RV.Check_Against_CRL (Leaf, CA, List, Ten_Years_On)));
+
+      --  The age is the only thing refusing it: the signature, the issuer
+      --  and the scope are all fine, which is what makes replaying it work.
+      Check (RV.Check_Against_CRL
+               (Leaf, CA, List, Ten_Years_On,
+                Maximum_Age_Days => 4_000) = RV.Not_Revoked,
+             "and a caller who says it may be that old gets the answer, so "
+             & "nothing else about the list is what was refused");
+   end Check_Undated_Statement_Ages;
+
    procedure Check_X509_Extensions is
       use type CryptoLib.ASN1.Errors.Decode_Status;
       use type CryptoLib.PEM.Decode_Status;
@@ -10983,6 +11090,7 @@ begin
    Check_CSR_Signing;
    Check_Validity_Not_Past_Issuer;
    Check_Impossible_Dates;
+   Check_Undated_Statement_Ages;
    Check_Random_Fails_Closed;
    Check_Off_Curve_Key;
    Check_Ed25519_Encoding;
