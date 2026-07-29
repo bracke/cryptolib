@@ -9,9 +9,24 @@ with CryptoLib.Buffers;
 --  Implements client-side key generation and shared-secret computation for the
 --  RFC 4253 / RFC 3526 Oakley groups: group1 (1024-bit legacy), group14
 --  (2048-bit), group16 (4096-bit) and group18 (8192-bit).  Public values and
---  shared secrets are exchanged as SSH mpints; the modular exponentiations for
+--  shared secrets are exchanged as mpint value octets -- see the note below,
+--  which is not what RFC 4251 calls an mpint; the modular exponentiations for
 --  the large groups run through CryptoLib.Modexp because they exceed GNAT's
 --  big-integer cap.  Peer public values are range-validated before use.
+
+--  A note on "mpint" here, because it is not RFC 4251's.
+--
+--  RFC 4251 section 5 writes an mpint on the wire as a four-byte length
+--  followed by the value. What crosses this interface is only the second
+--  part: the value as big-endian octets, carrying a single leading zero
+--  when the top bit would otherwise read as a sign. No length prefix. A
+--  caller that hands over the wire form instead is passing a number four
+--  bytes longer than it means, and one that begins with the length -- which
+--  for a group16 value is 00 00 02 01, a perfectly ordinary group element
+--  no validity check has any reason to reject.
+--
+--  ssh_lib holds to this: it stores the value octets and adds the length
+--  itself with Append_Mpint when the field goes on the wire.
 package CryptoLib.Diffie_Hellman is
 
    type Supported_Gex_Group is (No_Supported_Gex_Group, Gex_Group14, Gex_Group16, Gex_Group18);
@@ -30,7 +45,7 @@ package CryptoLib.Diffie_Hellman is
    --  (a convenience wrapper over Generate_Group14_Keypair that discards the
    --  private exponent).
    --  @param Source_Item  the randomness source for the private exponent
-   --  @param Public_Value out: the client public value g**x mod p as an mpint
+   --  @param Public_Value out: the client public value g**x mod p, as value octets
    --  @return Ok on success, or an error status on failure
    function Generate_Group14_Client_Value
      (Source_Item : in out CryptoLib.Random.Random_Source;
@@ -40,7 +55,7 @@ package CryptoLib.Diffie_Hellman is
    --  Generate a group1 (1024-bit) ephemeral DH keypair.
    --  @param Source_Item   the randomness source for the private exponent
    --  @param Private_Value out: the private exponent as fixed-width bytes
-   --  @param Public_Value  out: the public value g**x mod p as an mpint
+   --  @param Public_Value  out: the public value g**x mod p, as value octets
    --  @return Ok on success, or an error status on failure
    function Generate_Group1_Keypair
      (Source_Item   : in out CryptoLib.Random.Random_Source;
@@ -52,8 +67,8 @@ package CryptoLib.Diffie_Hellman is
    --  server public value, validating the peer value lies in (1, p-1).
    --  @param Client_Private_Placeholder the client's private exponent as
    --                                     fixed-width big-endian bytes
-   --  @param Server_Public_Value        the server public value as an mpint
-   --  @param Shared_Secret              out: the shared secret as an mpint
+   --  @param Server_Public_Value        the server public value, as value octets (see above: no length prefix)
+   --  @param Shared_Secret              out: the shared secret, as value octets
    --  @return Ok on success, or Handshake_Failed / error status on failure
    function Compute_Group1_Shared_Secret
      (Client_Private_Placeholder : Ada.Streams.Stream_Element_Array;
@@ -64,7 +79,7 @@ package CryptoLib.Diffie_Hellman is
    --  Generate a group14 (2048-bit) ephemeral DH keypair.
    --  @param Source_Item   the randomness source for the private exponent
    --  @param Private_Value out: the private exponent as fixed-width bytes
-   --  @param Public_Value  out: the public value g**x mod p as an mpint
+   --  @param Public_Value  out: the public value g**x mod p, as value octets
    --  @return Ok on success, or an error status on failure
    function Generate_Group14_Keypair
      (Source_Item   : in out CryptoLib.Random.Random_Source;
@@ -76,8 +91,8 @@ package CryptoLib.Diffie_Hellman is
    --  the server public value, validating the peer value lies in (1, p-1).
    --  @param Client_Private_Placeholder the client's private exponent as
    --                                     fixed-width big-endian bytes
-   --  @param Server_Public_Value        the server public value as an mpint
-   --  @param Shared_Secret              out: the shared secret as an mpint
+   --  @param Server_Public_Value        the server public value, as value octets (see above: no length prefix)
+   --  @param Shared_Secret              out: the shared secret, as value octets
    --  @return Ok on success, or Handshake_Failed / error status on failure
    function Compute_Group14_Shared_Secret
      (Client_Private_Placeholder : Ada.Streams.Stream_Element_Array;
@@ -88,7 +103,7 @@ package CryptoLib.Diffie_Hellman is
    --  Generate a group16 (4096-bit) ephemeral DH keypair.
    --  @param Source_Item   the randomness source for the private exponent
    --  @param Private_Value out: the private exponent as fixed-width bytes
-   --  @param Public_Value  out: the public value g**x mod p as an mpint
+   --  @param Public_Value  out: the public value g**x mod p, as value octets
    --  @return Ok on success, or an error status on failure
    function Generate_Group16_Keypair
      (Source_Item   : in out CryptoLib.Random.Random_Source;
@@ -100,8 +115,8 @@ package CryptoLib.Diffie_Hellman is
    --  the server public value, validating the peer value lies in (1, p-1).
    --  @param Client_Private_Placeholder the client's private exponent as
    --                                     fixed-width big-endian bytes
-   --  @param Server_Public_Value        the server public value as an mpint
-   --  @param Shared_Secret              out: the shared secret as an mpint
+   --  @param Server_Public_Value        the server public value, as value octets (see above: no length prefix)
+   --  @param Shared_Secret              out: the shared secret, as value octets
    --  @return Ok on success, or Handshake_Failed / error status on failure
    function Compute_Group16_Shared_Secret
      (Client_Private_Placeholder : Ada.Streams.Stream_Element_Array;
@@ -112,7 +127,7 @@ package CryptoLib.Diffie_Hellman is
    --  Generate a group18 (8192-bit) ephemeral DH keypair.
    --  @param Source_Item   the randomness source for the private exponent
    --  @param Private_Value out: the private exponent as fixed-width bytes
-   --  @param Public_Value  out: the public value g**x mod p as an mpint
+   --  @param Public_Value  out: the public value g**x mod p, as value octets
    --  @return Ok on success, or an error status on failure
    function Generate_Group18_Keypair
      (Source_Item   : in out CryptoLib.Random.Random_Source;
@@ -124,8 +139,8 @@ package CryptoLib.Diffie_Hellman is
    --  the server public value, validating the peer value lies in (1, p-1).
    --  @param Client_Private_Placeholder the client's private exponent as
    --                                     fixed-width big-endian bytes
-   --  @param Server_Public_Value        the server public value as an mpint
-   --  @param Shared_Secret              out: the shared secret as an mpint
+   --  @param Server_Public_Value        the server public value, as value octets (see above: no length prefix)
+   --  @param Shared_Secret              out: the shared secret, as value octets
    --  @return Ok on success, or Handshake_Failed / error status on failure
    function Compute_Group18_Shared_Secret
      (Client_Private_Placeholder : Ada.Streams.Stream_Element_Array;
