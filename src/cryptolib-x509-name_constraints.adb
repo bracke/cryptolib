@@ -505,6 +505,22 @@ package body CryptoLib.X509.Name_Constraints is
                return;
             end if;
 
+            --  GeneralSubtree ::= SEQUENCE { base, minimum [0] DEFAULT 0,
+            --                                maximum [1] OPTIONAL }
+            --
+            --  RFC 5280 4.2.1.10 says the minimum MUST be zero and the
+            --  maximum MUST be absent, and DER leaves out a DEFAULT that
+            --  holds, so anything following the base is a depth restriction
+            --  on the subtree that this does not know how to apply. Say so
+            --  rather than skip it: a minimum on a permitted subtree narrows
+            --  what the CA allowed, and ignoring it would permit names the
+            --  CA did not -- the same reasoning as the name forms below,
+            --  and the same answer.
+            if not DER_Reader.At_End (Inner, Subtree.Last) then
+               Usable := False;
+               return;
+            end if;
+
             case Base.Number is
                when 2 =>
                   Any_DNS := True;

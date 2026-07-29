@@ -4973,6 +4973,154 @@ procedure Tests is
       end;
    end Check_Policy_Constraint_Skipcerts;
 
+   --  A depth restriction on a subtree, silently skipped.
+   --
+   --  GeneralSubtree is SEQUENCE { base, minimum [0] DEFAULT 0,
+   --  maximum [1] OPTIONAL }. The base was read and whatever followed it
+   --  was left where it lay, so a minimum or a maximum went unnoticed
+   --  rather than unapplied. On a permitted subtree that is the wrong
+   --  direction: the minimum narrows what the CA allowed, and skipping it
+   --  permits names the CA did not.
+   --
+   --  RFC 5280 4.2.1.10 says the minimum MUST be zero and the maximum MUST
+   --  be absent, and DER omits a DEFAULT that holds, so no conforming
+   --  certificate encodes either and refusing them turns nothing away that
+   --  ought to be let through. OpenSSL does not even print them.
+   procedure Check_Name_Constraint_Depth_Fields is
+      package X509C renames CryptoLib.X509.Certificates;
+      package XV renames CryptoLib.X509.Validation;
+      use type XV.Validation_Failure;
+
+      NC_Min_CA_DER : constant String :=
+        "308201893082012ea00302010202145f13d4c64ff6773e61fd40ae198e01e7e79aa283300a06082a8648ce3d04" &
+        "03023011310f300d06035504030c064e43204d696e301e170d3236303732393039303735325a170d3334313031" &
+        "353039303735325a3011310f300d06035504030c064e43204d696e3059301306072a8648ce3d020106082a8648" &
+        "ce3d030107034200043eaa1ca1862169e02c4e8f933225cd1a8b335ab26ca7c7c03face181777c71684a6f5ade" &
+        "c3181b5ea11e44c1f3840eeddc2152c42bae3ec43f8d01f0928c6296a3643062300f0603551d130101ff040530" &
+        "030101ff300e0603551d0f0101ff04040302020430200603551d1e0101ff04163014a0123010820b6578616d70" &
+        "6c652e636f6d800101301d0603551d0e041604148e2ea5a21f944a8341efa6f0df04aa6d96c5a2a0300a06082a" &
+        "8648ce3d04030203490030460221009c344933da2f2b9a10badddc5ae256d4c30a0a479913597e29a770d09797" &
+        "192f022100c97d516a75214f271e475ca9a92bc4ed787adef504d1343bfee918c615d11671";
+
+      NC_Min_Leaf_DER : constant String :=
+        "3082019b30820141a0030201020214091885003ffa3413cb5ca0510c88e1d709e70a0e300a06082a8648ce3d04" &
+        "03023011310f300d06035504030c064e43204d696e301e170d3236303732393039303832395a170d3332303131" &
+        "393039303832395a301b3119301706035504030c10686f73742e6578616d706c652e636f6d3059301306072a86" &
+        "48ce3d020106082a8648ce3d0301070342000416bfbd49d4557c57e7b21756b7791b113e63cf027787722edd3f" &
+        "f9c41dc9bc5b13e577d727bb59e03acafb1b2f1e4d1eced69166effc36e9ddee3648ea991df2a36d306b300c06" &
+        "03551d130101ff04023000301b0603551d11041430128210686f73742e6578616d706c652e636f6d301d060355" &
+        "1d0e04160414971536a1ddd56b38ba2176034ad59a060ebf0cab301f0603551d230418301680148e2ea5a21f94" &
+        "4a8341efa6f0df04aa6d96c5a2a0300a06082a8648ce3d0403020348003045022069f3544e54c82ab2b53729d4" &
+        "9ea0260166fb2f2a582e72e61cb82d4b9dabca560221009690069ac763d69c2791508640b9ab51c47c6bdb8d56" &
+        "bf3e5705e4182cdb8894";
+
+      NC_Plain_CA_DER : constant String :=
+        "308201893082012fa0030201020214316593b98b00241c04be3e68624fc73da069af77300a06082a8648ce3d04" &
+        "030230133111300f06035504030c084e4320506c61696e301e170d3236303732393039303735325a170d333431" &
+        "3031353039303735325a30133111300f06035504030c084e4320506c61696e3059301306072a8648ce3d020106" &
+        "082a8648ce3d030107034200043eaa1ca1862169e02c4e8f933225cd1a8b335ab26ca7c7c03face181777c7168" &
+        "4a6f5adec3181b5ea11e44c1f3840eeddc2152c42bae3ec43f8d01f0928c6296a361305f300f0603551d130101" &
+        "ff040530030101ff300e0603551d0f0101ff040403020204301d0603551d1e0101ff04133011a00f300d820b65" &
+        "78616d706c652e636f6d301d0603551d0e041604148e2ea5a21f944a8341efa6f0df04aa6d96c5a2a0300a0608" &
+        "2a8648ce3d040302034800304502205eda2f9745df5b9b43b8ec3f7854ac014b820d4468a4a0da9e1b16c7f2fa" &
+        "2a7d0221008d4ca3d920a0d3452df05f2bb584c736511bf2d334e206c772268099ccac3202";
+
+      NC_Plain_Leaf_DER : constant String :=
+        "3082019d30820143a003020102021416dea706705425e9261be59927526fbd90610c20300a06082a8648ce3d04" &
+        "030230133111300f06035504030c084e4320506c61696e301e170d3236303732393039303832395a170d333230" &
+        "3131393039303832395a301b3119301706035504030c10686f73742e6578616d706c652e636f6d305930130607" &
+        "2a8648ce3d020106082a8648ce3d0301070342000416bfbd49d4557c57e7b21756b7791b113e63cf027787722e" &
+        "dd3ff9c41dc9bc5b13e577d727bb59e03acafb1b2f1e4d1eced69166effc36e9ddee3648ea991df2a36d306b30" &
+        "0c0603551d130101ff04023000301b0603551d11041430128210686f73742e6578616d706c652e636f6d301d06" &
+        "03551d0e04160414971536a1ddd56b38ba2176034ad59a060ebf0cab301f0603551d230418301680148e2ea5a2" &
+        "1f944a8341efa6f0df04aa6d96c5a2a0300a06082a8648ce3d0403020348003045022100b572247d37ddd569e7" &
+        "0a4157fa7920ac79e78cdaa6d86b3f11b3f7246ed3bb5602207674615be7de3e53edfcef686286de5190d25b0f" &
+        "b1e41b5895455233741311f1";
+
+      Status : CryptoLib.ASN1.Errors.Decode_Status;
+
+      function From_Hex
+        (Text : String) return Ada.Streams.Stream_Element_Array
+      is
+         Result : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (Text'Length / 2));
+         function Nibble (C : Character) return Natural
+         is (case C is
+                when '0' .. '9' => Character'Pos (C) - Character'Pos ('0'),
+                when others     => Character'Pos (C) - Character'Pos ('a') + 10);
+      begin
+         for I in Result'Range loop
+            Result (I) :=
+              Ada.Streams.Stream_Element
+                (Nibble (Text (Text'First + 2 * Natural (I - 1))) * 16
+                 + Nibble (Text (Text'First + 2 * Natural (I - 1) + 1)));
+         end loop;
+         return Result;
+      end From_Hex;
+
+      function Decoded (Hex : String) return X509C.Certificate
+      is (X509C.Decode_DER
+            (From_Hex (Hex), CryptoLib.ASN1.Default_Limits, Status));
+
+      --  permittedSubtrees DNS:example.com, carrying minimum 1.
+      type With_Minimum is limited new XV.Path_Source with null record;
+
+      overriding function Length (Source : With_Minimum) return Positive is (2);
+
+      overriding function Certificate_At
+        (Source : With_Minimum; Index : Positive) return X509C.Certificate
+      is (if Index = 1 then Decoded (NC_Min_Leaf_DER)
+          else Decoded (NC_Min_CA_DER));
+
+      overriding function Is_Trust_Anchor
+        (Source : With_Minimum; Item : X509C.Certificate) return Boolean
+      is (X509C.Subject_Bytes (Item)
+          = X509C.Subject_Bytes (Decoded (NC_Min_CA_DER)));
+
+      --  The same constraint written the way the RFC asks for.
+      type Without_Minimum is limited new XV.Path_Source with null record;
+
+      overriding function Length
+        (Source : Without_Minimum) return Positive is (2);
+
+      overriding function Certificate_At
+        (Source : Without_Minimum; Index : Positive) return X509C.Certificate
+      is (if Index = 1 then Decoded (NC_Plain_Leaf_DER)
+          else Decoded (NC_Plain_CA_DER));
+
+      overriding function Is_Trust_Anchor
+        (Source : Without_Minimum; Item : X509C.Certificate) return Boolean
+      is (X509C.Subject_Bytes (Item)
+          = X509C.Subject_Bytes (Decoded (NC_Plain_CA_DER)));
+
+      At_Time : constant CryptoLib.X509.Certificate_Time :=
+        (Year => 2026, Month => 9, Day => 1,
+         Hour => 12, Minute => 0, Second => 0);
+   begin
+      --  Both leaves are host.example.com, inside the subtree either way,
+      --  so the only thing separating these two verdicts is the minimum.
+      declare
+         Verdict : constant XV.Validation_Result :=
+           XV.Validate_Path (With_Minimum'(null record), At_Time);
+      begin
+         Check (not Verdict.Valid,
+                "a subtree carrying a depth restriction is not quietly "
+                & "treated as one without");
+         Check (Verdict.Failure = XV.Unsupported_Name_Constraint,
+                "and says the constraint went unapplied rather than blaming "
+                & "the name, got " & XV.Failure_Image (Verdict.Failure));
+      end;
+
+      declare
+         Verdict : constant XV.Validation_Result :=
+           XV.Validate_Path (Without_Minimum'(null record), At_Time);
+      begin
+         Check (Verdict.Valid,
+                "while the same subtree without one still admits the same "
+                & "name, got " & XV.Failure_Image (Verdict.Failure));
+      end;
+   end Check_Name_Constraint_Depth_Fields;
+
    procedure Check_X509_Extensions is
       use type CryptoLib.ASN1.Errors.Decode_Status;
       use type CryptoLib.PEM.Decode_Status;
@@ -9888,6 +10036,7 @@ begin
    Check_Policy_Tree_Bound;
    Check_Policy_Set_Is_A_Set;
    Check_Policy_Constraint_Skipcerts;
+   Check_Name_Constraint_Depth_Fields;
    Check_Random_Fails_Closed;
    Check_Off_Curve_Key;
    Check_Ed25519_Encoding;

@@ -195,7 +195,13 @@ every status reading `Ok` while every key it produces is predictable.
   cover the same ground rather than leaving a gap between them; a constraint naming a form this crate
   cannot apply (an EDI party name, an x400 address, a registered identifier)
   makes the chain fail
-  rather than be checked against only the part that could be applied. A
+  rather than be checked against only the part that could be applied. The same
+  answer covers a subtree carrying the `minimum` or `maximum` depth fields:
+  they are a restriction on the subtree this does not apply, and on a
+  permitted subtree skipping one would admit names the CA did not. RFC 5280
+  §4.2.1.10 says the minimum MUST be zero and the maximum MUST be absent, and
+  DER omits a DEFAULT that holds, so no conforming certificate carries either
+  and refusing them turns nothing legitimate away. A
   directory-name subtree constrains the certificate's own subject as a prefix
   of its relative names; a URI subtree constrains the host the URI names,
   ignoring any credentials, port or path; a mail subtree is read as a mailbox,
