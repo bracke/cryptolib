@@ -2535,6 +2535,83 @@ procedure Tests is
       end;
    end Check_Validity_Window;
 
+   --  A certificate says which key it belongs to and which key signed it.
+   --
+   --  RFC 5280 requires both -- subjectKeyIdentifier in every CA
+   --  certificate, authorityKeyIdentifier in everything but a self-signed
+   --  root -- because a name alone stops identifying a certificate as soon
+   --  as a CA has more than one. After a re-key, or under a cross-signature,
+   --  several certificates share a subject name and differ only by key. The
+   --  crate issued neither.
+   procedure Check_Key_Identifiers is
+      use type CryptoLib.ASN1.Errors.Decode_Status;
+
+      package X509C renames CryptoLib.X509.Certificates;
+      package XE renames CryptoLib.X509.Extensions;
+
+      function Decoded (Text : String) return X509C.Certificate is
+         Buffer : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset
+                   (CryptoLib.PEM.Maximum_Decoded_Length (Text)));
+         Last   : Ada.Streams.Stream_Element_Offset;
+         From   : Positive := Text'First;
+         P      : CryptoLib.PEM.Decode_Status;
+         D      : CryptoLib.ASN1.Errors.Decode_Status;
+      begin
+         CryptoLib.PEM.Decode_Block
+           (Text, CryptoLib.PEM.Certificate_Label, From, Buffer, Last, P);
+         return X509C.Decode_DER
+           (Buffer (Buffer'First .. Last), CryptoLib.ASN1.Default_Limits, D);
+      end Decoded;
+
+      CA_PEM, CA_Key, Leaf_PEM, Leaf_Key : Unbounded_String;
+      Outcome : CryptoLib.Certificates.Certificate_Status;
+   begin
+      Outcome :=
+        CryptoLib.Certificates.Create_Local_CA
+          ("identifier-ca", CA_PEM, CA_Key, CryptoLib.Certificates.P384_Key);
+      Check (Outcome = CryptoLib.Certificates.Ok, "fixture: CA created");
+
+      Outcome :=
+        CryptoLib.Certificates.Issue_Server_Certificate
+          (To_String (CA_PEM), To_String (CA_Key), "host.example",
+           [1 => To_Unbounded_String ("host.example")], Leaf_PEM, Leaf_Key);
+      Check (Outcome = CryptoLib.Certificates.Ok, "fixture: leaf issued");
+
+      declare
+         CA   : constant X509C.Certificate := Decoded (To_String (CA_PEM));
+         Leaf : constant X509C.Certificate := Decoded (To_String (Leaf_PEM));
+
+         CA_SKI   : constant CryptoLib.ASN1.Octets :=
+           XE.Subject_Key_Identifier (CA);
+         Leaf_SKI : constant CryptoLib.ASN1.Octets :=
+           XE.Subject_Key_Identifier (Leaf);
+         Leaf_AKI : constant CryptoLib.ASN1.Octets :=
+           XE.Authority_Key_Identifier (Leaf);
+         CA_AKI   : constant CryptoLib.ASN1.Octets :=
+           XE.Authority_Key_Identifier (CA);
+      begin
+         Check (X509C.Is_Present (CA) and then X509C.Is_Present (Leaf),
+                "both certificates decode");
+
+         --  SHA-1 over the public key bits, which is the derivation 38 of
+         --  the 40 system roots carrying one were measured to use.
+         Check (CA_SKI'Length = 20 and then Leaf_SKI'Length = 20,
+                "each certificate names its own key");
+         Check (CA_SKI /= Leaf_SKI,
+                "and two different keys get different identifiers");
+
+         --  The link that makes the pair useful: the leaf points at the key
+         --  that signed it, which is the CA's own.
+         Check (Leaf_AKI = CA_SKI,
+                "the leaf names the key that signed it");
+
+         --  A self-signed CA signed itself, so it points at itself.
+         Check (CA_AKI = CA_SKI,
+                "and a self-signed CA points at its own key");
+      end;
+   end Check_Key_Identifiers;
+
    procedure Check_X509_Extensions is
       use type CryptoLib.ASN1.Errors.Decode_Status;
       use type CryptoLib.PEM.Decode_Status;
@@ -7381,6 +7458,7 @@ begin
    Check_X509_Extensions;
    Check_Serial_Numbers;
    Check_Validity_Window;
+   Check_Key_Identifiers;
    Check_Decoder_Robustness;
    Check_Certificate_Ambiguity;
    Check_X509_Access_Locations;

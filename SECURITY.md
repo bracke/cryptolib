@@ -26,7 +26,7 @@ The reference sources are:
 | ECDSA | P-256 (in `ssh_lib`), P-384 / P-521 sign; P-256 / P-384 / P-521 verify | **RFC 6979 A.2.5** (P-384, byte-exact) + P-521 (pyca cross-verified); verification against OpenSSL signatures on all three curves, including curve/digest pairings that differ (P-521 with SHA-256, P-384 with SHA-512) |
 | Finite-field DH | groups 1 / 14 / 16 / 18 | live vs OpenSSH; group16/18 pin the exact RFC 3526 primes |
 | Post-quantum | ML-KEM-768, sntrup761 (+ hybrid x25519 KEX) | NIST / live vs OpenSSH sntrup761x25519 |
-| X.509 (`Certificates`) | local CA, server/client/email issuance, CSR signing, PKCS#12 | PKCS#12 MAC key byte-exact vs OpenSSL; issued Ed25519 and P-384 certificates chain-verified against their CA by OpenSSL in the suite; serials are 128-bit random and distinct per certificate |
+| X.509 (`Certificates`) | local CA, server/client/email issuance, CSR signing, PKCS#12 | PKCS#12 MAC key byte-exact vs OpenSSL; issued Ed25519 and P-384 certificates chain-verified against their CA by OpenSSL in the suite; serials are 128-bit random and distinct per certificate; key identifiers match an independent SHA-1 over the public key bits, and OpenSSL refuses the chain if the authority identifier names the wrong key |
 | PBES2 (`PBES2`, `PKCS8`, `PKCS12`) | password-based decryption: PBKDF2 over HMAC-SHA1/256/384/512, AES-128/192/256-CBC | keys written by `openssl pkcs8 -topk8` open to the byte-identical scalar OpenSSL holds; a wrong password is refused |
 | PKCS#12 (`PKCS12`) | reading a bundle, MAC verified before its contents are parsed | bundles written by this crate and by `openssl pkcs12 -export` both open, including OpenSSL's default layout with the certificates in encrypted content; the extracted certificates hash identically to the originals |
 | RSA | PKCS#1 v1.5 and PSS verification, SHA-256/384/512 | signatures produced by OpenSSL at 2048 and 3072 bits; a cube-root forgery against a low exponent is refused; PSS checked at both salt lengths OpenSSL emits, and a signature does not verify under a salt length or hash other than the one its parameters state |
@@ -187,6 +187,18 @@ The RNG **fails closed**: if no OS source is available it returns
   responders. The nonce must be unpredictable (`CryptoLib.Random`, not a
   counter); without one, a captured "good" response replays until its
   `nextUpdate`.
+- **An issued certificate names its own key and its signer's.** Neither
+  `subjectKeyIdentifier` nor `authorityKeyIdentifier` was emitted, and RFC
+  5280 requires both -- SKI in every CA certificate, AKI in everything but a
+  self-signed root. A subject name stops identifying a certificate as soon as
+  a CA has more than one: after a re-key, or under a cross-signature, several
+  certificates share a name and differ only by key, and a verifier with no
+  identifier to go on has to try them all. Both are SHA-1 over the public key
+  bits (RFC 5280 method 1, which 38 of the 40 system roots carrying an SKI
+  were measured to use), and both are non-critical -- they help a verifier
+  find the issuer, they do not constrain what it may conclude. SHA-1's
+  weakness costs nothing here: the value only has to tell one key from
+  another, and a verifier that follows it still checks the signature.
 - **An issued certificate's validity window is computed, not compiled in.**
   It used to be two literals -- `260101000000Z` to `360101000000Z` -- so every
   certificate this crate issued claimed the same ten years, and once that

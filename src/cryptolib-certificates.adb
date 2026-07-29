@@ -965,9 +965,22 @@ package body CryptoLib.Certificates is
       end if;
    end Valid_Profile_Name;
 
+   --  A key identifier, RFC 5280 method 1: SHA-1 over the public key bits,
+   --  which is what 38 of the 40 system roots carrying one were checked to
+   --  use. It is an identifier, not a security claim -- SHA-1's weakness
+   --  costs nothing here, because the value only has to tell one key from
+   --  another and a verifier that follows it still checks the signature.
+   function Key_Identifier
+     (Public_Key : Ada.Streams.Stream_Element_Array) return String
+   is (To_String
+         (Ada.Streams.Stream_Element_Array
+            (CryptoLib.Hashes.SHA1 (Public_Key))));
+
    function Extensions_DER
-     (Profile : Certificate_Profile;
-      Names   : Subject_Alternative_Name_List) return String
+     (Profile     : Certificate_Profile;
+      Names       : Subject_Alternative_Name_List;
+      Subject_Key : Ada.Streams.Stream_Element_Array;
+      Issuer_Key  : Ada.Streams.Stream_Element_Array) return String
    is
       Items : Unbounded_String;
       SANs  : Unbounded_String;
@@ -1035,6 +1048,29 @@ package body CryptoLib.Certificates is
                                when Email_Profile => Byte (16#04#),
                                when CA_Profile => Byte (16#01#)))))));
       end if;
+      --  subjectKeyIdentifier names this certificate's key, and
+      --  authorityKeyIdentifier names the key that signed it. RFC 5280
+      --  requires both -- SKI in every CA certificate, AKI in everything but
+      --  a self-signed root -- because a name alone does not pick out a
+      --  certificate once a CA has more than one: after a re-key, or under a
+      --  cross-signature, several certificates share a subject name and
+      --  differ only by key. A verifier with no identifier to go on has to
+      --  try them all, and one that gives up early fails to build a chain
+      --  that exists. Both are non-critical, as the RFC requires: they help
+      --  a verifier find the issuer, they do not constrain what it may
+      --  conclude.
+      Append
+        (Items,
+         Seq
+           (OID (Byte (16#55#) & Byte (16#1D#) & Byte (16#0E#))
+            & Octets (Octets (Key_Identifier (Subject_Key)))));
+      Append
+        (Items,
+         Seq
+           (OID (Byte (16#55#) & Byte (16#1D#) & Byte (16#23#))
+            & Octets
+                (Seq (TLV (16#80#, Key_Identifier (Issuer_Key))))));
+
       return Explicit (3, Seq (To_String (Items)));
    end Extensions_DER;
 
@@ -1062,7 +1098,7 @@ package body CryptoLib.Certificates is
            & Validity_DER (Valid_Days)
            & Name_DER (Subject_CN)
            & SPKI_DER (Subject_Key, Subject_Algorithm)
-           & Extensions_DER (Profile, Names));
+           & Extensions_DER (Profile, Names, Subject_Key, Sign_Public));
    begin
       case Algorithm is
          when Ed25519_Key =>
