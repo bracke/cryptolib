@@ -7417,6 +7417,121 @@ procedure Tests is
       One_Group ("group18", 18);
    end Check_DH_Generators;
 
+   --  Every cipher name, against what OpenSSL makes of it.
+   --
+   --  Initialize dispatches on the name, and each name is its own branch
+   --  fixing a mode and a key width. The suite reached four of them; the
+   --  rest -- both 128-bit names, both 192-bit ones, and 3DES -- had no
+   --  user here, so a name wired to the wrong width or the wrong mode would
+   --  have encrypted happily and matched nothing anywhere else.
+   --
+   --  Same key, same IV, same plaintext as OpenSSL was given, so the
+   --  ciphertext has to be identical byte for byte. That is what a mode or
+   --  a width cannot be wrong in and still pass.
+   procedure Check_Cipher_Names is
+      Message : constant String :=
+        "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
+
+      function From_Hex
+        (Text : String) return Ada.Streams.Stream_Element_Array
+      is
+         Result : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (Text'Length / 2));
+         function Nibble (C : Character) return Natural
+         is (case C is
+                when '0' .. '9' => Character'Pos (C) - Character'Pos ('0'),
+                when others     => Character'Pos (C) - Character'Pos ('a') + 10);
+      begin
+         for I in Result'Range loop
+            Result (I) :=
+              Ada.Streams.Stream_Element
+                (Nibble (Text (Text'First + 2 * Natural (I - 1))) * 16
+                 + Nibble (Text (Text'First + 2 * Natural (I - 1) + 1)));
+         end loop;
+         return Result;
+      end From_Hex;
+
+      procedure One_Name (Name, Key, IV, Expected : String) is
+         Context : CryptoLib.Ciphers.Cipher_State;
+         Plain   : constant Ada.Streams.Stream_Element_Array :=
+           From_Hex (Message);
+         Output  : Ada.Streams.Stream_Element_Array (Plain'Range);
+         Status  : CryptoLib.Errors.Status;
+      begin
+         Status :=
+           CryptoLib.Ciphers.Initialize
+             (Context, Name, CryptoLib.Ciphers.Client_To_Server,
+              From_Hex (Key), From_Hex (IV));
+         Check (Status = CryptoLib.Errors.Ok,
+                Name & " initialises with a key of its own width");
+         Status := CryptoLib.Ciphers.Encrypt (Context, Plain, Output);
+         Check (Status = CryptoLib.Errors.Ok, Name & " encrypts");
+         Check (Output = From_Hex (Expected),
+                Name & " produces what OpenSSL produces");
+      end One_Name;
+   begin
+      One_Name ("aes128-ctr",
+                "abababababababababababababababab",
+                "000102030405060708090a0b0c0d0e0f",
+                "10dec75cc1a7da62cdc982e6186e758908c140b5c5379873a710c0edcc85ca45"
+                & "");
+      One_Name ("aes192-ctr",
+                "abababababababababababababababababababababababab",
+                "000102030405060708090a0b0c0d0e0f",
+                "74ca7eb72c325edb3f70dd4039febc906eb18324f9afac0f863fa647b83d2d59"
+                & "");
+      One_Name ("aes256-ctr",
+                "abababababababababababababababababababababababababababababababab",
+                "000102030405060708090a0b0c0d0e0f",
+                "a66348b2729c70247ee550459837889edef0037d5f0d1293b392a6d2fd65ee3f"
+                & "");
+      One_Name ("aes128-cbc",
+                "abababababababababababababababab",
+                "000102030405060708090a0b0c0d0e0f",
+                "3bf79ce0e6082a306a5e5b8392e28a3e78dd9a3c5ef8aee50ec762150ed621df"
+                & "");
+      One_Name ("aes192-cbc",
+                "abababababababababababababababababababababababab",
+                "000102030405060708090a0b0c0d0e0f",
+                "2094ac9d7f1e93c6622a03db786f7316f5616711fec4d266a6e411c017822477"
+                & "");
+      One_Name ("aes256-cbc",
+                "abababababababababababababababababababababababababababababababab",
+                "000102030405060708090a0b0c0d0e0f",
+                "76ed2071a4b20ae2dbe279d87c725b19891bd66749dfb5cfd82d8f9ff43e5be1"
+                & "");
+      One_Name ("3des-cbc",
+                "abababababababababababababababababababababababab",
+                "0001020304050607",
+                "9943829c28b98324dbe5bb7132363aaa8b7e81a7db6fdfefd446f77c0d9626cd"
+                & "");
+
+      --  A key too short for the name it was given is refused rather than
+      --  stretched. A longer one is accepted and cut to the width the name
+      --  names, which is what SSH's key derivation produces when the two
+      --  directions negotiate ciphers of different widths.
+      declare
+         Context : CryptoLib.Ciphers.Cipher_State;
+      begin
+         Check (CryptoLib.Ciphers.Initialize
+                  (Context, "aes256-ctr", CryptoLib.Ciphers.Client_To_Server,
+                   From_Hex ("cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"),
+                   From_Hex ("000102030405060708090a0b0c0d0e0f"))
+                /= CryptoLib.Errors.Ok,
+                "a 128-bit key under a 256-bit name is refused");
+
+         Check (CryptoLib.Ciphers.Initialize
+                  (Context, "aes128-ctr", CryptoLib.Ciphers.Client_To_Server,
+                   From_Hex ("cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+                             & "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"),
+                   From_Hex ("000102030405060708090a0b0c0d0e0f"))
+                = CryptoLib.Errors.Ok,
+                "while a 256-bit key under a 128-bit name is taken as the "
+                & "first sixteen bytes, which is how ssh_lib hands one "
+                & "derivation to two ciphers of different widths");
+      end;
+   end Check_Cipher_Names;
+
    procedure Check_X509_Extensions is
       use type CryptoLib.ASN1.Errors.Decode_Status;
       use type CryptoLib.PEM.Decode_Status;
@@ -12422,6 +12537,7 @@ begin
    Check_DH_Group14;
    Check_DH_Group1;
    Check_DH_Generators;
+   Check_Cipher_Names;
    Check_X25519_Shared_Secret;
    Check_Chain_Constraint_Bypasses;
    Check_Signature_Algorithm_Agreement;

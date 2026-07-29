@@ -1254,6 +1254,21 @@ package body CryptoLib.Ciphers is
       Total_Words : constant Natural := 4 * (Nr + 1);
       Temp        : Word;
    begin
+      --  At least the width the name needs; a longer key is cut to it.
+      --
+      --  Not an oversight, and not safe to tighten. RFC 4253 derives one key
+      --  stream per direction and a caller takes as many bytes off the front
+      --  as its cipher wants, so a buffer longer than the cipher is the
+      --  normal shape rather than a mistake. ssh_lib relies on exactly that:
+      --  it derives both directions at the wider of the two negotiated
+      --  ciphers, so when the directions differ -- aes256-ctr one way and
+      --  aes128-ctr the other -- the narrower one is handed the wider key
+      --  and must take its first sixteen bytes.
+      --
+      --  Requiring an exact length was tried here and refused those
+      --  connections. What it costs is that a caller who passes the wrong
+      --  buffer is not told; what it buys is the derivation SSH actually
+      --  specifies.
       if Key_Data'Length < Key_Bits / 8 then
          return CryptoLib.Errors.Handshake_Failed;
       end if;
