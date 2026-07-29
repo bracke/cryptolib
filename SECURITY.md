@@ -200,6 +200,17 @@ The RNG **fails closed**: if no OS source is available it returns
   something other than the password's protection is being exercised.
   OpenSSL opens the result and reports both counts; a wrong password is
   refused.
+- **Building an OCSP request cannot be crashed by the certificate it is
+  about.** A CertID carries the certificate's serial number, nothing bounds
+  that on the way in, and the request builder's length emitter converted its
+  third octet to a `Stream_Element` rather than masking it -- so a
+  certificate with a serial past 65,535 octets raised `CONSTRAINT_ERROR`
+  instead of writing. Reproduced with a 70,000-octet serial: the certificate
+  decoded cleanly and then the builder crashed, on input from whoever
+  supplied the certificate. `Maximum_Request_Length` is documented as a
+  buffer size sufficient for a conforming certificate rather than an upper
+  bound on what the builder can produce, which it never was; a caller sizing
+  by it gets `Size_Limit_Exceeded` for such a certificate.
 - **DER lengths are emitted for the size they describe.** The long form
   stopped at two octets and `Byte` truncates rather than complains, so
   anything past 65,535 octets was given a length with its high bits dropped.

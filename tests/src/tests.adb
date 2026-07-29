@@ -2797,6 +2797,165 @@ procedure Tests is
       end;
    end Check_Large_Certificate;
 
+   --  A certificate whose serial number is absurd.
+   --
+   --  Nothing bounds a serial on the way in, and a CertID carries it, so the
+   --  OCSP request builder is handed whatever the certificate says. Its
+   --  length emitter stopped at a two-octet long form and converted the
+   --  third octet to a Stream_Element rather than masking it, so a length
+   --  past 65_535 raised CONSTRAINT_ERROR -- an exception escaping on input
+   --  from whoever supplied the certificate.
+   procedure Check_Oversized_Serial is
+      use type CryptoLib.ASN1.Errors.Decode_Status;
+      use type CryptoLib.PEM.Decode_Status;
+
+      package X509C renames CryptoLib.X509.Certificates;
+      package CO renames CryptoLib.OCSP;
+      subtype Blob is Ada.Streams.Stream_Element_Array;
+      subtype Spot is Ada.Streams.Stream_Element_Offset;
+
+      Serial_Octets : constant := 70_000;
+
+      --  Minimal DER length octets, so the spliced certificate is one the
+      --  reader will accept: it refuses a length written wider than it needs.
+      function Length_Octets (Value : Natural) return Blob is
+         Wide  : Blob (1 .. 4);
+         First : Spot := 4;
+         Rest  : Natural := Value;
+      begin
+         if Value < 128 then
+            return [1 => Ada.Streams.Stream_Element (Value)];
+         end if;
+         Wide (First) := Ada.Streams.Stream_Element (Rest mod 256);
+         Rest := Rest / 256;
+         while Rest > 0 loop
+            First := First - 1;
+            Wide (First) := Ada.Streams.Stream_Element (Rest mod 256);
+            Rest := Rest / 256;
+         end loop;
+         return [1 => Ada.Streams.Stream_Element (16#80# + (5 - First))]
+                & Wide (First .. 4);
+      end Length_Octets;
+
+      function Wrap (Tag : Ada.Streams.Stream_Element; Content : Blob)
+        return Blob
+      is ([1 => Tag] & Length_Octets (Natural (Content'Length)) & Content);
+
+      CA_PEM, CA_Key : Unbounded_String;
+      Outcome : CryptoLib.Certificates.Certificate_Status;
+   begin
+      Outcome :=
+        CryptoLib.Certificates.Create_Local_CA
+          ("serial-size-ca", CA_PEM, CA_Key,
+           CryptoLib.Certificates.P384_Key);
+      Check (Outcome = CryptoLib.Certificates.Ok, "fixture: CA created");
+
+      declare
+         Text   : constant String := To_String (CA_PEM);
+         Buffer : Blob
+           (1 .. Ada.Streams.Stream_Element_Offset
+                   (CryptoLib.PEM.Maximum_Decoded_Length (Text)));
+         Last   : Ada.Streams.Stream_Element_Offset;
+         From   : Positive := Text'First;
+         P      : CryptoLib.PEM.Decode_Status;
+         Status : CryptoLib.ASN1.Errors.Decode_Status;
+      begin
+         CryptoLib.PEM.Decode_Block
+           (Text, CryptoLib.PEM.Certificate_Label, From, Buffer, Last, P);
+
+         declare
+            Real : constant Blob := Buffer (Buffer'First .. Last);
+
+            --  Both headers are 30 82 LL LL at this size, which is asserted
+            --  rather than assumed: a splice onto a shape that moved would
+            --  silently produce something else.
+            Header_Ok : constant Boolean :=
+              Real'Length > 8
+              and then Real (Real'First) = 16#30#
+              and then Real (Real'First + 1) = 16#82#
+              and then Real (Real'First + 4) = 16#30#
+              and then Real (Real'First + 5) = 16#82#;
+
+            TBS_Body : constant Blob :=
+              Real (Real'First + 8
+                    .. Real'First + 7
+                       + Spot (Natural (Real (Real'First + 6)) * 256
+                               + Natural (Real (Real'First + 7))));
+            Trailer  : constant Blob :=
+              Real (TBS_Body'Last + 1 .. Real'Last);
+
+            --  version [0] is the first field; the serial follows it.
+            Version_Length : constant Spot :=
+              2 + Spot (Real (Real'First + 9));
+            Before_Serial : constant Blob :=
+              TBS_Body (TBS_Body'First
+                        .. TBS_Body'First + Version_Length - 1);
+            After_Serial  : constant Blob :=
+              TBS_Body (TBS_Body'First + Version_Length + 2
+                        + Spot (Real (Real'First + 8 + Version_Length + 1))
+                        .. TBS_Body'Last);
+
+            Big_Serial : constant Blob :=
+              Wrap (16#02#,
+                    [1 => 16#01#]
+                    & [1 .. Spot (Serial_Octets) => 16#42#]);
+            Spliced : constant Blob :=
+              Wrap (16#30#,
+                    Wrap (16#30#,
+                          Before_Serial & Big_Serial & After_Serial)
+                    & Trailer);
+
+            Roomy : constant CryptoLib.ASN1.Decode_Limits :=
+              (Maximum_Input_Size     => 1024 * 1024,
+               Maximum_Nesting_Depth  => 16,
+               Maximum_Sequence_Items => 2048,
+               Maximum_String_Length  => 1024 * 1024);
+            Item : constant X509C.Certificate :=
+              X509C.Decode_DER (Spliced, Roomy, Status);
+         begin
+            Check (P = CryptoLib.PEM.Ok and then Header_Ok,
+                   "fixture: the certificate has the shape this splices");
+
+            --  If this stopped decoding the builder would never be reached
+            --  and the check below would pass without testing anything.
+            Check (Status = CryptoLib.ASN1.Errors.Ok
+                   and then X509C.Is_Present (Item),
+                   "fixture: the spliced certificate decodes, got "
+                   & CryptoLib.ASN1.Errors.Status_Image (Status));
+            Check (X509C.Serial_Number (Item)'Length > 65_535,
+                   "fixture: and its serial is past a two-octet length,"
+                   & Spot'Image (X509C.Serial_Number (Item)'Length)
+                   & " octets");
+
+            --  The point: a buffer sized by the documented bound is told it
+            --  is too small, rather than crashed through.
+            declare
+               Sized : Blob (1 .. Spot (CO.Maximum_Request_Length));
+               Stop  : Spot;
+               Built : CryptoLib.ASN1.Errors.Decode_Status;
+            begin
+               CO.Build_Request (Item, Item, Sized, Stop, Built);
+               Check (Built /= CryptoLib.ASN1.Errors.Ok,
+                      "a request that cannot fit is refused, got "
+                      & CryptoLib.ASN1.Errors.Status_Image (Built));
+            end;
+
+            --  And with room, it is written rather than raised.
+            declare
+               Roomy_Buffer : Blob (1 .. 128 * 1024);
+               Stop  : Spot;
+               Built : CryptoLib.ASN1.Errors.Decode_Status;
+            begin
+               CO.Build_Request
+                 (Item, Item, Roomy_Buffer, Stop, Built);
+               Check (Built = CryptoLib.ASN1.Errors.Ok,
+                      "and with room it is written, got "
+                      & CryptoLib.ASN1.Errors.Status_Image (Built));
+            end;
+         end;
+      end;
+   end Check_Oversized_Serial;
+
    procedure Check_X509_Extensions is
       use type CryptoLib.ASN1.Errors.Decode_Status;
       use type CryptoLib.PEM.Decode_Status;
@@ -7646,6 +7805,7 @@ begin
    Check_Key_Identifiers;
    Check_PKCS12_Work_Factor;
    Check_Large_Certificate;
+   Check_Oversized_Serial;
    Check_Decoder_Robustness;
    Check_Certificate_Ambiguity;
    Check_X509_Access_Locations;

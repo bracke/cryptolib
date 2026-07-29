@@ -51,7 +51,14 @@ package body CryptoLib.OCSP is
    --  Request building
    -----------------------------------------------------------------------
 
-   --  Emit a DER length.
+   --  Emit a DER length, in the shortest form that holds it.
+   --
+   --  The long form used to stop at two octets, and the third octet was a
+   --  conversion to Stream_Element rather than a masked byte, so a length
+   --  past 65_535 raised instead of writing. A certificate's serial number
+   --  is not bounded by its decoder, so a certificate carrying an absurd one
+   --  turned an OCSP request into a crash -- on input from whoever supplied
+   --  the certificate.
    procedure Put_Length
      (Output : in out Octets;
       Cursor : in out Offset;
@@ -61,17 +68,31 @@ package body CryptoLib.OCSP is
       if Value < 128 then
          Output (Cursor) := Ada.Streams.Stream_Element (Value);
          Cursor := Cursor + 1;
-      elsif Value < 256 then
-         Output (Cursor) := 16#81#;
-         Output (Cursor + 1) := Ada.Streams.Stream_Element (Value);
-         Cursor := Cursor + 2;
-      else
-         Output (Cursor) := 16#82#;
-         Output (Cursor + 1) := Ada.Streams.Stream_Element (Value / 256);
-         Output (Cursor + 2) :=
-           Ada.Streams.Stream_Element (Value mod 256);
-         Cursor := Cursor + 3;
+         return;
       end if;
+
+      declare
+         Octets_Out : array (1 .. 4) of Ada.Streams.Stream_Element;
+         First      : Natural := Octets_Out'Last;
+         Rest       : Natural := Value;
+      begin
+         Octets_Out (First) := Ada.Streams.Stream_Element (Rest mod 256);
+         Rest := Rest / 256;
+         while Rest > 0 loop
+            First := First - 1;
+            Octets_Out (First) := Ada.Streams.Stream_Element (Rest mod 256);
+            Rest := Rest / 256;
+         end loop;
+
+         Output (Cursor) :=
+           Ada.Streams.Stream_Element
+             (16#80# + (Octets_Out'Last - First + 1));
+         Cursor := Cursor + 1;
+         for I in First .. Octets_Out'Last loop
+            Output (Cursor) := Octets_Out (I);
+            Cursor := Cursor + 1;
+         end loop;
+      end;
    end Put_Length;
 
    procedure Put_TLV
@@ -90,9 +111,17 @@ package body CryptoLib.OCSP is
       end loop;
    end Put_TLV;
 
-   --  How many octets a TLV with this much content occupies.
+   --  How many octets a TLV with this much content occupies. Has to agree
+   --  with Put_Length exactly: the sizes are computed up front and the
+   --  buffer check depends on them, so a disagreement writes past what was
+   --  reserved.
    function TLV_Length (Content : Natural) return Natural
-   is (1 + (if Content < 128 then 1 elsif Content < 256 then 2 else 3)
+   is (1
+       + (if Content < 128 then 1
+          elsif Content < 16#100# then 2
+          elsif Content < 16#10000# then 3
+          elsif Content < 16#1000000# then 4
+          else 5)
        + Content);
 
    procedure Build_Request

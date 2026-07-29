@@ -126,8 +126,16 @@ package CryptoLib.OCSP is
       Status : out Decode_Status;
       Nonce  : Octets := No_Nonce);
 
-   --  An upper bound on a request's size, for sizing the buffer.
-   --  @return the largest number of octets Build_Request can produce
+   --  A buffer size that holds a request about any ordinary certificate.
+   --
+   --  Not an upper bound on what Build_Request can produce, which it was
+   --  once described as: a CertID carries the certificate's serial number,
+   --  and nothing bounds that on the way in, so a certificate with an absurd
+   --  serial makes an absurd request. A caller sizing its buffer by this
+   --  gets Size_Limit_Exceeded for such a certificate rather than a request
+   --  no responder would answer, which is the useful answer -- RFC 5280
+   --  caps a conforming serial at 20 octets and this leaves room to spare.
+   --  @return a buffer size sufficient for a conforming certificate
    function Maximum_Request_Length return Natural
    is (512);
 
