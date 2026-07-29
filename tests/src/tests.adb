@@ -7843,6 +7843,77 @@ procedure Tests is
              & "decides the exchange");
    end Check_Hybrid_PQ_Names;
 
+   --  The one-shot CBC path, against the same authority as the streaming
+   --  one.
+   --
+   --  CBC decryption is written twice here: Initialize with a CBC name and
+   --  Decrypt for the transport, and Decrypt_CBC_Raw for a caller with the
+   --  whole ciphertext in hand. ssh_lib uses both -- the first for packets,
+   --  the second for an OpenSSH private key encrypted with a CBC cipher.
+   --
+   --  Only the decrypt side is written twice: Encrypt_CBC_Raw delegates to
+   --  the streaming path, so the existing round trip does cross the two
+   --  implementations rather than checking one against itself.
+   --
+   --  What it does not do is anchor either of them outside this crate. Until
+   --  the cipher-name table went in, AES-CBC had no vector at all here --
+   --  RC2 had one and AES did not -- so the pair agreed with each other and
+   --  with nothing else. This decrypts what OpenSSL encrypted, which is a
+   --  direct anchor rather than one reached through two other tests, and
+   --  keeps the agreement assertion because it costs a line.
+   procedure Check_CBC_Paths_Agree is
+      function From_Hex
+        (Text : String) return Ada.Streams.Stream_Element_Array
+      is
+         Result : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (Text'Length / 2));
+         function Nibble (C : Character) return Natural
+         is (case C is
+                when '0' .. '9' => Character'Pos (C) - Character'Pos ('0'),
+                when others     => Character'Pos (C) - Character'Pos ('a') + 10);
+      begin
+         for I in Result'Range loop
+            Result (I) :=
+              Ada.Streams.Stream_Element
+                (Nibble (Text (Text'First + 2 * Natural (I - 1))) * 16
+                 + Nibble (Text (Text'First + 2 * Natural (I - 1) + 1)));
+         end loop;
+         return Result;
+      end From_Hex;
+
+      Key        : constant String := "abababababababababababababababababababababababababababababababab";
+      IV         : constant String := "000102030405060708090a0b0c0d0e0f";
+      Plaintext  : constant String := "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
+      Ciphertext : constant String := "76ed2071a4b20ae2dbe279d87c725b19891bd66749dfb5cfd82d8f9ff43e5be1";
+
+      Raw_Out    : Ada.Streams.Stream_Element_Array (1 .. 32);
+      Stream_Out : Ada.Streams.Stream_Element_Array (1 .. 32);
+      Context    : CryptoLib.Ciphers.Cipher_State;
+      Status     : CryptoLib.Errors.Status;
+   begin
+      Status :=
+        CryptoLib.Ciphers.Decrypt_CBC_Raw
+          ("aes256-cbc", From_Hex (Key), From_Hex (IV),
+           From_Hex (Ciphertext), Raw_Out);
+      Check (Status = CryptoLib.Errors.Ok, "the one-shot path decrypts");
+      Check (Raw_Out = From_Hex (Plaintext),
+             "and gives back what OpenSSL encrypted, so its chaining is the "
+             & "same chaining");
+
+      Status :=
+        CryptoLib.Ciphers.Initialize
+          (Context, "aes256-cbc", CryptoLib.Ciphers.Client_To_Server,
+           From_Hex (Key), From_Hex (IV));
+      Check (Status = CryptoLib.Errors.Ok, "the streaming path initialises");
+      Status :=
+        CryptoLib.Ciphers.Decrypt (Context, From_Hex (Ciphertext), Stream_Out);
+      Check (Status = CryptoLib.Errors.Ok, "and decrypts");
+
+      Check (Raw_Out = Stream_Out,
+             "the two CBC paths agree, so neither can drift from the other "
+             & "unnoticed");
+   end Check_CBC_Paths_Agree;
+
    procedure Check_X509_Extensions is
       use type CryptoLib.ASN1.Errors.Decode_Status;
       use type CryptoLib.PEM.Decode_Status;
@@ -12852,6 +12923,7 @@ begin
    Check_UMAC_Sequence_Nonce;
    Check_Chacha_Length_Agreement;
    Check_Hybrid_PQ_Names;
+   Check_CBC_Paths_Agree;
    Check_Cipher_Names;
    Check_X25519_Shared_Secret;
    Check_Chain_Constraint_Bypasses;
