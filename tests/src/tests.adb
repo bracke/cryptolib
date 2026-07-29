@@ -4679,6 +4679,164 @@ procedure Tests is
              & XV.Failure_Image (Verdict.Failure));
    end Check_Policy_Tree_Bound;
 
+   --  A policy set is a set, at both ends.
+   --
+   --  Coming in: RFC 5280 4.2.1.4 says a policy OID must not appear twice
+   --  in one extension, and OpenSSL refuses one that does (error 42,
+   --  "invalid or inconsistent certificate policy extension"). Accepting
+   --  it would leave this the more permissive of the two on input the RFC
+   --  forbids outright, which is the wrong direction for this library to
+   --  differ in.
+   --
+   --  Going out: two nodes can carry the same policy without anything
+   --  being wrong -- two mappings converging on one subject policy is the
+   --  ordinary way to arrive there -- and the reported set listed it once
+   --  per node. Nothing was refused that should have been accepted, so
+   --  this is not an unsound verdict; it is a caller counting the list and
+   --  reading a repetition as breadth.
+   procedure Check_Policy_Set_Is_A_Set is
+      package X509C renames CryptoLib.X509.Certificates;
+      package PP renames CryptoLib.X509.Policies;
+      package XV renames CryptoLib.X509.Validation;
+      use type CryptoLib.ASN1.Errors.Decode_Status;
+
+      function From_Hex
+        (Text : String) return Ada.Streams.Stream_Element_Array
+      is
+         Result : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (Text'Length / 2));
+         function Nibble (C : Character) return Natural
+         is (case C is
+                when '0' .. '9' => Character'Pos (C) - Character'Pos ('0'),
+                when others     => Character'Pos (C) - Character'Pos ('a') + 10);
+      begin
+         for I in Result'Range loop
+            Result (I) :=
+              Ada.Streams.Stream_Element
+                (Nibble (Text (Text'First + 2 * Natural (I - 1))) * 16
+                 + Nibble (Text (Text'First + 2 * Natural (I - 1) + 1)));
+         end loop;
+         return Result;
+      end From_Hex;
+
+      Dup_Policy_DER : constant String :=
+        "308201a030820146a00302010202146f3c7cb756844c0a8daf62f2208802ba31ac25ac300a06082a8648ce3d04" &
+        "03023011310f300d06035504030c065020526f6f74301e170d3236303732393038343531395a170d3334313031" &
+        "353038343531395a3011310f300d06035504030c064475702043413059301306072a8648ce3d020106082a8648" &
+        "ce3d030107034200048b245cf0e8e82860e05d6391e4747088bea4efe6894425cc78ea2598d7c60f5777a3eede" &
+        "abf4bbcf66ce81a56ed8fde1207630ec6ea5b42e2af72d898ac5b0e7a37c307a300f0603551d130101ff040530" &
+        "030101ff300e0603551d0f0101ff04040302020430170603551d200410300e300506032a0304300506032a0304" &
+        "301d0603551d0e041604143aa5eb3b237e63b3f2a0710f36e2ee6d60625cc6301f0603551d2304183016801402" &
+        "2ece54b366f27ede1b920700fb928139116f3f300a06082a8648ce3d04030203480030450220231e243cb54f35" &
+        "131612fabafd2f527a87c66c5cbe31e9e224ae8aa24c5a1132022100d8931fda0f0bc878d3d8f9a4d88a015eac" &
+        "589d43e60285c4282ce615d5a45068";
+
+      CV_Root_DER : constant String :=
+        "308201673082010ca003020102021438712a03489d5b69aefec58a74228f323acc452d300a06082a8648ce3d04" &
+        "03023011310f300d06035504030c065020526f6f74301e170d3236303732393038343531395a170d3336303732" &
+        "363038343531395a3011310f300d06035504030c065020526f6f743059301306072a8648ce3d020106082a8648" &
+        "ce3d03010703420004456418d55e203fe65b9f8c38fb141be790aebcb087d03965a3e6f8f3e555aeb6a24623d5" &
+        "aaf702768805759cbc5186201d8b054de710825cd2b80dc2ca9b6950a3423040300f0603551d130101ff040530" &
+        "030101ff300e0603551d0f0101ff040403020204301d0603551d0e04160414022ece54b366f27ede1b920700fb" &
+        "928139116f3f300a06082a8648ce3d0403020349003046022100f7618559ffeac694358047b4e91c751e63f9c8" &
+        "a94cb85592c13596b05980ab5b02210097f23bcf1b16a617cf03076c9b638540ff7f1457a268770df533e00e2f" &
+        "0ee7cd";
+
+      CV_AB_DER : constant String :=
+        "3082019f30820145a00302010202146f3c7cb756844c0a8daf62f2208802ba31ac25ad300a06082a8648ce3d04" &
+        "03023011310f300d06035504030c065020526f6f74301e170d3236303732393038343531395a170d3334313031" &
+        "353038343531395a3010310e300c06035504030c0541422043413059301306072a8648ce3d020106082a8648ce" &
+        "3d030107034200048b245cf0e8e82860e05d6391e4747088bea4efe6894425cc78ea2598d7c60f5777a3eedeab" &
+        "f4bbcf66ce81a56ed8fde1207630ec6ea5b42e2af72d898ac5b0e7a37c307a300f0603551d130101ff04053003" &
+        "0101ff300e0603551d0f0101ff04040302020430170603551d200410300e300506032a0301300506032a030230" &
+        "1d0603551d0e041604143aa5eb3b237e63b3f2a0710f36e2ee6d60625cc6301f0603551d23041830168014022e" &
+        "ce54b366f27ede1b920700fb928139116f3f300a06082a8648ce3d040302034800304502205b1b6cea73d3c0e9" &
+        "0684665b6b05f52c756b21594af01cf309dbe10f37fb4400022100b72a6346f917f03829b91c9b527f779a028b" &
+        "42f0169017bd2a14a4039a9cceeb";
+
+      CV_Map_DER : constant String :=
+        "308201c53082016aa0030201020214140f080672287aeb0d12b20eca69618ad6ccb75a300a06082a8648ce3d04" &
+        "03023010310e300c06035504030c054142204341301e170d3236303732393038343531395a170d333431303135" &
+        "3038343531395a3011310f300d06035504030c064d61702043413059301306072a8648ce3d020106082a8648ce" &
+        "3d03010703420004c57bfeab6876597b9837d11e2a014c5635b7ba4e23e656fc0fdef9102c24bb86510273b3ab" &
+        "993e7ea30dd8d2abf6ef31ec6906ecece4b4936c3a6a446825caa1a381a030819d300f0603551d130101ff0405" &
+        "30030101ff300e0603551d0f0101ff04040302020430170603551d200410300e300506032a0301300506032a03" &
+        "0230210603551d21041a3018300a06032a030106032a0309300a06032a030206032a0309301d0603551d0e0416" &
+        "04144213281531333a76ba243992cc9b3570024d80c9301f0603551d230418301680143aa5eb3b237e63b3f2a0" &
+        "710f36e2ee6d60625cc6300a06082a8648ce3d0403020349003046022100b978f747358fef7b843c5951d2729f" &
+        "e2157a9032234fab5054e0342c719e7ac6022100f173dc4da3833c5873004bbff6cae519f7855859d83e46ac6e" &
+        "6ba2b79752e4c5";
+
+      CV_Leaf_DER : constant String :=
+        "308201883082012fa0030201020214793d3836dd484ab712ce6e5876bfb95ec73531a2300a06082a8648ce3d04" &
+        "03023011310f300d06035504030c064d6170204341301e170d3236303732393038343533375a170d3334313031" &
+        "353038343533375a30143112301006035504030c09782e6578616d706c653059301306072a8648ce3d02010608" &
+        "2a8648ce3d03010703420004985fb7103ef3a20f32fa4ea636bbf614aff1c998e56410209b6882f4c19a7ce09d" &
+        "a8e95ee119f295fccf4de59e46c8ff212667609ce4a4fa53ee6a20cef93f42a3623060300c0603551d130101ff" &
+        "0402300030100603551d2004093007300506032a0309301d0603551d0e041604147471bbec40749113341508ee" &
+        "601bd5dc5eb116a2301f0603551d230418301680144213281531333a76ba243992cc9b3570024d80c9300a0608" &
+        "2a8648ce3d0403020347003044022100e31cbbf268a7036a8207c8cd98cae7c385741d59199e43b2d6670a9185" &
+        "c7d747021f2d41fa8ca8245f053189b898a850d014d075387846b95be31ff57f3f8fa7c6";
+
+      Status : CryptoLib.ASN1.Errors.Decode_Status;
+
+      function Decoded (Hex : String) return X509C.Certificate
+      is (X509C.Decode_DER
+            (From_Hex (Hex), CryptoLib.ASN1.Default_Limits, Status));
+
+      --  root -> {1.2.3.1, 1.2.3.2} -> both mapped to 1.2.3.9 -> 1.2.3.9
+      type Converging is limited new XV.Path_Source with null record;
+
+      overriding function Length (Source : Converging) return Positive is (4);
+
+      overriding function Certificate_At
+        (Source : Converging; Index : Positive) return X509C.Certificate
+      is (case Index is
+             when 1      => Decoded (CV_Leaf_DER),
+             when 2      => Decoded (CV_Map_DER),
+             when 3      => Decoded (CV_AB_DER),
+             when others => Decoded (CV_Root_DER));
+
+      overriding function Is_Trust_Anchor
+        (Source : Converging; Item : X509C.Certificate) return Boolean
+      is (X509C.Subject_Bytes (Item)
+          = X509C.Subject_Bytes (Decoded (CV_Root_DER)));
+
+      At_Time : constant CryptoLib.X509.Certificate_Time :=
+        (Year => 2026, Month => 9, Day => 1,
+         Hour => 12, Minute => 0, Second => 0);
+   begin
+      --  Coming in: 1.2.3.4 twice in one extension.
+      declare
+         Doubled : constant PP.Policy_Set :=
+           PP.Policies_Of (Decoded (Dup_Policy_DER));
+      begin
+         Check (Status = CryptoLib.ASN1.Errors.Ok,
+                "the certificate itself decodes -- the duplicate is a policy "
+                & "question, not a DER one");
+         Check (Doubled.Present,
+                "and the extension is there to be judged");
+         Check (not Doubled.Well_Formed,
+                "a policy asserted twice makes the set unusable rather than "
+                & "being folded down to one");
+      end;
+
+      --  Going out: two mappings, one destination, reported once.
+      declare
+         Verdict : constant XV.Validation_Result :=
+           XV.Validate_Path (Converging'(null record), At_Time);
+      begin
+         Check (Verdict.Valid,
+                "converging mappings are ordinary and the path holds, got "
+                & XV.Failure_Image (Verdict.Failure));
+         Check (Verdict.Policies.Count = 1,
+                "the policy both mappings arrive at is reported once, got"
+                & Natural'Image (Verdict.Policies.Count));
+         Check (not Verdict.Policies.Exhausted,
+                "and nothing about this reached a bound");
+      end;
+   end Check_Policy_Set_Is_A_Set;
+
    procedure Check_X509_Extensions is
       use type CryptoLib.ASN1.Errors.Decode_Status;
       use type CryptoLib.PEM.Decode_Status;
@@ -9592,6 +9750,7 @@ begin
    Check_Unsupported_Algorithm;
    Check_Verification_Failure_Kinds;
    Check_Policy_Tree_Bound;
+   Check_Policy_Set_Is_A_Set;
    Check_Random_Fails_Closed;
    Check_Off_Curve_Key;
    Check_Ed25519_Encoding;

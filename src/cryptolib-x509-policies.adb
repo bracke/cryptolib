@@ -270,6 +270,19 @@ package body CryptoLib.X509.Policies is
                   return Result;
                end if;
 
+               --  RFC 5280 4.2.1.4: a policy OID must not appear twice in
+               --  one extension. Refuse the certificate rather than fold
+               --  the copies together. Folding would be the quiet reading,
+               --  and a policy asserted twice with two different qualifier
+               --  sets has no single meaning to fold to; OpenSSL refuses
+               --  this too, so accepting it would make this the more
+               --  permissive of the two on input the RFC forbids outright.
+               for Seen in 1 .. Result.Count loop
+                  if Same (Result.Values (Seen), Value) then
+                     return Result;
+                  end if;
+               end loop;
+
                Result.Count := Result.Count + 1;
                Result.Values (Result.Count) := Value;
                Result.Entries (Result.Count).Value := Value;
@@ -971,16 +984,33 @@ package body CryptoLib.X509.Policies is
       --  The policies the path established. Reporting fewer than there are
       --  would hand back a list that looks complete and is not, and the
       --  point of this list is to be acted on.
+      --
+      --  It is a set, so a policy goes in once. Two nodes can carry the
+      --  same policy without either being wrong -- two mappings converging
+      --  on one subject policy is the ordinary way -- and listing it twice
+      --  would make a caller that counts read a repetition as breadth.
       for I in Item.Nodes'Range loop
          if Item.Nodes (I).In_Use
            and then Item.Nodes (I).Depth = Depth
          then
-            if Result.Count = Maximum_Policies then
-               Item.Exhausted := True;
-            else
-               Result.Count := Result.Count + 1;
-               Result.Values (Result.Count) := Item.Nodes (I).Valid;
-            end if;
+            declare
+               Listed : Boolean := False;
+            begin
+               for Seen in 1 .. Result.Count loop
+                  if Same (Result.Values (Seen), Item.Nodes (I).Valid) then
+                     Listed := True;
+                  end if;
+               end loop;
+
+               if not Listed then
+                  if Result.Count = Maximum_Policies then
+                     Item.Exhausted := True;
+                  else
+                     Result.Count := Result.Count + 1;
+                     Result.Values (Result.Count) := Item.Nodes (I).Valid;
+                  end if;
+               end if;
+            end;
          end if;
       end loop;
 

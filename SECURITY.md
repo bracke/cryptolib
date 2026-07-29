@@ -217,7 +217,15 @@ every status reading `Ok` while every key it produces is predictable.
   carried through the tree: §6.1 never consults them, a node's qualifiers are
   those of the certificate that created it, and the ones belonging to a
   chain's established policies are the leaf's own, which `Policies_Of` gives
-  directly. `Validation_Result.Policies` reports the
+  directly. A policy set is a set at both ends. A certificate
+  naming the same policy twice in one extension is refused rather than folded
+  down to one -- RFC 5280 §4.2.1.4 forbids the repeat, OpenSSL refuses it as
+  error 42, and two copies carrying two qualifier sets have no single meaning
+  to fold to. In the other direction a policy is reported once however many
+  tree nodes carry it, which two mappings converging on one subject policy
+  legitimately arrange; the verdict was never wrong there, but a caller
+  counting the list would have read a repetition as breadth.
+  `Validation_Result.Policies` reports the
   policies the authorities in the path actually agreed on, which is not what
   the leaf asserts: a certificate may name a policy no issuer above it
   granted, and that certificate is refused when an explicit policy is
