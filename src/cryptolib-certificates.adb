@@ -1176,7 +1176,8 @@ package body CryptoLib.Certificates is
       Subject_Algorithm : Key_Algorithm := Ed25519_Key;
       Valid_Days  : Positive := Default_Certificate_Days;
       Limit_Present   : Boolean := False;
-      Not_After_Limit : Ada.Calendar.Time := Ada.Calendar.Clock)
+      Not_After_Limit : Ada.Calendar.Time := Ada.Calendar.Clock;
+      Subject_SPKI    : String := "")
       return String
    is
       --  The signer's algorithm and the subject's need not agree: a CSR brings
@@ -1189,7 +1190,8 @@ package body CryptoLib.Certificates is
            & Name_DER (Issuer_CN)
            & Validity_DER (Valid_Days, Limit_Present, Not_After_Limit)
            & Name_DER (Subject_CN)
-           & SPKI_DER (Subject_Key, Subject_Algorithm)
+           & (if Subject_SPKI /= "" then Subject_SPKI
+              else SPKI_DER (Subject_Key, Subject_Algorithm))
            & Extensions_DER (Profile, Names, Subject_Key, Sign_Public));
    begin
       case Algorithm is
@@ -1296,6 +1298,86 @@ package body CryptoLib.Certificates is
    --  and integers, trailing data, unbounded nesting -- and that the
    --  signature check now covers every algorithm the crate can verify rather
    --  than the two this walked by hand.
+   --  The subject name and the whole SubjectPublicKeyInfo of a request.
+   --
+   --  Taking the key's own encoding rather than rebuilding it from raw bytes
+   --  is what lets a request name a key this crate cannot generate -- RSA,
+   --  most of the time. Nothing here has to know the algorithm: the request
+   --  is signed with the key it names, so a request whose signature this can
+   --  check is one whose key it can carry, and a request whose signature it
+   --  cannot check is refused below whatever the key is.
+   function Extract_CSR_Info
+     (CSR_PEM    : String;
+      Subject_CN : out Unbounded_String;
+      Key_Info   : out Unbounded_String) return Boolean
+   is
+      use type CryptoLib.ASN1.Errors.Decode_Status;
+      use type CryptoLib.X509.Signatures.Verification_Result;
+
+      DER : constant String := Base64_Decode (CSR_PEM);
+   begin
+      Subject_CN := Null_Unbounded_String;
+      Key_Info := Null_Unbounded_String;
+
+      if DER'Length = 0 then
+         return False;
+      end if;
+
+      declare
+         Raw : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (DER'Length));
+      begin
+         for I in DER'Range loop
+            Raw (Ada.Streams.Stream_Element_Offset (I - DER'First + 1)) :=
+              Character'Pos (DER (I));
+         end loop;
+
+         declare
+            Status : CryptoLib.ASN1.Errors.Decode_Status;
+            Item   : constant CryptoLib.PKCS10.Request :=
+              CryptoLib.PKCS10.Decode_DER
+                (Raw, CryptoLib.ASN1.Default_Limits, Status);
+         begin
+            if Status /= CryptoLib.ASN1.Errors.Ok
+              or else not CryptoLib.PKCS10.Is_Present (Item)
+            then
+               return False;
+            end if;
+
+            --  Proof of possession, as before: a request whose signature
+            --  does not check is somebody claiming a key without showing
+            --  they hold it.
+            if CryptoLib.PKCS10.Verify_Signature (Item)
+              /= CryptoLib.X509.Signatures.Valid
+            then
+               return False;
+            end if;
+
+            declare
+               Info : constant Ada.Streams.Stream_Element_Array :=
+                 CryptoLib.PKCS10.Public_Key_Info_Bytes (Item);
+               Text : String (1 .. Natural (Info'Length));
+            begin
+               if Info'Length = 0 then
+                  return False;
+               end if;
+               for I in Text'Range loop
+                  Text (I) :=
+                    Character'Val
+                      (Info (Info'First
+                             + Ada.Streams.Stream_Element_Offset (I - 1)));
+               end loop;
+               Key_Info := To_Unbounded_String (Text);
+            end;
+
+            Subject_CN :=
+              To_Unbounded_String
+                (CryptoLib.PKCS10.Subject_Common_Name (Item));
+            return Length (Subject_CN) > 0;
+         end;
+      end;
+   end Extract_CSR_Info;
+
    function Extract_CSR
      (CSR_PEM    : String;
       Subject_CN : out Unbounded_String;
@@ -1846,9 +1928,8 @@ package body CryptoLib.Certificates is
       end Scrub;
 
       Subject   : Unbounded_String;
-      --  The CSR carries an Ed25519 key: this reads and verifies that shape
-      --  only, whatever the CA itself is signed with.
-      CSR_Public : Ada.Streams.Stream_Element_Array (1 .. 32);
+      Empty_Key : constant Ada.Streams.Stream_Element_Array (1 .. 0) :=
+        [others => 0];
       Cert      : Unbounded_String;
       Rng       : CryptoLib.Random.Random_Source;
    begin
@@ -1899,123 +1980,44 @@ package body CryptoLib.Certificates is
             end if;
       end case;
 
-      --  Which kind of request this is shows in the request itself, so try the
-      --  EC shape first and fall back rather than making the caller declare it.
+      --  One path for every request. The subject's key goes in exactly as
+      --  the request encoded it, so nothing here needs to recognise the
+      --  algorithm or its width -- which is what used to be tried in turn,
+      --  97 bytes then 57 then 32, and is why an RSA request was refused
+      --  whatever the CA was.
       declare
-         EC_Public : Ada.Streams.Stream_Element_Array (1 .. 97);
+         Key_Info : Unbounded_String;
       begin
-         if Extract_CSR (CSR_PEM, Subject, EC_Public) then
-            declare
-               Serial_Value : constant String := Random_Serial (Rng);
-            begin
-               if Serial_Value = "" then
-                  Scrub;
-                  return Internal_Error;
-               end if;
+         if not Extract_CSR_Info (CSR_PEM, Subject, Key_Info) then
+            Scrub;
+            return Invalid_Input;
+         end if;
 
-               Cert :=
-                 To_Unbounded_String
-                   (Sign_Certificate
-                      (Serial      => Serial_Value,
-                       Issuer_CN   => To_String (Issuer_Name),
-                       Subject_CN  => To_String (Subject),
-                       Subject_Key => EC_Public,
-                       Sign_Seed   => CA_Seed,
-                       Sign_Public => CA_Public,
-                       Profile     => Server_Profile,
-                       Names       => [1 => Subject],
-                       Algorithm   => Algorithm,
-                       Subject_Algorithm => P384_Key,
-                       Valid_Days  => Valid_Days,
-                 Limit_Present   => CA_Ends_Known,
-                 Not_After_Limit => CA_Ends));
-            end;
-
-            if Length (Cert) = 0 then
+         declare
+            Serial_Value : constant String := Random_Serial (Rng);
+         begin
+            if Serial_Value = "" then
                Scrub;
                return Internal_Error;
             end if;
-            Certificate_PEM := PEM ("CERTIFICATE", To_String (Cert));
-            Scrub;
-            return Ok;
-         end if;
-      end;
 
-      --  Then Ed448, whose key is 57 bytes and so tells itself apart from
-      --  both of the others by width alone. Extract_CSR checks the request's
-      --  own signature before any of this, which for an Ed448 request means
-      --  verifying an Ed448 signature -- something this crate could not do
-      --  until recently, and the reason such a request used to be refused
-      --  here whatever the CA was.
-      declare
-         Ed448_Public : Ada.Streams.Stream_Element_Array (1 .. 57);
-      begin
-         if Extract_CSR (CSR_PEM, Subject, Ed448_Public) then
-            declare
-               Serial_Value : constant String := Random_Serial (Rng);
-            begin
-               if Serial_Value = "" then
-                  Scrub;
-                  return Internal_Error;
-               end if;
-
-               Cert :=
-                 To_Unbounded_String
-                   (Sign_Certificate
-                      (Serial      => Serial_Value,
-                       Issuer_CN   => To_String (Issuer_Name),
-                       Subject_CN  => To_String (Subject),
-                       Subject_Key => Ed448_Public,
-                       Sign_Seed   => CA_Seed,
-                       Sign_Public => CA_Public,
-                       Profile     => Server_Profile,
-                       Names       => [1 => Subject],
-                       Algorithm   => Algorithm,
-                       Subject_Algorithm => Ed448_Key,
-                       Valid_Days  => Valid_Days,
-                 Limit_Present   => CA_Ends_Known,
-                 Not_After_Limit => CA_Ends));
-            end;
-
-            if Length (Cert) = 0 then
-               Scrub;
-               return Internal_Error;
-            end if;
-            Certificate_PEM := PEM ("CERTIFICATE", To_String (Cert));
-            Scrub;
-            return Ok;
-         end if;
-      end;
-
-      if not Extract_CSR (CSR_PEM, Subject, CSR_Public) then
-         Scrub;
-         return Invalid_Input;
-      end if;
-
-      declare
-         Serial_Value : constant String := Random_Serial (Rng);
-      begin
-         if Serial_Value = "" then
-            Scrub;
-            return Internal_Error;
-         end if;
-
-         Cert :=
-           To_Unbounded_String
-             (Sign_Certificate
-                (Serial      => Serial_Value,
-                 Issuer_CN   => To_String (Issuer_Name),
-                 Subject_CN  => To_String (Subject),
-                 Subject_Key => CSR_Public,
-                 Sign_Seed   => CA_Seed,
-                 Sign_Public => CA_Public,
-                 Profile     => Server_Profile,
-                 Names       => [1 => Subject],
-                 Algorithm   => Algorithm,
-                 Subject_Algorithm => Ed25519_Key,
-                 Valid_Days  => Valid_Days,
-                 Limit_Present   => CA_Ends_Known,
-                 Not_After_Limit => CA_Ends));
+            Cert :=
+              To_Unbounded_String
+                (Sign_Certificate
+                   (Serial      => Serial_Value,
+                    Issuer_CN   => To_String (Issuer_Name),
+                    Subject_CN  => To_String (Subject),
+                    Subject_Key => Empty_Key,
+                    Sign_Seed   => CA_Seed,
+                    Sign_Public => CA_Public,
+                    Profile     => Server_Profile,
+                    Names       => [1 => Subject],
+                    Algorithm   => Algorithm,
+                    Valid_Days  => Valid_Days,
+                    Limit_Present   => CA_Ends_Known,
+                    Not_After_Limit => CA_Ends,
+                    Subject_SPKI    => To_String (Key_Info)));
+         end;
       end;
 
       if Length (Cert) = 0 then

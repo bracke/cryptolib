@@ -45,7 +45,7 @@ Do not run plain system `gnat*`, `gnatmake`, `gnatls`, `gnatprove`,
 | `CryptoLib.RSA` | RSA PKCS#1 v1.5 and PSS signature verification (SHA-256/384/512) |
 | `CryptoLib.ASN1`, `CryptoLib.ASN1.DER`, `CryptoLib.ASN1.OIDs` | defensive bounded DER reader, object identifiers |
 | `CryptoLib.PEM` | strict PEM armour decoding, multi-block |
-| `CryptoLib.PKCS10` | certification requests: decode, read the subject and key, check proof of possession |
+| `CryptoLib.PKCS10` | certification requests: decode, read the subject and key, check proof of possession; any key whose proof can be checked can be signed into a certificate, RSA included |
 | `CryptoLib.PKCS8` | private keys, plain or PBES2-encrypted; wipes its own storage when it goes out of scope |
 | `CryptoLib.PBES2` | password-based decryption shared by PKCS#8 and PKCS#12 |
 | `CryptoLib.PKCS12` | read a bundle: MAC first, then its certificates and key |

@@ -5853,6 +5853,22 @@ procedure Tests is
         "YAWCJiwoap6pUSg3bUe6wUOkMnPzurMPfMLXo439xNeDGQE=" & ASCII.LF &
         "-----END CERTIFICATE REQUEST-----";
 
+      CSR_RSA_PEM : constant String :=
+        "-----BEGIN CERTIFICATE REQUEST-----" & ASCII.LF &
+        "MIICYzCCAUsCAQAwHjEcMBoGA1UEAwwTcnNhLnJlcXVlc3QuZXhhbXBsZTCCASIw" & ASCII.LF &
+        "DQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAMHCQpPTVm3pD0d9FUhUKBFZ+rPq" & ASCII.LF &
+        "u5LusbTg+eAHU6j4m3yqjeTdRfLdwBPLDssTcFB7m26r3v9RiJvEbpgnAlA1n8L6" & ASCII.LF &
+        "7xP8lfJeCOqCsGD4AVdE+WWUtUakOu5zuxGxbIy1/xY6Q64KFSbul2gT3nmnPBtx" & ASCII.LF &
+        "ECpi44QVvr4SfAhmdNe8U6zvAnuA8D8ooFsIY/lT7tiKHnutkpnKfM+2CuHR3vcK" & ASCII.LF &
+        "x/KMUEdY5segc44Cr2+BjvUyFEGYvh6teBoccOMMtr4C+wvmpsy0TszZDsl4L176" & ASCII.LF &
+        "2XWcvfUKqEYEm3vpcgrWDONH+kKE4T/wiJFL7PtafRWpGvL5/M5dCTaVwFECAwEA" & ASCII.LF &
+        "AaAAMA0GCSqGSIb3DQEBCwUAA4IBAQBPwYA3lAy0jS4hqUPnRz4xkMhPwer0LUaS" & ASCII.LF &
+        "fEvOpbjqulmZfDBUQkfIFlve/JqRINCFUCH8gMR8/cFcL0eOhKIuax85tC75lgnP" & ASCII.LF &
+        "Z+5bb/JN39u+JfTR5ouKwd+w9YFnslLr6a0X9OVu3Ids1bzZ15w+E30n/oy9YJHB" & ASCII.LF &
+        "3nOPO2ZudZSxhi9+Y7jHSHHKMmAnzfShC+m909cuJCY2h1T9AD4d8ATghwGudXz2" & ASCII.LF &
+        "ZrB+acI/Gw1Fdkxlx0F5WLvbQ1kfo1yqViQn2LChsB5Pmr0mVWRRnouVVTN8kx+x" & ASCII.LF &
+        "LwEiIpsn8CcZ3Mipis3VpJ680SQybRVZXHuTs8SH7amS2CCUPc8f" & ASCII.LF &
+        "-----END CERTIFICATE REQUEST-----";
       CA_Cert, CA_Key : Unbounded_String;
 
       --  The issued certificate's own subject key algorithm, read back from
@@ -5907,6 +5923,12 @@ procedure Tests is
       One_Request ("an Ed25519", CSR_Ed25519_PEM, CryptoLib.X509.Ed25519);
       One_Request ("a P-384", CSR_P384_PEM, CryptoLib.X509.ECDSA_P384);
       One_Request ("an Ed448", CSR_Ed448_PEM, CryptoLib.X509.Ed448);
+
+      --  RSA, which this crate can verify but cannot generate. Signing a
+      --  request needs neither: the CA signs with its own key and the
+      --  subject's goes in as the request encoded it. Refused outright until
+      --  the widths stopped being tried one at a time.
+      One_Request ("an RSA", CSR_RSA_PEM, CryptoLib.X509.RSA);
 
       --  A request is a claim to hold a key, and its signature is the only
       --  thing behind that claim. Signing one that does not check would
