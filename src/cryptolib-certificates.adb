@@ -1993,6 +1993,19 @@ package body CryptoLib.Certificates is
             return Invalid_Input;
          end if;
 
+         --  The request's common name becomes this certificate's subject
+         --  alternative name, so it has to be a name of the kind the profile
+         --  admits. Without this a request could ask for "evil.test
+         --  attacker" and be handed a certificate carrying it as a dNSName
+         --  -- not a domain name at all, and the sort of thing two readers
+         --  disagree about, which is the whole reason this crate refuses a
+         --  name with a NUL in it elsewhere. The profile paths have always
+         --  checked; this one did not.
+         if not Valid_Profile_Name (Server_Profile, To_String (Subject)) then
+            Scrub;
+            return Invalid_Input;
+         end if;
+
          declare
             Serial_Value : constant String := Random_Serial (Rng);
          begin

@@ -5869,6 +5869,22 @@ procedure Tests is
         "ZrB+acI/Gw1Fdkxlx0F5WLvbQ1kfo1yqViQn2LChsB5Pmr0mVWRRnouVVTN8kx+x" & ASCII.LF &
         "LwEiIpsn8CcZ3Mipis3VpJ680SQybRVZXHuTs8SH7amS2CCUPc8f" & ASCII.LF &
         "-----END CERTIFICATE REQUEST-----";
+      CSR_Spaced_Name_PEM : constant String :=
+        "-----BEGIN CERTIFICATE REQUEST-----" & ASCII.LF &
+        "MIICYjCCAUoCAQAwHTEbMBkGA1UEAwwSZXZpbC50ZXN0IGF0dGFja2VyMIIBIjAN" & ASCII.LF &
+        "BgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAwcJCk9NWbekPR30VSFQoEVn6s+q7" & ASCII.LF &
+        "ku6xtOD54AdTqPibfKqN5N1F8t3AE8sOyxNwUHubbqve/1GIm8RumCcCUDWfwvrv" & ASCII.LF &
+        "E/yV8l4I6oKwYPgBV0T5ZZS1RqQ67nO7EbFsjLX/FjpDrgoVJu6XaBPeeac8G3EQ" & ASCII.LF &
+        "KmLjhBW+vhJ8CGZ017xTrO8Ce4DwPyigWwhj+VPu2Ioee62Smcp8z7YK4dHe9wrH" & ASCII.LF &
+        "8oxQR1jmx6BzjgKvb4GO9TIUQZi+Hq14Ghxw4wy2vgL7C+amzLROzNkOyXgvXvrZ" & ASCII.LF &
+        "dZy99QqoRgSbe+lyCtYM40f6QoThP/CIkUvs+1p9Faka8vn8zl0JNpXAUQIDAQAB" & ASCII.LF &
+        "oAAwDQYJKoZIhvcNAQELBQADggEBADfiNY+VdyXZIGnRbzjjktEeUCq0lUdwwVbV" & ASCII.LF &
+        "ybkl6IMMNw1BULUP1URRUwryWCwaRUyK+q36U4PeE+CI9TmtKErAVoXeNu8q/zox" & ASCII.LF &
+        "DLQCwipPpeMuxM515axvMNMzwykPSl/QP6sfxBjuRcjy2jneslQsnOswBYJLh5tj" & ASCII.LF &
+        "jJ8yo1k7rzux1RY6664BSEoQP3DnZpKiorni1sUJVjJRgViQ6iRG2mRrvAj7QOoB" & ASCII.LF &
+        "l0I+uRR80TllKTruvHL3SnSiEqMe+cKJjHyrMiGTDZ3or8yYwcbeBYV5lOmCAPhK" & ASCII.LF &
+        "FBabLd9d9PsQKF71JI0X8KzIGU0M+6XtKQasiqDpBJsr5BTnmdE=" & ASCII.LF &
+        "-----END CERTIFICATE REQUEST-----";
       CA_Cert, CA_Key : Unbounded_String;
 
       --  The issued certificate's own subject key algorithm, read back from
@@ -5929,6 +5945,25 @@ procedure Tests is
       --  subject's goes in as the request encoded it. Refused outright until
       --  the widths stopped being tried one at a time.
       One_Request ("an RSA", CSR_RSA_PEM, CryptoLib.X509.RSA);
+
+      --  The name in the request becomes the name in the certificate, so a
+      --  request cannot ask for one that is not a name. "evil.test
+      --  attacker" is a dNSName no resolver will ever answer for and two
+      --  parsers may disagree about -- the same hazard as a NUL in a name,
+      --  which this crate refuses elsewhere. The profile paths have always
+      --  checked the names they are given; this one signed whatever the
+      --  request put in its common name.
+      declare
+         Issued : Unbounded_String;
+      begin
+         Check (CryptoLib.Certificates.Sign_CSR
+                  (To_String (CA_Cert), To_String (CA_Key),
+                   CSR_Spaced_Name_PEM, Issued)
+                /= CryptoLib.Certificates.Ok,
+                "a request whose common name is not a name is refused");
+         Check (Length (Issued) = 0,
+                "and nothing is issued carrying it");
+      end;
 
       --  A request is a claim to hold a key, and its signature is the only
       --  thing behind that claim. Signing one that does not check would
