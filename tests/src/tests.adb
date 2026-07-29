@@ -5793,6 +5793,128 @@ procedure Tests is
       end;
    end Check_Ed448_Certificate;
 
+   --  Signing a request somebody else wrote.
+   --
+   --  Only the refusal of a malformed request was pinned before, so the
+   --  whole working path was untested: which key shape a request carries is
+   --  discovered by trying each width in turn, and nothing checked that a
+   --  request came back out as a certificate for the key it asked about.
+   --  Getting that wrong issues a certificate for the wrong key, which is
+   --  the one mistake a CA must not make.
+   --
+   --  Ed448 is here because it did not work. The width was never tried, so
+   --  an Ed448 request was refused whatever the CA was -- and it could not
+   --  have worked earlier anyway, since the proof of possession below is an
+   --  Ed448 signature and this crate could not check one until recently.
+   procedure Check_CSR_Signing is
+      package X509C renames CryptoLib.X509.Certificates;
+      use type CryptoLib.X509.Public_Key_Algorithm;
+      use type CryptoLib.PEM.Decode_Status;
+
+      CSR_Ed25519_PEM : constant String :=
+        "-----BEGIN CERTIFICATE REQUEST-----" & ASCII.LF &
+        "MIGVMEkCAQAwFjEUMBIGA1UEAwwLY3NyLmV4YW1wbGUwKjAFBgMrZXADIQBBJpvj" & ASCII.LF &
+        "aZxK7SwC8CaIrLz4i3VkyTsS5Ye0XbklAWR4xaAAMAUGAytlcANBAD7itkSYJMpQ" & ASCII.LF &
+        "1mMRDkJDhzFhJLlfw/wlENMXrdpzof7u/CKUOau7MH3hvXAClMOOG2bZGA9XhN83" & ASCII.LF &
+        "uTKPDkS8Fw8=" & ASCII.LF &
+        "-----END CERTIFICATE REQUEST-----";
+      CSR_P384_PEM : constant String :=
+        "-----BEGIN CERTIFICATE REQUEST-----" & ASCII.LF &
+        "MIIBDTCBlQIBADAWMRQwEgYDVQQDDAtjc3IuZXhhbXBsZTB2MBAGByqGSM49AgEG" & ASCII.LF &
+        "BSuBBAAiA2IABFi3dHDRyk+Dz18vqqw9bsGzjLJtbFBfcBV0mVLbpId0fu2kEriP" & ASCII.LF &
+        "1strUf45B1XBcWJ+C2TSJp33iMQC4tutrr2rJDXzHm4Uv1I20NJFWI8pafnkXK7K" & ASCII.LF &
+        "HnLtP8yccD8eg6AAMAoGCCqGSM49BAMCA2cAMGQCMG8MmYT9rRbmR02tbgqG8t9s" & ASCII.LF &
+        "rc6Pw4tiwIKA7IgI6n0GST6UbigyR6vTEwjKkaOBVQIwNm8h1jfbSAAnyIXfWzHM" & ASCII.LF &
+        "yU2TZ0M9TknrtxSFba6jEgMA1cj4t8kfPN+X9sFChPPd" & ASCII.LF &
+        "-----END CERTIFICATE REQUEST-----";
+      CSR_Ed448_PEM : constant String :=
+        "-----BEGIN CERTIFICATE REQUEST-----" & ASCII.LF &
+        "MIHgMGICAQAwFjEUMBIGA1UEAwwLY3NyLmV4YW1wbGUwQzAFBgMrZXEDOgANH4DL" & ASCII.LF &
+        "Cg5y24zB0yCYnWMlf6CVxn2+dh9q/uDI8pi6uwTgXc24ANumjZSyuSScgvBSwKxM" & ASCII.LF &
+        "BgOMgQCgADAFBgMrZXEDcwCiHVlUdTjRU8vk0KbthD7WYlBi4u9mTp7GQEHIjR0R" & ASCII.LF &
+        "9NlFfTxY/3vY3VLRcZOkeBIkuvr5iJ6EeoD53Wi6dd02QG+K9BMGLQ2URuJWpzaF" & ASCII.LF &
+        "YAWCJiwoap6pUSg3bUe6wUOkMnPzurMPfMLXo439xNeDGQA=" & ASCII.LF &
+        "-----END CERTIFICATE REQUEST-----";
+      CSR_Ed448_Tampered_PEM : constant String :=
+        "-----BEGIN CERTIFICATE REQUEST-----" & ASCII.LF &
+        "MIHgMGICAQAwFjEUMBIGA1UEAwwLY3NyLmV4YW1wbGUwQzAFBgMrZXEDOgANH4DL" & ASCII.LF &
+        "Cg5y24zB0yCYnWMlf6CVxn2+dh9q/uDI8pi6uwTgXc24ANumjZSyuSScgvBSwKxM" & ASCII.LF &
+        "BgOMgQCgADAFBgMrZXEDcwCiHVlUdTjRU8vk0KbthD7WYlBi4u9mTp7GQEHIjR0R" & ASCII.LF &
+        "9NlFfTxY/3vY3VLRcZOkeBIkuvr5iJ6EeoD53Wi6dd02QG+K9BMGLQ2URuJWpzaF" & ASCII.LF &
+        "YAWCJiwoap6pUSg3bUe6wUOkMnPzurMPfMLXo439xNeDGQE=" & ASCII.LF &
+        "-----END CERTIFICATE REQUEST-----";
+
+      CA_Cert, CA_Key : Unbounded_String;
+
+      --  The issued certificate's own subject key algorithm, read back from
+      --  the DER rather than assumed from what went in.
+      function Issued_Key_Kind (Certificate_PEM : String)
+        return CryptoLib.X509.Public_Key_Algorithm
+      is
+         Buffer : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset
+                   (CryptoLib.PEM.Maximum_Decoded_Length (Certificate_PEM)));
+         Last   : Ada.Streams.Stream_Element_Offset;
+         From   : Positive := Certificate_PEM'First;
+         Armour : CryptoLib.PEM.Decode_Status;
+         Status : CryptoLib.ASN1.Errors.Decode_Status;
+      begin
+         CryptoLib.PEM.Decode_Block
+           (Certificate_PEM, CryptoLib.PEM.Certificate_Label, From, Buffer,
+            Last, Armour);
+         if Armour /= CryptoLib.PEM.Ok then
+            return CryptoLib.X509.Unknown_Public_Key_Algorithm;
+         end if;
+         return X509C.Public_Key_Algorithm_Of
+                  (X509C.Decode_DER
+                     (Buffer (Buffer'First .. Last),
+                      CryptoLib.ASN1.Default_Limits, Status));
+      end Issued_Key_Kind;
+
+      procedure One_Request
+        (Label    : String;
+         Request  : String;
+         Expected : CryptoLib.X509.Public_Key_Algorithm)
+      is
+         Issued : Unbounded_String;
+      begin
+         Check (CryptoLib.Certificates.Sign_CSR
+                  (To_String (CA_Cert), To_String (CA_Key), Request, Issued)
+                = CryptoLib.Certificates.Ok,
+                Label & " request is signed");
+         Check (Issued_Key_Kind (To_String (Issued)) = Expected,
+                Label & " certificate carries the key the request asked "
+                & "about, not the CA's");
+         Check (OpenSSL_Interop.Chain_Verifies
+                  (To_String (CA_Cert), To_String (Issued)),
+                Label & " certificate verifies against its CA in OpenSSL");
+      end One_Request;
+   begin
+      Check (CryptoLib.Certificates.Create_Local_CA ("csr-signing-ca",
+                                                     CA_Cert, CA_Key)
+             = CryptoLib.Certificates.Ok,
+             "a CA to sign requests with");
+
+      One_Request ("an Ed25519", CSR_Ed25519_PEM, CryptoLib.X509.Ed25519);
+      One_Request ("a P-384", CSR_P384_PEM, CryptoLib.X509.ECDSA_P384);
+      One_Request ("an Ed448", CSR_Ed448_PEM, CryptoLib.X509.Ed448);
+
+      --  A request is a claim to hold a key, and its signature is the only
+      --  thing behind that claim. Signing one that does not check would
+      --  certify a key to whoever asked rather than to whoever holds it.
+      declare
+         Issued : Unbounded_String;
+      begin
+         Check (CryptoLib.Certificates.Sign_CSR
+                  (To_String (CA_Cert), To_String (CA_Key),
+                   CSR_Ed448_Tampered_PEM, Issued)
+                /= CryptoLib.Certificates.Ok,
+                "a request whose own signature does not check is refused");
+         Check (Length (Issued) = 0,
+                "and no certificate comes out of it");
+      end;
+   end Check_CSR_Signing;
+
    procedure Check_X509_Extensions is
       use type CryptoLib.ASN1.Errors.Decode_Status;
       use type CryptoLib.PEM.Decode_Status;
@@ -10714,6 +10836,7 @@ begin
    Check_Unapplicable_Name_Constraint;
    Check_Ed448;
    Check_Ed448_Certificate;
+   Check_CSR_Signing;
    Check_Random_Fails_Closed;
    Check_Off_Curve_Key;
    Check_Ed25519_Encoding;

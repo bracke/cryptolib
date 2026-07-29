@@ -1842,6 +1842,50 @@ package body CryptoLib.Certificates is
          end if;
       end;
 
+      --  Then Ed448, whose key is 57 bytes and so tells itself apart from
+      --  both of the others by width alone. Extract_CSR checks the request's
+      --  own signature before any of this, which for an Ed448 request means
+      --  verifying an Ed448 signature -- something this crate could not do
+      --  until recently, and the reason such a request used to be refused
+      --  here whatever the CA was.
+      declare
+         Ed448_Public : Ada.Streams.Stream_Element_Array (1 .. 57);
+      begin
+         if Extract_CSR (CSR_PEM, Subject, Ed448_Public) then
+            declare
+               Serial_Value : constant String := Random_Serial (Rng);
+            begin
+               if Serial_Value = "" then
+                  Scrub;
+                  return Internal_Error;
+               end if;
+
+               Cert :=
+                 To_Unbounded_String
+                   (Sign_Certificate
+                      (Serial      => Serial_Value,
+                       Issuer_CN   => To_String (Issuer_Name),
+                       Subject_CN  => To_String (Subject),
+                       Subject_Key => Ed448_Public,
+                       Sign_Seed   => CA_Seed,
+                       Sign_Public => CA_Public,
+                       Profile     => Server_Profile,
+                       Names       => [1 => Subject],
+                       Algorithm   => Algorithm,
+                       Subject_Algorithm => Ed448_Key,
+                       Valid_Days  => Valid_Days));
+            end;
+
+            if Length (Cert) = 0 then
+               Scrub;
+               return Internal_Error;
+            end if;
+            Certificate_PEM := PEM ("CERTIFICATE", To_String (Cert));
+            Scrub;
+            return Ok;
+         end if;
+      end;
+
       if not Extract_CSR (CSR_PEM, Subject, CSR_Public) then
          Scrub;
          return Invalid_Input;
