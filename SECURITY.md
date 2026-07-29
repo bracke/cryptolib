@@ -26,7 +26,7 @@ The reference sources are:
 | ECDSA | P-256 (in `ssh_lib`), P-384 / P-521 sign; P-256 / P-384 / P-521 verify | **RFC 6979 A.2.5** (P-384, byte-exact) + P-521 (pyca cross-verified); verification against OpenSSL signatures on all three curves, including curve/digest pairings that differ (P-521 with SHA-256, P-384 with SHA-512) |
 | Finite-field DH | groups 1 / 14 / 16 / 18 | live vs OpenSSH; group16/18 pin the exact RFC 3526 primes |
 | Post-quantum | ML-KEM-768, sntrup761 (+ hybrid x25519 KEX) | NIST / live vs OpenSSH sntrup761x25519 |
-| X.509 (`Certificates`) | local CA, server/client/email issuance, CSR signing, PKCS#12 | PKCS#12 MAC key byte-exact vs OpenSSL; issued Ed25519 and P-384 certificates chain-verified against their CA by OpenSSL in the suite |
+| X.509 (`Certificates`) | local CA, server/client/email issuance, CSR signing, PKCS#12 | PKCS#12 MAC key byte-exact vs OpenSSL; issued Ed25519 and P-384 certificates chain-verified against their CA by OpenSSL in the suite; serials are 128-bit random and distinct per certificate |
 | PBES2 (`PBES2`, `PKCS8`, `PKCS12`) | password-based decryption: PBKDF2 over HMAC-SHA1/256/384/512, AES-128/192/256-CBC | keys written by `openssl pkcs8 -topk8` open to the byte-identical scalar OpenSSL holds; a wrong password is refused |
 | PKCS#12 (`PKCS12`) | reading a bundle, MAC verified before its contents are parsed | bundles written by this crate and by `openssl pkcs12 -export` both open, including OpenSSL's default layout with the certificates in encrypted content; the extracted certificates hash identically to the originals |
 | RSA | PKCS#1 v1.5 and PSS verification, SHA-256/384/512 | signatures produced by OpenSSL at 2048 and 3072 bits; a cube-root forgery against a low exponent is refused; PSS checked at both salt lengths OpenSSL emits, and a signature does not verify under a salt length or hash other than the one its parameters state |
@@ -187,6 +187,18 @@ The RNG **fails closed**: if no OS source is available it returns
   responders. The nonce must be unpredictable (`CryptoLib.Random`, not a
   counter); without one, a captured "good" response replays until its
   `nextUpdate`.
+- **An issued serial number is 128 bits of randomness, drawn per
+  certificate.** A revocation names a certificate by issuer and serial and by
+  nothing else -- both a CRL entry and an OCSP `CertID` key on it -- so two
+  certificates from one CA sharing a serial cannot be revoked apart. These
+  used to be hardcoded (1 for the CA, 10 for server certificates, 20 for
+  signed CSRs), which meant revoking any server certificate revoked every
+  server certificate that CA had issued; that was measured, not inferred. The
+  serial is drawn from `CryptoLib.Random`, made positive and minimally
+  encoded, and issuance fails closed if the RNG cannot supply bytes rather
+  than falling back on anything predictable. The width also puts the value
+  out of reach of an attacker who would need to predict it to attempt a
+  chosen-prefix collision against the signature hash.
 - **Malformed input comes back as a status, not an exception.** The decoders
   were run over 14,600 hostile inputs -- truncations at every prefix
   boundary, pathological lengths, nesting thousands deep, and structured

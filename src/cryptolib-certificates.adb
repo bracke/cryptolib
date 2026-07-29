@@ -278,6 +278,47 @@ package body CryptoLib.Certificates is
       return TLV (16#02#, Value (First .. Value'Last));
    end Integer_From_Bytes;
 
+   --  How many octets of randomness a serial number carries.
+   --
+   --  A serial has to be unique per issuer, because a revocation names a
+   --  certificate by issuer and serial and by nothing else: two certificates
+   --  sharing one cannot be revoked apart. Uniqueness by counting would mean
+   --  keeping state across calls, which this has nowhere to put, so it is
+   --  bought with entropy instead -- at this width a collision is not
+   --  something that happens. The width also puts the serial out of reach of
+   --  an attacker who wants to predict it, which is what a chosen-prefix
+   --  collision against the signature hash would need.
+   Serial_Octets : constant := 16;
+
+   --  Draw a serial. Empty when the source could not supply bytes, which the
+   --  caller must treat as a failure rather than fall back on something
+   --  predictable.
+   function Random_Serial
+     (Source : in out CryptoLib.Random.Random_Source) return String
+   is
+      Bytes : Ada.Streams.Stream_Element_Array (1 .. Serial_Octets);
+      Text  : String (1 .. Serial_Octets);
+   begin
+      if CryptoLib.Random.Fill (Source, Bytes) /= CryptoLib.Errors.Ok then
+         return "";
+      end if;
+
+      --  Positive, and with no leading zero octet to strip: RFC 5280 requires
+      --  a positive serial, and clearing the top bit gives one without the
+      --  encoder having to pad. Forcing the low bit keeps the first octet
+      --  non-zero so the encoding stays minimal at its full width.
+      Bytes (Bytes'First) :=
+        Ada.Streams."or"
+          (Ada.Streams."and" (Bytes (Bytes'First), 16#7F#), 16#01#);
+
+      for I in Text'Range loop
+         Text (I) :=
+           Character'Val
+             (Bytes (Bytes'First + Ada.Streams.Stream_Element_Offset (I - 1)));
+      end loop;
+      return Text;
+   end Random_Serial;
+
    function Name_DER (Common_Name : String) return String is
    begin
       return Seq
@@ -934,7 +975,7 @@ package body CryptoLib.Certificates is
    end Extensions_DER;
 
    function Sign_Certificate
-     (Serial      : Natural;
+     (Serial      : String;
       Issuer_CN   : String;
       Subject_CN  : String;
       Subject_Key : Ada.Streams.Stream_Element_Array;
@@ -950,7 +991,7 @@ package body CryptoLib.Certificates is
       TBS : constant String :=
         Seq
           (Explicit (0, Integer_DER (2))
-           & Integer_DER (Serial)
+           & Integer_From_Bytes (Serial)
            & Signature_Algorithm (Algorithm)
            & Name_DER (Issuer_CN)
            & Validity_DER
@@ -1166,19 +1207,29 @@ package body CryptoLib.Certificates is
             end if;
       end case;
 
-      Cert :=
-        To_Unbounded_String
-          (Sign_Certificate
-             (Serial      => 1,
-              Issuer_CN   => Common_Name,
-              Subject_CN  => Common_Name,
-              Subject_Key => Public,
-              Sign_Seed   => Seed,
-              Sign_Public => Public,
-              Profile     => CA_Profile,
-              Names       => [1 => To_Unbounded_String (Common_Name)],
-              Algorithm   => Algorithm,
-              Subject_Algorithm => Algorithm));
+      declare
+         Serial_Value : constant String := Random_Serial (Rng);
+      begin
+         if Serial_Value = "" then
+            Scrub;
+            return Internal_Error;
+         end if;
+
+         Cert :=
+           To_Unbounded_String
+             (Sign_Certificate
+                (Serial      => Serial_Value,
+                 Issuer_CN   => Common_Name,
+                 Subject_CN  => Common_Name,
+                 Subject_Key => Public,
+                 Sign_Seed   => Seed,
+                 Sign_Public => Public,
+                 Profile     => CA_Profile,
+                 Names       => [1 => To_Unbounded_String (Common_Name)],
+                 Algorithm   => Algorithm,
+                 Subject_Algorithm => Algorithm));
+      end;
+
       if Length (Cert) = 0 then
          Scrub;
          return Internal_Error;
@@ -1359,19 +1410,29 @@ package body CryptoLib.Certificates is
          return Internal_Error;
       end if;
 
-      Cert :=
-        To_Unbounded_String
-          (Sign_Certificate
-             (Serial      => 10,
-              Issuer_CN   => To_String (Issuer_Name),
-              Subject_CN  => Common_Name,
-              Subject_Key => Public,
-              Sign_Seed   => CA_Seed,
-              Sign_Public => CA_Public,
-              Profile     => Profile,
-              Names       => Names,
-              Algorithm   => Algorithm,
-              Subject_Algorithm => Algorithm));
+      declare
+         Serial_Value : constant String := Random_Serial (Rng);
+      begin
+         if Serial_Value = "" then
+            Scrub;
+            return Internal_Error;
+         end if;
+
+         Cert :=
+           To_Unbounded_String
+             (Sign_Certificate
+                (Serial      => Serial_Value,
+                 Issuer_CN   => To_String (Issuer_Name),
+                 Subject_CN  => Common_Name,
+                 Subject_Key => Public,
+                 Sign_Seed   => CA_Seed,
+                 Sign_Public => CA_Public,
+                 Profile     => Profile,
+                 Names       => Names,
+                 Algorithm   => Algorithm,
+                 Subject_Algorithm => Algorithm));
+      end;
+
       if Length (Cert) = 0 then
          Scrub;
          return Internal_Error;
@@ -1461,7 +1522,9 @@ package body CryptoLib.Certificates is
       --  only, whatever the CA itself is signed with.
       CSR_Public : Ada.Streams.Stream_Element_Array (1 .. 32);
       Cert      : Unbounded_String;
+      Rng       : CryptoLib.Random.Random_Source;
    begin
+      CryptoLib.Random.Initialize_Production (Rng);
       Certificate_PEM := Null_Unbounded_String;
       --  Without the CA's certificate there is no issuer name to sign with.
       if not Have_Issuer or else CA_Private_Key_PEM = "" or else CSR_PEM = ""
@@ -1499,19 +1562,29 @@ package body CryptoLib.Certificates is
          EC_Public : Ada.Streams.Stream_Element_Array (1 .. 97);
       begin
          if Extract_CSR (CSR_PEM, Subject, EC_Public) then
-            Cert :=
-              To_Unbounded_String
-                (Sign_Certificate
-                   (Serial      => 20,
-                    Issuer_CN   => To_String (Issuer_Name),
-                    Subject_CN  => To_String (Subject),
-                    Subject_Key => EC_Public,
-                    Sign_Seed   => CA_Seed,
-                    Sign_Public => CA_Public,
-                    Profile     => Server_Profile,
-                    Names       => [1 => Subject],
-                    Algorithm   => Algorithm,
-                    Subject_Algorithm => P384_Key));
+            declare
+               Serial_Value : constant String := Random_Serial (Rng);
+            begin
+               if Serial_Value = "" then
+                  Scrub;
+                  return Internal_Error;
+               end if;
+
+               Cert :=
+                 To_Unbounded_String
+                   (Sign_Certificate
+                      (Serial      => Serial_Value,
+                       Issuer_CN   => To_String (Issuer_Name),
+                       Subject_CN  => To_String (Subject),
+                       Subject_Key => EC_Public,
+                       Sign_Seed   => CA_Seed,
+                       Sign_Public => CA_Public,
+                       Profile     => Server_Profile,
+                       Names       => [1 => Subject],
+                       Algorithm   => Algorithm,
+                       Subject_Algorithm => P384_Key));
+            end;
+
             if Length (Cert) = 0 then
                Scrub;
                return Internal_Error;
@@ -1527,19 +1600,29 @@ package body CryptoLib.Certificates is
          return Invalid_Input;
       end if;
 
-      Cert :=
-        To_Unbounded_String
-          (Sign_Certificate
-             (Serial      => 20,
-              Issuer_CN   => To_String (Issuer_Name),
-              Subject_CN  => To_String (Subject),
-              Subject_Key => CSR_Public,
-              Sign_Seed   => CA_Seed,
-              Sign_Public => CA_Public,
-              Profile     => Server_Profile,
-              Names       => [1 => Subject],
-              Algorithm   => Algorithm,
-              Subject_Algorithm => Ed25519_Key));
+      declare
+         Serial_Value : constant String := Random_Serial (Rng);
+      begin
+         if Serial_Value = "" then
+            Scrub;
+            return Internal_Error;
+         end if;
+
+         Cert :=
+           To_Unbounded_String
+             (Sign_Certificate
+                (Serial      => Serial_Value,
+                 Issuer_CN   => To_String (Issuer_Name),
+                 Subject_CN  => To_String (Subject),
+                 Subject_Key => CSR_Public,
+                 Sign_Seed   => CA_Seed,
+                 Sign_Public => CA_Public,
+                 Profile     => Server_Profile,
+                 Names       => [1 => Subject],
+                 Algorithm   => Algorithm,
+                 Subject_Algorithm => Ed25519_Key));
+      end;
+
       if Length (Cert) = 0 then
          Scrub;
          return Internal_Error;

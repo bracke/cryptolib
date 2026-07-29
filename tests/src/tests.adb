@@ -2359,6 +2359,95 @@ procedure Tests is
       end;
    end Check_Decoder_Robustness;
 
+   --  A serial number names a certificate. A revocation names a certificate
+   --  by issuer and serial and by nothing else, so two certificates from one
+   --  CA sharing a serial cannot be revoked apart: revoking either revokes
+   --  both, and there is no way to revoke just one. These used to be
+   --  hardcoded, so every server certificate this crate issued carried the
+   --  same one.
+   procedure Check_Serial_Numbers is
+      use type CryptoLib.ASN1.Errors.Decode_Status;
+
+      package X509C renames CryptoLib.X509.Certificates;
+
+      function Decoded (Text : String) return X509C.Certificate is
+         Buffer : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset
+                   (CryptoLib.PEM.Maximum_Decoded_Length (Text)));
+         Last   : Ada.Streams.Stream_Element_Offset;
+         From   : Positive := Text'First;
+         P      : CryptoLib.PEM.Decode_Status;
+         D      : CryptoLib.ASN1.Errors.Decode_Status;
+      begin
+         CryptoLib.PEM.Decode_Block
+           (Text, CryptoLib.PEM.Certificate_Label, From, Buffer, Last, P);
+         return X509C.Decode_DER
+           (Buffer (Buffer'First .. Last), CryptoLib.ASN1.Default_Limits, D);
+      end Decoded;
+
+      CA_PEM, CA_Key   : Unbounded_String;
+      A_PEM, A_Key     : Unbounded_String;
+      B_PEM, B_Key     : Unbounded_String;
+      Outcome          : CryptoLib.Certificates.Certificate_Status;
+
+      --  Enough that a collision is not a thing that happens, and enough to
+      --  put the value out of reach of anyone wanting to predict it.
+      Minimum_Octets : constant := 8;
+   begin
+      Outcome :=
+        CryptoLib.Certificates.Create_Local_CA
+          ("serial-ca", CA_PEM, CA_Key, CryptoLib.Certificates.P384_Key);
+      Check (Outcome = CryptoLib.Certificates.Ok, "fixture: CA created");
+
+      Outcome :=
+        CryptoLib.Certificates.Issue_Server_Certificate
+          (To_String (CA_PEM), To_String (CA_Key), "alpha.example",
+           [1 => To_Unbounded_String ("alpha.example")], A_PEM, A_Key);
+      Check (Outcome = CryptoLib.Certificates.Ok, "fixture: alpha issued");
+
+      Outcome :=
+        CryptoLib.Certificates.Issue_Server_Certificate
+          (To_String (CA_PEM), To_String (CA_Key), "beta.example",
+           [1 => To_Unbounded_String ("beta.example")], B_PEM, B_Key);
+      Check (Outcome = CryptoLib.Certificates.Ok, "fixture: beta issued");
+
+      declare
+         CA    : constant X509C.Certificate := Decoded (To_String (CA_PEM));
+         Alpha : constant X509C.Certificate := Decoded (To_String (A_PEM));
+         Beta  : constant X509C.Certificate := Decoded (To_String (B_PEM));
+
+         SA : constant Ada.Streams.Stream_Element_Array :=
+           X509C.Serial_Number (Alpha);
+         SB : constant Ada.Streams.Stream_Element_Array :=
+           X509C.Serial_Number (Beta);
+         SC : constant Ada.Streams.Stream_Element_Array :=
+           X509C.Serial_Number (CA);
+      begin
+         Check (X509C.Is_Present (Alpha) and then X509C.Is_Present (Beta),
+                "fixture: both certificates decode");
+
+         --  The property that matters.
+         Check (SA /= SB,
+                "two certificates from one CA get different serials");
+         Check (SA /= SC and then SB /= SC,
+                "and neither collides with the CA's own");
+
+         Check (SA'Length >= Minimum_Octets and then SB'Length >= Minimum_Octets,
+                "a serial carries real width, got"
+                & Ada.Streams.Stream_Element_Offset'Image (SA'Length)
+                & " octets");
+
+         --  RFC 5280 requires a positive serial. The encoding is the content
+         --  octets of an INTEGER, so a leading octet at or above 16#80#
+         --  would make it negative, and a leading zero would mean the
+         --  encoder padded one that was.
+         Check (SA (SA'First) < 16#80# and then SB (SB'First) < 16#80#,
+                "a serial is positive");
+         Check (SA (SA'First) /= 0 and then SB (SB'First) /= 0,
+                "and minimally encoded, with no padding octet");
+      end;
+   end Check_Serial_Numbers;
+
    procedure Check_X509_Extensions is
       use type CryptoLib.ASN1.Errors.Decode_Status;
       use type CryptoLib.PEM.Decode_Status;
@@ -7203,6 +7292,7 @@ begin
    Check_X509_Decode;
    Check_X509_Verify;
    Check_X509_Extensions;
+   Check_Serial_Numbers;
    Check_Decoder_Robustness;
    Check_Certificate_Ambiguity;
    Check_X509_Access_Locations;
