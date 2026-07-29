@@ -3101,6 +3101,74 @@ procedure Tests is
              "the same key with the sign bit set is refused");
    end Check_Ed25519_Encoding;
 
+   --  What a bundle costs to open is a number the bundle chooses.
+   --
+   --  A PKCS#12 file states its own iteration counts, twice -- once for the
+   --  MAC and once for the encryption -- and both are paid before anything
+   --  in the file has been believed. Open had no way to be told a ceiling,
+   --  and the one it used internally allows about forty-five seconds of CPU
+   --  per file here. That is a person opening a file they chose; it is not a
+   --  service opening one that arrived.
+   procedure Check_PKCS12_Work_Ceiling is
+      use type CryptoLib.PKCS12.Open_Status;
+
+      package P12 renames CryptoLib.PKCS12;
+
+      Written : constant := 32_768;
+
+      CA_PEM, CA_Key, Bundle : Unbounded_String;
+      Outcome : CryptoLib.Certificates.Certificate_Status;
+   begin
+      Outcome :=
+        CryptoLib.Certificates.Create_Local_CA
+          ("ceiling-ca", CA_PEM, CA_Key, CryptoLib.Certificates.P384_Key);
+      Check (Outcome = CryptoLib.Certificates.Ok, "fixture: CA created");
+
+      Outcome :=
+        CryptoLib.Certificates.Generate_PKCS12
+          (To_String (CA_PEM), To_String (CA_Key), "ceiling", "secret",
+           Bundle, Iterations => Written);
+      Check (Outcome = CryptoLib.Certificates.Ok, "fixture: bundle written");
+
+      declare
+         Text : constant String := To_String (Bundle);
+         Raw  : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (Text'Length));
+      begin
+         for I in Text'Range loop
+            Raw (Ada.Streams.Stream_Element_Offset (I - Text'First + 1)) :=
+              Character'Pos (Text (I));
+         end loop;
+
+         --  Allowed the work, it opens.
+         declare
+            Item : P12.Bundle;
+            St   : P12.Open_Status;
+         begin
+            P12.Open (Raw, "secret", CryptoLib.ASN1.Default_Limits, Item, St,
+                      Maximum_Iterations => Written);
+            Check (St = P12.Ok,
+                   "a bundle within the ceiling opens, got "
+                   & P12.Status_Image (St));
+         end;
+
+         --  Told to spend less than the bundle asks, it refuses. The
+         --  password is right; what is wrong is the price.
+         declare
+            Item : P12.Bundle;
+            St   : P12.Open_Status;
+         begin
+            P12.Open (Raw, "secret", CryptoLib.ASN1.Default_Limits, Item, St,
+                      Maximum_Iterations => Written - 1);
+            Check (St /= P12.Ok,
+                   "and a bundle asking for more than the caller allows does "
+                   & "not, got " & P12.Status_Image (St));
+            Check (not P12.Is_Present (Item),
+                   "with nothing decoded from it");
+         end;
+      end;
+   end Check_PKCS12_Work_Ceiling;
+
    procedure Check_X509_Extensions is
       use type CryptoLib.ASN1.Errors.Decode_Status;
       use type CryptoLib.PEM.Decode_Status;
@@ -7951,6 +8019,7 @@ begin
    Check_Validity_Window;
    Check_Key_Identifiers;
    Check_PKCS12_Work_Factor;
+   Check_PKCS12_Work_Ceiling;
    Check_Large_Certificate;
    Check_Oversized_Serial;
    Check_Decoder_Robustness;

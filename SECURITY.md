@@ -217,6 +217,19 @@ The RNG **fails closed**: if no OS source is available it returns
   responders. The nonce must be unpredictable (`CryptoLib.Random`, not a
   counter); without one, a captured "good" response replays until its
   `nextUpdate`.
+- **How much work opening a bundle costs is now the caller's to bound.** A
+  PKCS#12 file states its own iteration counts twice -- once for the MAC and
+  once for the encryption -- and both are paid before anything in the file
+  has been believed. `Open` had no parameter for it and used a ceiling of ten
+  million internally, which is about **forty-five seconds** of CPU per file
+  here (~2.4s for the SHA-1 MAC KDF, ~42s for PBKDF2-HMAC-SHA256, measured).
+  That is acceptable for a person opening a file they chose and not for a
+  service opening one that arrived. `Open` now takes `Maximum_Iterations`,
+  applied to both counts and checked *before* the derivation rather than
+  after. The default is unchanged, so nothing silently starts refusing files;
+  a caller handling untrusted bundles should pass something far smaller.
+  Legitimate files are nowhere near the ceiling -- `openssl pkcs12 -export`
+  writes 2048 and this crate writes 600,000.
 - **Opening a PKCS#12 bundle costs real work.** The bundle holds a private
   key, so a copy of one is an offline guessing target and the iteration count
   is the only thing between a weak password and the key. It was 2048 -- what

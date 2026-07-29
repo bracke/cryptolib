@@ -5,7 +5,6 @@ with CryptoLib.ASN1.Errors;
 with CryptoLib.ASN1.OIDs;
 with CryptoLib.Constant_Time;
 with CryptoLib.Macs;
-with CryptoLib.PBES2;
 with CryptoLib.Secure_Wipe;
 
 package body CryptoLib.PKCS12 is
@@ -304,7 +303,8 @@ package body CryptoLib.PKCS12 is
       Password : String;
       Limits   : Decode_Limits;
       Item     : out Bundle;
-      Status   : out Open_Status)
+      Status   : out Open_Status;
+      Maximum_Iterations : Natural := Default_Maximum_Iterations)
    is
       Parse   : CryptoLib.ASN1.Errors.Decode_Status;
       Cursor  : Offset;
@@ -438,7 +438,9 @@ package body CryptoLib.PKCS12 is
             end if;
          end if;
 
-         if Rounds = 0 or else Rounds > 10_000_000 then
+         --  Before the derivation, not after: the point is not to notice
+         --  afterwards that it cost too much.
+         if Rounds = 0 or else Rounds > Maximum_Iterations then
             Status := Unsupported_Scheme;
             return;
          end if;
@@ -617,7 +619,8 @@ package body CryptoLib.PKCS12 is
                            Limits     => Limits,
                            Output     => Plain,
                            Last       => Last,
-                           Status     => Undo);
+                           Status     => Undo,
+                           Maximum_Iterations => Maximum_Iterations);
 
                         if Undo = CryptoLib.PBES2.Unsupported_Scheme then
                            Status := Unsupported_Scheme;

@@ -1,6 +1,7 @@
 private with Ada.Finalization;
 
 with CryptoLib.ASN1;
+with CryptoLib.PBES2;
 with CryptoLib.PKCS8;
 with CryptoLib.X509;
 
@@ -63,12 +64,36 @@ package CryptoLib.PKCS12 is
    --  @param Limits the bounds the caller is willing to decode within
    --  @param Item receives the bundle's contents
    --  @param Status Ok on success, otherwise why it was not opened
+   --  The most derivation work opening a bundle may cost.
+   --
+   --  A bundle states its own iteration counts, twice: once for the MAC and
+   --  once for the encryption. Both are numbers in a file somebody else
+   --  wrote, and both are paid before anything in the file has been
+   --  believed. At the ceiling this defaults to, a single bundle costs about
+   --  forty-five seconds of CPU here -- fine for a person opening a file
+   --  they chose, not fine for a service opening one that arrived.
+   --
+   --  Legitimate bundles are nowhere near it: `openssl pkcs12 -export`
+   --  writes 2048 and this crate writes 600,000. A caller that opens
+   --  untrusted bundles should say so with a much smaller number.
+   Default_Maximum_Iterations : constant :=
+     CryptoLib.PBES2.Default_Maximum_Iterations;
+
+   --  Open a bundle: verify its MAC, then decode what it holds.
+   --  @param Data the bundle's DER
+   --  @param Password the password protecting it
+   --  @param Limits the bounds the caller is willing to decode within
+   --  @param Item receives the opened bundle
+   --  @param Status Ok on success, otherwise why nothing was opened
+   --  @param Maximum_Iterations the most derivation work to do before
+   --  refusing, counted separately for the MAC and for the encryption
    procedure Open
      (Data     : Octets;
       Password : String;
       Limits   : Decode_Limits;
       Item     : out Bundle;
-      Status   : out Open_Status);
+      Status   : out Open_Status;
+      Maximum_Iterations : Natural := Default_Maximum_Iterations);
 
    --  Did this open?
    --  @param Item the bundle to inspect
