@@ -9593,6 +9593,107 @@ procedure Tests is
          end;
       end;
 
+      --  The primes and CRT parameters, checked by using them rather than by
+      --  restating how they were computed.
+      --
+      --  A CRT signature is reconstructed from dp, dq and the coefficient and
+      --  required to equal the ordinary one. That exercises all three at once
+      --  and cannot be satisfied by a wrong value the way "dp is the inverse
+      --  of e mod p-1" could be -- that would just re-run the code that made
+      --  it. This crate does not sign with CRT; the arithmetic is here only to
+      --  hold the parameters it hands out to being the right ones.
+      declare
+         package BN renames CryptoLib.Bignum;
+         Half : constant Ada.Streams.Stream_Element_Offset := 128;
+         N  : Ada.Streams.Stream_Element_Array (1 .. 256);
+         E  : Ada.Streams.Stream_Element_Array (1 .. 3);
+         D  : Ada.Streams.Stream_Element_Array (1 .. 256);
+         P, Q, DP, DQ, QI : Ada.Streams.Stream_Element_Array (1 .. Half);
+      begin
+         Check (R.Generate_Keypair_With_Primes
+                  (R.RSA_2048, Rng, N, E, D, P, Q, DP, DQ, QI)
+                  = CryptoLib.Errors.Ok,
+                "RSA generates a keypair with its primes");
+
+         --  p*q must be the modulus.
+         declare
+            Product : Ada.Streams.Stream_Element_Array (1 .. 256);
+            Fits    : Boolean;
+         begin
+            BN.Resize (BN.Multiply (P, Q), Product'Length, Product, Fits);
+            Check (Fits and then Product = N, "the primes multiply to n");
+         end;
+
+         --  q * qinv = 1 mod p. p is odd, so the modular multiply applies.
+         declare
+            One : Ada.Streams.Stream_Element_Array (1 .. Half) :=
+              [others => 0];
+         begin
+            One (One'Last) := 1;
+            Check (CryptoLib.Modexp.Mod_Mul (Q, QI, P) = One,
+                   "the coefficient is q inverse modulo p");
+         end;
+
+         --  Reconstruct a signature through the CRT and compare.
+         declare
+            Base : Ada.Streams.Stream_Element_Array (1 .. 256) :=
+              [others => 0];
+            Small : Ada.Streams.Stream_Element_Array (1 .. Half) :=
+              [others => 0];
+            Plain : Ada.Streams.Stream_Element_Array (1 .. 256);
+         begin
+            Base (Base'Last) := 42;
+            Small (Small'Last) := 42;         --  below both primes
+            Plain := CryptoLib.Modexp.Mod_Exp (Base, D, N);
+
+            declare
+               S1 : constant Ada.Streams.Stream_Element_Array :=
+                 CryptoLib.Modexp.Mod_Exp (Small, DP, P);
+               S2_Raw : constant Ada.Streams.Stream_Element_Array :=
+                 CryptoLib.Modexp.Mod_Exp (Small, DQ, Q);
+               --  Two copies on purpose. Garner's formula needs s2 reduced
+               --  mod p inside the difference, and the *unreduced* s2 in the
+               --  final sum -- reducing it once and using it for both is
+               --  wrong, which is how the first version of this test failed
+               --  against parameters OpenSSL had already called correct.
+               S2_Mod_P : Ada.Streams.Stream_Element_Array (1 .. Half) :=
+                 S2_Raw;
+               Diff : Ada.Streams.Stream_Element_Array (1 .. Half);
+               Combined : Ada.Streams.Stream_Element_Array (1 .. 256);
+               Fits : Boolean;
+            begin
+               --  q may exceed p, so bring the copy below p; one subtraction
+               --  suffices because the primes are within a bit of each other.
+               if BN.Compare (S2_Mod_P, P) >= 0 then
+                  S2_Mod_P := BN.Subtract (S2_Mod_P, P);
+               end if;
+               if BN.Compare (S1, S2_Mod_P) >= 0 then
+                  Diff := BN.Subtract (S1, S2_Mod_P);
+               else
+                  declare
+                     Lifted : Ada.Streams.Stream_Element_Array (1 .. Half + 1);
+                     Held   : Boolean;
+                  begin
+                     BN.Resize (BN.Add (S1, P), Lifted'Length, Lifted, Held);
+                     Diff := BN.Subtract (Lifted, S2_Mod_P) (2 .. Half + 1);
+                  end;
+               end if;
+               declare
+                  H : constant Ada.Streams.Stream_Element_Array :=
+                    CryptoLib.Modexp.Mod_Mul (QI, Diff, P);
+                  HQ : constant Ada.Streams.Stream_Element_Array :=
+                    BN.Multiply (H, Q);
+               begin
+                  BN.Resize (BN.Add (HQ, S2_Raw), Combined'Length,
+                             Combined, Fits);
+                  Check (Fits and then Combined = Plain,
+                         "a CRT signature rebuilt from dp, dq and the "
+                         & "coefficient equals the ordinary one");
+               end;
+            end;
+         end;
+      end;
+
       --  Blinding cannot be seen in the output -- that is the point of it,
       --  the signature is identical either way, and the byte-exact vectors
       --  above would pass with it removed. What can be seen is that the

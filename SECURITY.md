@@ -281,6 +281,19 @@ every status reading `Ok` while every key it produces is predictable.
   fault mode CRT is notorious for; it is also why the CRT parameters in a
   PKCS#8 key are parsed past rather than surfaced.
 
+  `Generate_Keypair_With_Primes` hands back the primes and CRT parameters as
+  well, which is what a caller needs to write a private key any other
+  implementation will read: RFC 3447's RSAPrivateKey has prime1, prime2,
+  exponent1, exponent2 and coefficient as required fields, so a key missing
+  them is not a key file. They cost no new arithmetic -- exponent1 is d mod
+  (p-1), which is the same value as the inverse of e modulo p-1, and the
+  coefficient is q inverse modulo p, so both come from inverses key generation
+  already had. This crate still signs without them. A key built from all nine
+  values is accepted by pyca, signs correctly through pyca's CRT path, and
+  `openssl rsa -check` calls it ok; the suite holds the three CRT parameters
+  by rebuilding a signature through Garner's formula and requiring it to equal
+  the ordinary one, which no single wrong value can satisfy.
+
   Key generation draws two primes with their top two bits set, trial-divides
   by the primes below 1000, and runs 24 Miller-Rabin rounds. The private
   exponent is required to exceed the square root of the modulus, which puts it

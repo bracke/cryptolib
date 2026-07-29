@@ -858,12 +858,20 @@ package body CryptoLib.RSA is
       return Ok;
    end Inverse_Of_E;
 
-   function Generate_Keypair
+   --  One body. Generate_Keypair below throws the primes away rather than
+   --  running a second, near-identical generator that could drift from this
+   --  one.
+   function Generate_Keypair_With_Primes
      (Size             : Modulus_Size;
       Rng              : in out CryptoLib.Random.Random_Source;
       Modulus          : out Octets;
       Public_Exponent  : out Octets;
-      Private_Exponent : out Octets) return CryptoLib.Errors.Status
+      Private_Exponent : out Octets;
+      Prime_P          : out Octets;
+      Prime_Q          : out Octets;
+      Exponent_P       : out Octets;
+      Exponent_Q       : out Octets;
+      Coefficient      : out Octets) return CryptoLib.Errors.Status
    is
       package BN renames CryptoLib.Bignum;
       use type CryptoLib.Errors.Status;
@@ -875,10 +883,20 @@ package body CryptoLib.RSA is
       Modulus := [others => 0];
       Public_Exponent := [others => 0];
       Private_Exponent := [others => 0];
+      Prime_P := [others => 0];
+      Prime_Q := [others => 0];
+      Exponent_P := [others => 0];
+      Exponent_Q := [others => 0];
+      Coefficient := [others => 0];
 
       if Natural (Modulus'Length) /= K
         or else Natural (Private_Exponent'Length) /= K
         or else Public_Exponent'Length /= 3
+        or else Prime_P'Length /= Half
+        or else Prime_Q'Length /= Half
+        or else Exponent_P'Length /= Half
+        or else Exponent_Q'Length /= Half
+        or else Coefficient'Length /= Half
       then
          return CryptoLib.Errors.Handshake_Failed;
       end if;
@@ -950,6 +968,41 @@ package body CryptoLib.RSA is
                   Scrub_All;
                   goto Continue;
                end if;
+
+               --  The CRT parameters, from inverses rather than divisions:
+               --  e*dp = 1 mod (p-1) makes dp the same value as d mod (p-1),
+               --  and the coefficient is q inverse mod p, which the binary
+               --  extended Euclid gives since p is odd.
+               declare
+                  P_Minus : constant Octets := BN.Subtract_Small (P, 1);
+                  Q_Minus : constant Octets := BN.Subtract_Small (Q, 1);
+                  DP, DQ, QI : Octets (1 .. Half) := [others => 0];
+                  Fine : Boolean;
+               begin
+                  CryptoLib.Bignum.Mod_Inverse_Small
+                    (Generated_Public_Exponent, P_Minus, DP, Fine);
+                  if not Fine then
+                     Scrub_All;
+                     goto Continue;
+                  end if;
+                  CryptoLib.Bignum.Mod_Inverse_Small
+                    (Generated_Public_Exponent, Q_Minus, DQ, Fine);
+                  if not Fine then
+                     Scrub_All;
+                     goto Continue;
+                  end if;
+                  CryptoLib.Bignum.Mod_Inverse (Q, P, QI, Fine);
+                  if not Fine then
+                     Scrub_All;
+                     goto Continue;
+                  end if;
+                  Exponent_P := DP;
+                  Exponent_Q := DQ;
+                  Coefficient := QI;
+               end;
+
+               Prime_P := P;
+               Prime_Q := Q;
                Private_Exponent := D;
                Public_Exponent := [16#01#, 16#00#, 16#01#];
                Scrub_All;
@@ -974,6 +1027,11 @@ package body CryptoLib.RSA is
                      CryptoLib.Secure_Wipe.Wipe
                        (Private_Exponent'Address, Private_Exponent'Length);
                      Private_Exponent := [others => 0];
+                     Prime_P := [others => 0];
+                     Prime_Q := [others => 0];
+                     Exponent_P := [others => 0];
+                     Exponent_Q := [others => 0];
+                     Coefficient := [others => 0];
                      goto Continue;
                   end if;
                end;
@@ -986,6 +1044,8 @@ package body CryptoLib.RSA is
       Modulus := [others => 0];
       Public_Exponent := [others => 0];
       Private_Exponent := [others => 0];
+      Prime_P := [others => 0];
+      Prime_Q := [others => 0];
       return CryptoLib.Errors.Internal_Error;
    exception
       when others =>
@@ -994,7 +1054,43 @@ package body CryptoLib.RSA is
          CryptoLib.Secure_Wipe.Wipe
            (Private_Exponent'Address, Private_Exponent'Length);
          Private_Exponent := [others => 0];
+         CryptoLib.Secure_Wipe.Wipe (Prime_P'Address, Prime_P'Length);
+         CryptoLib.Secure_Wipe.Wipe (Prime_Q'Address, Prime_Q'Length);
+         Prime_P := [others => 0];
+         Prime_Q := [others => 0];
+         Exponent_P := [others => 0];
+         Exponent_Q := [others => 0];
+         Coefficient := [others => 0];
          return CryptoLib.Errors.Internal_Error;
+   end Generate_Keypair_With_Primes;
+
+   function Generate_Keypair
+     (Size             : Modulus_Size;
+      Rng              : in out CryptoLib.Random.Random_Source;
+      Modulus          : out Octets;
+      Public_Exponent  : out Octets;
+      Private_Exponent : out Octets) return CryptoLib.Errors.Status
+   is
+      Half : constant Offset := Offset (Modulus_Octets (Size)) / 2;
+      P, Q, DP, DQ, QI : Octets (1 .. Half) := [others => 0];
+      Result : CryptoLib.Errors.Status;
+
+      procedure Scrub is
+      begin
+         CryptoLib.Secure_Wipe.Wipe (P'Address, P'Length);
+         CryptoLib.Secure_Wipe.Wipe (Q'Address, Q'Length);
+         CryptoLib.Secure_Wipe.Wipe (DP'Address, DP'Length);
+         CryptoLib.Secure_Wipe.Wipe (DQ'Address, DQ'Length);
+         CryptoLib.Secure_Wipe.Wipe (QI'Address, QI'Length);
+      end Scrub;
+   begin
+      Result := Generate_Keypair_With_Primes
+        (Size, Rng, Modulus, Public_Exponent, Private_Exponent,
+         P, Q, DP, DQ, QI);
+      --  The primes and CRT parameters are wiped rather than returned: a
+      --  caller of this face asked for what signing needs.
+      Scrub;
+      return Result;
    end Generate_Keypair;
 
 end CryptoLib.RSA;

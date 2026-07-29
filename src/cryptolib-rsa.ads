@@ -233,6 +233,45 @@ package CryptoLib.RSA is
       Private_Exponent : out Ada.Streams.Stream_Element_Array)
       return CryptoLib.Errors.Status;
 
+   --  Generate a keypair and hand back the primes and CRT parameters too.
+   --
+   --  Everything an RSAPrivateKey carries, which is what a caller needs to
+   --  write a private key any other implementation will read: PKCS#8 around
+   --  RFC 3447's structure has prime1, prime2, exponent1, exponent2 and
+   --  coefficient as required fields, so a key missing them is not a key file.
+   --
+   --  This crate signs without them -- see the package summary on CRT -- so
+   --  Generate_Keypair, which returns only what signing needs, is the one to
+   --  call unless the key has to be written out.
+   --
+   --  The CRT parameters come from the same inverses key generation already
+   --  computes and need no division: exponent1 is d mod (p-1), which is also
+   --  the inverse of e modulo p-1, and coefficient is q inverse modulo p.
+   --  @param Size             which modulus width to generate
+   --  @param Rng              the random source the primes are drawn from
+   --  @param Modulus          out: n, Size octets
+   --  @param Public_Exponent  out: 65537 as three octets
+   --  @param Private_Exponent out: d, as wide as the modulus
+   --  @param Prime_P          out: p, half the modulus width
+   --  @param Prime_Q          out: q, half the modulus width
+   --  @param Exponent_P       out: d mod (p-1), half the modulus width
+   --  @param Exponent_Q       out: d mod (q-1), half the modulus width
+   --  @param Coefficient      out: q inverse mod p, half the modulus width
+   --  @return Ok, Handshake_Failed on a wrong-length output buffer,
+   --    Internal_Error when the random source fails or no key is found
+   function Generate_Keypair_With_Primes
+     (Size             : Modulus_Size;
+      Rng              : in out CryptoLib.Random.Random_Source;
+      Modulus          : out Ada.Streams.Stream_Element_Array;
+      Public_Exponent  : out Ada.Streams.Stream_Element_Array;
+      Private_Exponent : out Ada.Streams.Stream_Element_Array;
+      Prime_P          : out Ada.Streams.Stream_Element_Array;
+      Prime_Q          : out Ada.Streams.Stream_Element_Array;
+      Exponent_P       : out Ada.Streams.Stream_Element_Array;
+      Exponent_Q       : out Ada.Streams.Stream_Element_Array;
+      Coefficient      : out Ada.Streams.Stream_Element_Array)
+      return CryptoLib.Errors.Status;
+
    --  The modulus width in octets for a size.
    --  @param Size which modulus width
    --  @return 256, 384 or 512
