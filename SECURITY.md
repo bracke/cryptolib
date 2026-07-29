@@ -121,6 +121,12 @@ by the project file (`src-linux` / `src-windows`):
 
 The RNG **fails closed**: if no OS source is available it returns
 `Internal_Error` and zeroes the buffer rather than emitting weak randomness.
+The suite holds it to that -- the failure is checked at the source, the buffer
+is checked to be zeroed rather than left as the caller supplied it, and the
+failure is checked to reach the callers that matter: neither an ECDSA nor an
+Ed25519 key pair is produced without randomness. The regression this guards
+against is quiet, since a fallback that makes a failing source "work" leaves
+every status reading `Ok` while every key it produces is predictable.
 `Deterministic_Mode` / `Failing_Mode` exist only for reproducible tests.
 
 ## Known limitations

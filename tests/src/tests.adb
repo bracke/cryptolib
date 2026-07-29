@@ -3329,6 +3329,85 @@ procedure Tests is
              & XV.Failure_Image (Verdict (Inhibit).Failure));
    end Check_Policy_Extensions;
 
+   --  What happens when there is no randomness.
+   --
+   --  The RNG is documented to fail closed: no OS source means
+   --  Internal_Error and a zeroed buffer, never weak bytes. Nothing tested
+   --  that, and the regression it invites is quiet -- somebody making a
+   --  failing source "work" by falling back to something deterministic
+   --  leaves no trace, and every key generated afterwards is predictable
+   --  while every status still reads Ok.
+   --
+   --  So this checks the failure at the source and then that it propagates:
+   --  a key generator handed a source that cannot deliver must refuse rather
+   --  than build a key out of whatever the buffer happened to hold.
+   procedure Check_Random_Fails_Closed is
+      Rng    : CryptoLib.Random.Random_Source;
+      Buffer : Ada.Streams.Stream_Element_Array (1 .. 32) := [others => 16#AA#];
+   begin
+      CryptoLib.Random.Initialize_Failing (Rng);
+
+      Check (CryptoLib.Random.Fill (Rng, Buffer) /= CryptoLib.Errors.Ok,
+             "a source that cannot deliver says so");
+
+      --  Zeroed, not left as it was: a caller that ignores the status must
+      --  not find the bytes it supplied looking like fresh randomness.
+      declare
+         Untouched : Boolean := False;
+      begin
+         for B of Buffer loop
+            if B /= 0 then
+               Untouched := True;
+            end if;
+         end loop;
+         Check (not Untouched,
+                "and leaves nothing behind that could pass for randomness");
+      end;
+
+      --  The failure has to reach the caller of a key generator, not be
+      --  swallowed into a key made of zeros.
+      declare
+         Seed   : Ada.Streams.Stream_Element_Array (1 .. 48) :=
+           [others => 16#BB#];
+         Public : Ada.Streams.Stream_Element_Array (1 .. 97) :=
+           [others => 16#CC#];
+      begin
+         Check (CryptoLib.ECDSA.Generate_Nistp384_Keypair (Rng, Seed, Public)
+                /= CryptoLib.Errors.Ok,
+                "a P-384 key pair is not generated without randomness");
+      end;
+
+      declare
+         Seed_25519   : Ada.Streams.Stream_Element_Array (1 .. 32) :=
+           [others => 16#BB#];
+         Public_25519 : Ada.Streams.Stream_Element_Array (1 .. 32) :=
+           [others => 16#CC#];
+      begin
+         Check (CryptoLib.Ed25519.Generate_Keypair
+                  (Rng, Seed_25519, Public_25519)
+                /= CryptoLib.Errors.Ok,
+                "nor an Ed25519 one");
+      end;
+
+      --  And the production source still works, so the checks above are
+      --  about the failing mode rather than about these calls always failing.
+      declare
+         Live   : CryptoLib.Random.Random_Source;
+         Sample : Ada.Streams.Stream_Element_Array (1 .. 32) := [others => 0];
+         Any    : Boolean := False;
+      begin
+         CryptoLib.Random.Initialize_Production (Live);
+         Check (CryptoLib.Random.Fill (Live, Sample) = CryptoLib.Errors.Ok,
+                "the production source delivers");
+         for B of Sample loop
+            if B /= 0 then
+               Any := True;
+            end if;
+         end loop;
+         Check (Any, "and delivers something other than zeros");
+      end;
+   end Check_Random_Fails_Closed;
+
    procedure Check_X509_Extensions is
       use type CryptoLib.ASN1.Errors.Decode_Status;
       use type CryptoLib.PEM.Decode_Status;
@@ -8174,6 +8253,7 @@ begin
    Check_X509_Verify;
    Check_X509_Extensions;
    Check_Policy_Extensions;
+   Check_Random_Fails_Closed;
    Check_Off_Curve_Key;
    Check_Ed25519_Encoding;
    Check_Serial_Numbers;
