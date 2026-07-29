@@ -169,7 +169,12 @@ every status reading `Ok` while every key it produces is predictable.
   signature, so "we did not check" is never mistaken for "the signature was
   bad" -- RSA-PSS whose parameters name a hash this crate does not implement
   lands there. RSA verification touches only public values, so nothing in it needs to
-  be constant-time.
+  be constant-time. That distinction is pinned by an Ed448 certificate
+  OpenSSL made and signed: it decodes, its key algorithm is named, and its
+  perfectly good self-signature comes back `Unsupported_Algorithm` rather
+  than `Invalid_Signature`. `Identities` reports `Unsupported_Key` for the
+  same pair rather than `Key_Mismatch` -- the key does belong to the
+  certificate, and saying otherwise would be a claim this cannot support.
 - **Path validation checks a supplied path; it does not build one.**
   `X509.Validation` verifies signatures along a chain, issuer/subject linkage,
   validity windows against a caller-supplied time, basic constraints and path
@@ -248,7 +253,10 @@ every status reading `Ok` while every key it produces is predictable.
   self-signed certificate is not an anchor unless the caller says so.
 - **Revocation is available but not wired into validation.** `X509.CRLs`
   decodes a CRL, verifies that its issuer signed it, and answers whether a
-  serial is on it; `Validate_Path` does not consult one. Nothing here fetches a
+  serial is on it; `Validate_Path` does not consult one, which a test holds it
+  to: a certificate the suite's own CRL revokes still passes path
+  validation, so a caller reading a valid result as "not revoked" is
+  reading something that was never checked. Nothing here fetches a
   CRL -- retrieval is the application's, though `X509.Extensions` reads the
   authority information access and CRL distribution point extensions, so the
   application is at least told where to go: which responder to ask, where to
