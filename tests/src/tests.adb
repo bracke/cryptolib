@@ -20,6 +20,7 @@ with CryptoLib.PKCS10;
 with CryptoLib.PKCS8;
 with CryptoLib.PKCS12;
 with CryptoLib.Identities;
+with CryptoLib.X509.Policies;
 with CryptoLib.X509.Validation;
 with CryptoLib.X509.Path_Building;
 with CryptoLib.X509.Name_Constraints;
@@ -3169,85 +3170,165 @@ procedure Tests is
       end;
    end Check_PKCS12_Work_Ceiling;
 
-   --  Certificate policy extensions, which this crate does not process.
+   --  RFC 5280 section 6.1 policy processing.
    --
-   --  A critical policyConstraints or inhibitAnyPolicy makes a chain fail,
-   --  and that refusal is the security-relevant half of not implementing RFC
-   --  5280 section 6.1: honouring the extension is a capability, but
-   --  *appearing* to honour it while ignoring it is a bypass. Nothing tested
-   --  it, so adding those identifiers to the recognised list -- the obvious
-   --  response to an interop complaint -- would have quietly started
-   --  accepting the chains they exist to restrict.
+   --  A policy identifier on its own asserts something and restricts nothing.
+   --  What gives it teeth is policyConstraints, which can demand that every
+   --  certificate below it name an acceptable policy; policyMappings, which
+   --  lets one CA declare its policy equivalent to another's; and
+   --  inhibitAnyPolicy, which withdraws the wildcard. This crate used to
+   --  refuse any chain carrying the first or third of those, which was
+   --  correct and useless.
    --
-   --  All four CAs here share one key and sign the same leaf, so the chain
-   --  is cryptographically identical in every case and the only variable is
-   --  the extension.
-   procedure Check_Policy_Extensions is
+   --  Every verdict below was taken from OpenSSL first, with
+   --  `openssl verify -policy_check -policy 1.3.6.1.4.1.99999.1`, and this
+   --  agrees with it on all of them.
+   procedure Check_Policy_Processing is
       package X509C renames CryptoLib.X509.Certificates;
       package XV renames CryptoLib.X509.Validation;
       use type XV.Validation_Failure;
 
-      Policy_Leaf_DER : constant String :=
-        "308201cf30820154a00302010202024001300a06082a8648ce3d04030230143112301006035504030c09706f6c" &
-        "6963792d6361301e170d3236303732393033313134365a170d3237303532353033313134365a30143112301006" &
-        "035504030c09706f6c6963792d63613076301006072a8648ce3d020106052b8104002203620004a1967d334891" &
-        "b110f021344ee5d651655a8c6d0465bf170f282e8006dcf00f30114e57ecc014cc595c922a5bdcaf016e1676da" &
-        "e9869435680420cd42f9b0eff70ad214fefe80921f9568631086373cbba32fee5439c4a95f83a9aa23363e62d5" &
-        "a3793077300c0603551d130101ff04023000300e0603551d0f0101ff04040302078030170603551d110410300e" &
-        "820c686f73742e6578616d706c65301d0603551d0e0416041423729900983e966fc4ba6c9bd8092045f7646dd5" &
-        "301f0603551d230418301680142e76caae95c3a26581130162cb4eb48d4ff1d100300a06082a8648ce3d040302" &
-        "0369003066023100c30bda2ca3117efafe124dd9544600f6a5002462d026879d20445caa6ed6f63f5b2568df27" &
-        "16dccf0e220d79c1f8484702310087948c37084b6f42f1986d4551abd620a205f0cdfd6a2dd2e91e30a3ff56d7" &
-        "c14b51d95efdbf36e3252cae3ea76634f5";
+      Pol_Root_DER : constant String :=
+        "308201c63082014ba00302010202145727441835ad76033727ea6b84f515747f3320c2300a06082a8648ce3d04" &
+        "030230163114301206035504030c0b706f6c6963792d726f6f74301e170d3236303732393033343234335a170d" &
+        "3237303532353033343234335a30163114301206035504030c0b706f6c6963792d726f6f743076301006072a86" &
+        "48ce3d020106052b8104002203620004fab57ef5a1788133397062176d5925a43cd8595df917f6743c6323355d" &
+        "2658e3173fce28a87905f80b9ba83ee1aab697a7bb599368c751864a56fbaa711e5b2726530bc20c83714e3ce3" &
+        "718536a74005d731b1489eb8e166434548c44d69b0cfa35a3058300f0603551d130101ff040530030101ff300e" &
+        "0603551d0f0101ff04040302010630160603551d20040f300d300b06092b06010401868d1f01301d0603551d0e" &
+        "04160414208a7da7f801c4b3c24c5dea13986578cbec0ed6300a06082a8648ce3d040302036900306602310093" &
+        "4dbbfa5f698b9aaa2a6349fed0bae3572c3a3fcf09da057a05046c6724f4d40d3e1c36dccecaab036b60672925" &
+        "bced023100d96d24eef7e88ed6c3c434743d79d0619f1b54a3bf01ef831d4bef08264efa2a9d989132170c7443" &
+        "fcacbe2bb70aee19";
 
-      Policy_Plain_CA_DER : constant String :=
-        "308201a93082012fa0030201020214057e9a886d757780bd3a89748ce4e2f6d1e28b8b300a06082a8648ce3d04" &
-        "030230143112301006035504030c09706f6c6963792d6361301e170d3236303732393033313134365a170d3237" &
-        "303532353033313134365a30143112301006035504030c09706f6c6963792d63613076301006072a8648ce3d02" &
-        "0106052b8104002203620004312c61766dee795a8898bf6cba0d8fcaab009608ae94d2537f110b0ad525dc4f75" &
-        "4b1b1d3ce1251b6ffc3782ba4edfd3dddf22a92292a1b38c524aedfc669135be5caadfa621c1896e334c70efd0" &
-        "3e8e41baff588dc33daea0c006d7bbc2b5f8a3423040300f0603551d130101ff040530030101ff300e0603551d" &
-        "0f0101ff040403020106301d0603551d0e041604142e76caae95c3a26581130162cb4eb48d4ff1d100300a0608" &
-        "2a8648ce3d0403020368003065023100819fdb26a9703040b6c75fb08da9117487d1163ed8ae6d051211fc63e4" &
-        "20cc91fdd8c18c72ed3f5f4dcfbf8fa116fe0d02303ecf826d5ce41299ed289410b77ca79edb69494f855b2059" &
-        "d94de41bca0b35f48f1c5bc0d3d43a00e416b5c399f6d894";
+      Pol_Inter_Req_DER : constant String :=
+        "308201e53082016ca003020102020111300a06082a8648ce3d04030230163114301206035504030c0b706f6c69" &
+        "63792d726f6f74301e170d3236303732393033343234335a170d3237303532353033343234335a301631143012" &
+        "06035504030c0b706f6c6963792d726f6f743076301006072a8648ce3d020106052b8104002203620004e15b58" &
+        "46a5c5aa4118c74841b2a4d1cac4c19fcf8b7a326c793b925c6b3e812064cfc41d80da3fe58efa95f36268c9e4" &
+        "92ce3f8cd6ad4c07c73320b34b892361a8182b17e63dbc1f53b9b51c559e6730b855011c68eeaa084cac7a4ed5" &
+        "2fd898a3818d30818a300f0603551d130101ff040530030101ff300e0603551d0f0101ff040403020106301606" &
+        "03551d20040f300d300b06092b06010401868d1f01300f0603551d240101ff04053003800100301d0603551d0e" &
+        "041604144a97461dd73c54c4d02a3f0b416a6afc6d0f8e32301f0603551d23041830168014208a7da7f801c4b3" &
+        "c24c5dea13986578cbec0ed6300a06082a8648ce3d040302036700306402300a2dfefe083b5e9d75967003b81a" &
+        "ba7d546b7834cc7c300881cabe6fe8dec7fece25dcae0366c2f70b9222c290603f70023059ec3865ccd17af7a8" &
+        "bc2af98ea4e35513ea24490494f49cc110096c3a8bee972151c7e4d17a7387329f33890c9c02eb";
 
-      Policy_Constraints_CA_DER : constant String :=
-        "308201b930820140a00302010202144f96f3a4e0b7825c280016312ca549afb6325e4a300a06082a8648ce3d04" &
-        "030230143112301006035504030c09706f6c6963792d6361301e170d3236303732393033313134365a170d3237" &
-        "303532353033313134365a30143112301006035504030c09706f6c6963792d63613076301006072a8648ce3d02" &
-        "0106052b8104002203620004312c61766dee795a8898bf6cba0d8fcaab009608ae94d2537f110b0ad525dc4f75" &
-        "4b1b1d3ce1251b6ffc3782ba4edfd3dddf22a92292a1b38c524aedfc669135be5caadfa621c1896e334c70efd0" &
-        "3e8e41baff588dc33daea0c006d7bbc2b5f8a3533051300f0603551d130101ff040530030101ff300e0603551d" &
-        "0f0101ff040403020106300f0603551d240101ff04053003800100301d0603551d0e041604142e76caae95c3a2" &
-        "6581130162cb4eb48d4ff1d100300a06082a8648ce3d040302036700306402305dc07a4bee839688763c7a556a" &
-        "96c8d094fe9b0161e44118c11c457713e18bf793a9dbb3431444795ddf67a6f9425dbc02307f029f67db083f34" &
-        "6d205cc458858c28c563296a0daccf940ddf14844e2d71188639ce1b01217afed1b166c8f0550abd";
+      Pol_Inter_Plain_DER : constant String :=
+        "308201d330820159a003020102020112300a06082a8648ce3d04030230163114301206035504030c0b706f6c69" &
+        "63792d726f6f74301e170d3236303732393033343234335a170d3237303532353033343234335a301631143012" &
+        "06035504030c0b706f6c6963792d726f6f743076301006072a8648ce3d020106052b8104002203620004e15b58" &
+        "46a5c5aa4118c74841b2a4d1cac4c19fcf8b7a326c793b925c6b3e812064cfc41d80da3fe58efa95f36268c9e4" &
+        "92ce3f8cd6ad4c07c73320b34b892361a8182b17e63dbc1f53b9b51c559e6730b855011c68eeaa084cac7a4ed5" &
+        "2fd898a37b3079300f0603551d130101ff040530030101ff300e0603551d0f0101ff0404030201063016060355" &
+        "1d20040f300d300b06092b06010401868d1f01301d0603551d0e041604144a97461dd73c54c4d02a3f0b416a6a" &
+        "fc6d0f8e32301f0603551d23041830168014208a7da7f801c4b3c24c5dea13986578cbec0ed6300a06082a8648" &
+        "ce3d040302036800306502307145f1818ae7ef3193b94efdd67dd25ed927f59caa1e8b35e903c94d57318782f6" &
+        "89872eb16daba58026fb82533bca3d023100dd8dcffad0f4b8fee4cf608dc1329619253245e550556568450970" &
+        "d2a72a37fb798b9b773a0346ede88c91839bc4e712";
 
-      Policy_Inhibit_CA_DER : constant String :=
-        "308201b93082013ea0030201020214567caf02a99294df5cd2268e913f8daa359d4b20300a06082a8648ce3d04" &
-        "030230143112301006035504030c09706f6c6963792d6361301e170d3236303732393033313134365a170d3237" &
-        "303532353033313134365a30143112301006035504030c09706f6c6963792d63613076301006072a8648ce3d02" &
-        "0106052b8104002203620004312c61766dee795a8898bf6cba0d8fcaab009608ae94d2537f110b0ad525dc4f75" &
-        "4b1b1d3ce1251b6ffc3782ba4edfd3dddf22a92292a1b38c524aedfc669135be5caadfa621c1896e334c70efd0" &
-        "3e8e41baff588dc33daea0c006d7bbc2b5f8a351304f300f0603551d130101ff040530030101ff300e0603551d" &
-        "0f0101ff040403020106300d0603551d360101ff0403020100301d0603551d0e041604142e76caae95c3a26581" &
-        "130162cb4eb48d4ff1d100300a06082a8648ce3d0403020369003066023100d4e4decf2c5e64f8d9a377b7f14b" &
-        "2e9d369e3d034b8d0f0be890eb3995b09054fe8bd66f50f6656213ee0c769fe1a1d7023100e9d499a18a92f0b4" &
-        "b90911c98578a60419ecec13711973526f6e12f00b12c886ca7cc783c45d8fa12dcb5c066c1b2fac";
+      Pol_Inter_Inhibit_DER : constant String :=
+        "308201f53082017ba003020102020113300a06082a8648ce3d04030230163114301206035504030c0b706f6c69" &
+        "63792d726f6f74301e170d3236303732393033343432395a170d3237303532353033343432395a301631143012" &
+        "06035504030c0b706f6c6963792d726f6f743076301006072a8648ce3d020106052b8104002203620004e15b58" &
+        "46a5c5aa4118c74841b2a4d1cac4c19fcf8b7a326c793b925c6b3e812064cfc41d80da3fe58efa95f36268c9e4" &
+        "92ce3f8cd6ad4c07c73320b34b892361a8182b17e63dbc1f53b9b51c559e6730b855011c68eeaa084cac7a4ed5" &
+        "2fd898a3819c308199300f0603551d130101ff040530030101ff300e0603551d0f0101ff040403020106301606" &
+        "03551d20040f300d300b06092b06010401868d1f01300f0603551d240101ff04053003800100300d0603551d36" &
+        "0101ff0403020100301d0603551d0e041604144a97461dd73c54c4d02a3f0b416a6afc6d0f8e32301f0603551d" &
+        "23041830168014208a7da7f801c4b3c24c5dea13986578cbec0ed6300a06082a8648ce3d040302036800306502" &
+        "3100c3b2fb9c7bd0488f4356ba5761f3a79b98e533779f8c2014d0c62891393eda71ed5d84e3e7565bd889fb85" &
+        "cfddfd320302307dc6d4f4d3254b9276b1a0459729f6bd6eb558083b79d0c9a8a9b71c56d794078ea20685dc68" &
+        "fd87c10ed979f527a6e5";
 
-      Policy_Certpolicies_CA_DER : constant String :=
-        "308201c130820147a00302010202142c665bea393ad78d3b663b6d4bd44e93fc622b28300a06082a8648ce3d04" &
-        "030230143112301006035504030c09706f6c6963792d6361301e170d3236303732393033313230385a170d3237" &
-        "303532353033313230385a30143112301006035504030c09706f6c6963792d63613076301006072a8648ce3d02" &
-        "0106052b8104002203620004312c61766dee795a8898bf6cba0d8fcaab009608ae94d2537f110b0ad525dc4f75" &
-        "4b1b1d3ce1251b6ffc3782ba4edfd3dddf22a92292a1b38c524aedfc669135be5caadfa621c1896e334c70efd0" &
-        "3e8e41baff588dc33daea0c006d7bbc2b5f8a35a3058300f0603551d130101ff040530030101ff300e0603551d" &
-        "0f0101ff04040302010630160603551d20040f300d300b06092b06010401868d1f01301d0603551d0e04160414" &
-        "2e76caae95c3a26581130162cb4eb48d4ff1d100300a06082a8648ce3d0403020368003065023100fb30bb4889" &
-        "ae0d45ca345c0925fbaf2a22a059dc2dbdfddbb04c8945a070389b7a1fe2233668a008544598f067f32ec00230" &
-        "20318d9d6745d334aa19d58eaa6ef632e8ebbf0327cd0a4a51deff0aaf3fcbd286fc6fdf4abb354bc22d6c24f1" &
-        "a70027";
+      Pol_Inter_Map_DER : constant String :=
+        "308202093082018fa003020102020114300a06082a8648ce3d04030230163114301206035504030c0b706f6c69" &
+        "63792d726f6f74301e170d3236303732393033343432395a170d3237303532353033343432395a301631143012" &
+        "06035504030c0b706f6c6963792d726f6f743076301006072a8648ce3d020106052b8104002203620004e15b58" &
+        "46a5c5aa4118c74841b2a4d1cac4c19fcf8b7a326c793b925c6b3e812064cfc41d80da3fe58efa95f36268c9e4" &
+        "92ce3f8cd6ad4c07c73320b34b892361a8182b17e63dbc1f53b9b51c559e6730b855011c68eeaa084cac7a4ed5" &
+        "2fd898a381b03081ad300f0603551d130101ff040530030101ff300e0603551d0f0101ff040403020106301606" &
+        "03551d20040f300d300b06092b06010401868d1f01300f0603551d240101ff0405300380010030210603551d21" &
+        "041a3018301606092b06010401868d1f0106092b0601040185b63801301d0603551d0e041604144a97461dd73c" &
+        "54c4d02a3f0b416a6afc6d0f8e32301f0603551d23041830168014208a7da7f801c4b3c24c5dea13986578cbec" &
+        "0ed6300a06082a8648ce3d0403020368003065023100de613a955ab42e1fb759f2cd1aec7951a15bc5aa8a8744" &
+        "3cee4921af808dbe73a7661d0a5f668e02f1ff650d68cc319d023071f25589438e722d60ebddc7d72430ebc2fe" &
+        "aa6719b84bc9929fdeb215be9168a99e4421eab72e6dd4de561b20532856";
+
+      Pol_Leaf_Policy_DER : constant String :=
+        "308201c130820146a003020102020121300a06082a8648ce3d04030230163114301206035504030c0b706f6c69" &
+        "63792d726f6f74301e170d3236303732393033343234335a170d3237303532353033343234335a301631143012" &
+        "06035504030c0b706f6c6963792d726f6f743076301006072a8648ce3d020106052b81040022036200043402ce" &
+        "6ccea70ea36eb8521e2007faa5beb6e7c3806e6fa37fa5327cb5d3f557feca8c0d8d241091a0ea74e4c0732957" &
+        "40bfbfc075897e4da948d1cc6c167840e84238120e8cb80affde05c989c869103e6b1baa065634d40307e610b8" &
+        "593fe8a3683066300c0603551d130101ff0402300030160603551d20040f300d300b06092b06010401868d1f01" &
+        "301d0603551d0e04160414384bc3b7f08c0a2ad3fc513ff2bec55b1ba8efb2301f0603551d230418301680144a" &
+        "97461dd73c54c4d02a3f0b416a6afc6d0f8e32300a06082a8648ce3d04030203690030660231009cf61f07f09c" &
+        "8bacb47ca0be767c341452c2032533a6b22b3efc9e002c7d2d11e85eff4d166d392b9f1b6d38db1b7f71023100" &
+        "fc4f717bc35b622f8c94e6b6fcea42adf6867f73f35cc262ebe57ed5790e3f42d8daea529862214ec14392f312" &
+        "e30b28";
+
+      Pol_Leaf_Other_DER : constant String :=
+        "308201c130820146a003020102020121300a06082a8648ce3d04030230163114301206035504030c0b706f6c69" &
+        "63792d726f6f74301e170d3236303732393033343234335a170d3237303532353033343234335a301631143012" &
+        "06035504030c0b706f6c6963792d726f6f743076301006072a8648ce3d020106052b81040022036200043402ce" &
+        "6ccea70ea36eb8521e2007faa5beb6e7c3806e6fa37fa5327cb5d3f557feca8c0d8d241091a0ea74e4c0732957" &
+        "40bfbfc075897e4da948d1cc6c167840e84238120e8cb80affde05c989c869103e6b1baa065634d40307e610b8" &
+        "593fe8a3683066300c0603551d130101ff0402300030160603551d20040f300d300b06092b0601040184df5109" &
+        "301d0603551d0e04160414384bc3b7f08c0a2ad3fc513ff2bec55b1ba8efb2301f0603551d230418301680144a" &
+        "97461dd73c54c4d02a3f0b416a6afc6d0f8e32300a06082a8648ce3d04030203690030660231009968df9936d9" &
+        "412143d1b60b2b6b971a6aafc2ae3beeb1065590e1a6b2a5052448ca815b7e798b4eb80f95cb0db95afa023100" &
+        "93358650650df7b7736b87dee1ff633b891fba4cfd35193edec3b902299b1fe03eb6e3de21044c271ed4a66766" &
+        "d78bac";
+
+      Pol_Leaf_None_DER : constant String :=
+        "308201a83082012ea003020102020121300a06082a8648ce3d04030230163114301206035504030c0b706f6c69" &
+        "63792d726f6f74301e170d3236303732393033343234335a170d3237303532353033343234335a301631143012" &
+        "06035504030c0b706f6c6963792d726f6f743076301006072a8648ce3d020106052b81040022036200043402ce" &
+        "6ccea70ea36eb8521e2007faa5beb6e7c3806e6fa37fa5327cb5d3f557feca8c0d8d241091a0ea74e4c0732957" &
+        "40bfbfc075897e4da948d1cc6c167840e84238120e8cb80affde05c989c869103e6b1baa065634d40307e610b8" &
+        "593fe8a350304e300c0603551d130101ff04023000301d0603551d0e04160414384bc3b7f08c0a2ad3fc513ff2" &
+        "bec55b1ba8efb2301f0603551d230418301680144a97461dd73c54c4d02a3f0b416a6afc6d0f8e32300a06082a" &
+        "8648ce3d040302036800306502310086e66099b0cda06383ed72776cb553ec367361e5cc528ca35c7018aedad7" &
+        "11f8ce39e5d4d6cf42b1d6f3ae94b327562e023068e4d658e2b643601e5682fad634ae5b82df926e3c7ed1f89e" &
+        "c31f435721d06ac80296c50dc5c9b3135dd1863d35d48a";
+
+      Pol_Leaf_Any_DER : constant String :=
+        "308201bb30820141a003020102020141300a06082a8648ce3d04030230163114301206035504030c0b706f6c69" &
+        "63792d726f6f74301e170d3236303732393033343432395a170d3237303532353033343432395a301631143012" &
+        "06035504030c0b706f6c6963792d726f6f743076301006072a8648ce3d020106052b81040022036200043402ce" &
+        "6ccea70ea36eb8521e2007faa5beb6e7c3806e6fa37fa5327cb5d3f557feca8c0d8d241091a0ea74e4c0732957" &
+        "40bfbfc075897e4da948d1cc6c167840e84238120e8cb80affde05c989c869103e6b1baa065634d40307e610b8" &
+        "593fe8a3633061300c0603551d130101ff0402300030110603551d20040a300830060604551d2000301d060355" &
+        "1d0e04160414384bc3b7f08c0a2ad3fc513ff2bec55b1ba8efb2301f0603551d230418301680144a97461dd73c" &
+        "54c4d02a3f0b416a6afc6d0f8e32300a06082a8648ce3d0403020368003065023100ce186b844eba08a3db51bc" &
+        "0941f289c9dfa619b402d4bd67dfc3520a95c21da82d347292ebddb3c1a6b5e336aa5f3956023048372cefb703" &
+        "f4314103946d7bf88e48a26a926adb447bee23e45c2ecb0af47fdae1467e3f0379160167a585854db4ba";
+
+      Pol_Leaf_Mapped_DER : constant String :=
+        "308201c130820146a003020102020141300a06082a8648ce3d04030230163114301206035504030c0b706f6c69" &
+        "63792d726f6f74301e170d3236303732393033343432395a170d3237303532353033343432395a301631143012" &
+        "06035504030c0b706f6c6963792d726f6f743076301006072a8648ce3d020106052b81040022036200043402ce" &
+        "6ccea70ea36eb8521e2007faa5beb6e7c3806e6fa37fa5327cb5d3f557feca8c0d8d241091a0ea74e4c0732957" &
+        "40bfbfc075897e4da948d1cc6c167840e84238120e8cb80affde05c989c869103e6b1baa065634d40307e610b8" &
+        "593fe8a3683066300c0603551d130101ff0402300030160603551d20040f300d300b06092b0601040185b63801" &
+        "301d0603551d0e04160414384bc3b7f08c0a2ad3fc513ff2bec55b1ba8efb2301f0603551d230418301680144a" &
+        "97461dd73c54c4d02a3f0b416a6afc6d0f8e32300a06082a8648ce3d0403020369003066023100ee90c48ae9b6" &
+        "5209c5242f56cd53e58e17e11ddefd40199f52ded1f32134f53b11ba13ca407435b5e520245043a5f931023100" &
+        "cc68368691849c6e3e5dc53902fd817f79a2b95e2bf1546184f1c80b71b6b74fe800fcaecbb79a20f4cf22f6e8" &
+        "e725b7";
+
+      Pol_Leaf_None_Plain_DER : constant String :=
+        "308201a83082012ea003020102020131300a06082a8648ce3d04030230163114301206035504030c0b706f6c69" &
+        "63792d726f6f74301e170d3236303732393033343331325a170d3237303532353033343331325a301631143012" &
+        "06035504030c0b706f6c6963792d726f6f743076301006072a8648ce3d020106052b81040022036200043402ce" &
+        "6ccea70ea36eb8521e2007faa5beb6e7c3806e6fa37fa5327cb5d3f557feca8c0d8d241091a0ea74e4c0732957" &
+        "40bfbfc075897e4da948d1cc6c167840e84238120e8cb80affde05c989c869103e6b1baa065634d40307e610b8" &
+        "593fe8a350304e300c0603551d130101ff04023000301d0603551d0e04160414384bc3b7f08c0a2ad3fc513ff2" &
+        "bec55b1ba8efb2301f0603551d230418301680144a97461dd73c54c4d02a3f0b416a6afc6d0f8e32300a06082a" &
+        "8648ce3d04030203680030650230036d5757d235d4fe32e612750bbeb248c84f198aa1cba7b6356ab90f967813" &
+        "f34484c5623e35449db518c535d2ba387f02310082d568ddeb7909e66d44ff7f1f000079835b0cb96226ecd19b" &
+        "fef5c1977bf5ffb01f82ab7ef3b5a9149431a0d21f1b4b";
 
       function From_Hex
         (Text : String) return Ada.Streams.Stream_Element_Array
@@ -3274,60 +3355,94 @@ procedure Tests is
       is (X509C.Decode_DER
             (From_Hex (Hex), CryptoLib.ASN1.Default_Limits, Status));
 
-      type Which_CA is (Plain, Constraints, Inhibit, Policies);
+      type Which_Inter is (Req, Plain, Inhibit, Map);
+      type Which_Leaf is (With_Policy, Other_Policy, No_Policy, Any, Mapped,
+                          None_Plain);
 
-      type Policy_Path (Kind : Which_CA) is limited new XV.Path_Source
-        with null record;
+      type Chain (Inter : Which_Inter; Leaf : Which_Leaf) is
+        limited new XV.Path_Source with null record;
 
-      overriding function Length (Source : Policy_Path) return Positive
-      is (2);
+      overriding function Length (Source : Chain) return Positive is (3);
 
       overriding function Certificate_At
-        (Source : Policy_Path; Index : Positive) return X509C.Certificate
-      is (if Index = 1 then Decoded (Policy_Leaf_DER)
-          else (case Source.Kind is
-                   when Plain       => Decoded (Policy_Plain_CA_DER),
-                   when Constraints => Decoded (Policy_Constraints_CA_DER),
-                   when Inhibit     => Decoded (Policy_Inhibit_CA_DER),
-                   when Policies    => Decoded (Policy_Certpolicies_CA_DER)));
+        (Source : Chain; Index : Positive) return X509C.Certificate
+      is (case Index is
+             when 1 =>
+               (case Source.Leaf is
+                   when With_Policy  => Decoded (Pol_Leaf_Policy_DER),
+                   when Other_Policy => Decoded (Pol_Leaf_Other_DER),
+                   when No_Policy    => Decoded (Pol_Leaf_None_DER),
+                   when Any          => Decoded (Pol_Leaf_Any_DER),
+                   when Mapped       => Decoded (Pol_Leaf_Mapped_DER),
+                   when None_Plain   => Decoded (Pol_Leaf_None_Plain_DER)),
+             when 2 =>
+               (case Source.Inter is
+                   when Req     => Decoded (Pol_Inter_Req_DER),
+                   when Plain   => Decoded (Pol_Inter_Plain_DER),
+                   when Inhibit => Decoded (Pol_Inter_Inhibit_DER),
+                   when Map     => Decoded (Pol_Inter_Map_DER)),
+             when others => Decoded (Pol_Root_DER));
 
       overriding function Is_Trust_Anchor
-        (Source : Policy_Path; Item : X509C.Certificate) return Boolean
+        (Source : Chain; Item : X509C.Certificate) return Boolean
       is (X509C.Subject_Bytes (Item)
-          = X509C.Subject_Bytes (Certificate_At (Source, 2)));
+          = X509C.Subject_Bytes (Decoded (Pol_Root_DER)));
 
       At_Time : constant CryptoLib.X509.Certificate_Time :=
         (Year => 2026, Month => 9, Day => 1,
          Hour => 12, Minute => 0, Second => 0);
 
-      function Verdict (Kind : Which_CA) return XV.Validation_Result
-      is (XV.Validate_Path (Policy_Path'(Kind => Kind), At_Time));
+      function Verdict (Inter : Which_Inter; Leaf : Which_Leaf)
+        return XV.Validation_Result
+      is (XV.Validate_Path (Chain'(Inter => Inter, Leaf => Leaf), At_Time));
    begin
-      --  The control. Without it the refusals below could be about anything.
-      Check (Verdict (Plain).Valid,
-             "the same leaf under a CA with no policy extension validates: "
-             & XV.Failure_Image (Verdict (Plain).Failure));
+      --  The control: a chain whose intermediate demands nothing, and a leaf
+      --  that names no policy. Without it the refusals below would be
+      --  consistent with the chain being broken for some other reason.
+      Check (Verdict (Plain, None_Plain).Valid,
+             "a chain that demands no policy validates: "
+             & XV.Failure_Image (Verdict (Plain, None_Plain).Failure));
 
-      --  certificatePolicies restricts nothing by itself -- it says under
-      --  which policies a certificate was issued, and it takes a caller
-      --  asking for a policy to make that mean anything. So it is
-      --  recognised, and a chain carrying it still validates.
-      Check (Verdict (Policies).Valid,
-             "a CA stating its certificate policies still validates: "
-             & XV.Failure_Image (Verdict (Policies).Failure));
+      --  requireExplicitPolicy on the intermediate: from here down, every
+      --  certificate must name a policy that survives to the leaf.
+      Check (Verdict (Req, With_Policy).Valid,
+             "a leaf naming the policy its issuer granted validates: "
+             & XV.Failure_Image (Verdict (Req, With_Policy).Failure));
+      Check (Verdict (Req, With_Policy).Policies.Count = 1,
+             "and the policy it establishes is reported, got"
+             & Natural'Image (Verdict (Req, With_Policy).Policies.Count));
 
-      --  These two demand processing this crate does not do.
-      Check (not Verdict (Constraints).Valid
-             and then Verdict (Constraints).Failure
-                      = XV.Unknown_Critical_Extension,
-             "a critical policyConstraints makes the chain fail, got "
-             & XV.Failure_Image (Verdict (Constraints).Failure));
-      Check (not Verdict (Inhibit).Valid
-             and then Verdict (Inhibit).Failure
-                      = XV.Unknown_Critical_Extension,
-             "and so does a critical inhibitAnyPolicy, got "
-             & XV.Failure_Image (Verdict (Inhibit).Failure));
-   end Check_Policy_Extensions;
+      --  A policy nobody above it granted is not a policy. This is the
+      --  check: the leaf asserts something, and the assertion is worth
+      --  nothing because no issuer in the path allowed it.
+      Check (not Verdict (Req, Other_Policy).Valid
+             and then Verdict (Req, Other_Policy).Failure
+                      = XV.Policy_Not_Established,
+             "a leaf naming a policy its issuers never granted is refused, "
+             & "got " & XV.Failure_Image (Verdict (Req, Other_Policy).Failure));
+      Check (not Verdict (Req, No_Policy).Valid,
+             "and so is one naming none at all");
+
+      --  anyPolicy satisfies the demand, until a certificate withdraws it.
+      Check (Verdict (Req, Any).Valid,
+             "anyPolicy satisfies an explicit-policy requirement: "
+             & XV.Failure_Image (Verdict (Req, Any).Failure));
+      Check (not Verdict (Inhibit, Any).Valid
+             and then Verdict (Inhibit, Any).Failure
+                      = XV.Policy_Not_Established,
+             "unless inhibitAnyPolicy withdrew it, got "
+             & XV.Failure_Image (Verdict (Inhibit, Any).Failure));
+
+      --  policyMappings: the intermediate declares its issuer's policy
+      --  equivalent to one of its own, and a leaf naming the mapped policy
+      --  is then reachable from the root's.
+      Check (Verdict (Map, Mapped).Valid,
+             "a mapped policy carries through: "
+             & XV.Failure_Image (Verdict (Map, Mapped).Failure));
+      Check (not Verdict (Map, With_Policy).Valid,
+             "and the unmapped one no longer does, because mapping replaced "
+             & "what the issuer expects rather than adding to it");
+   end Check_Policy_Processing;
 
    --  What happens when there is no randomness.
    --
@@ -3948,7 +4063,9 @@ procedure Tests is
               (Maximum_Path_Length       => 1,
                Require_Basic_Constraints => True,
                Require_Key_Cert_Sign     => True,
-               Reject_Unknown_Critical   => True));
+               Reject_Unknown_Critical   => True,
+               Policy_Options            =>
+                 CryptoLib.X509.Policies.Default_Options));
          Check (not Result.Valid and then Result.Failure = XV.Path_Too_Long,
                 "a path longer than policy allows is refused, got "
                 & XV.Failure_Image (Result.Failure));
@@ -8252,7 +8369,7 @@ begin
    Check_X509_Decode;
    Check_X509_Verify;
    Check_X509_Extensions;
-   Check_Policy_Extensions;
+   Check_Policy_Processing;
    Check_Random_Fails_Closed;
    Check_Off_Curve_Key;
    Check_Ed25519_Encoding;

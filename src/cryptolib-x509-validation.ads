@@ -1,4 +1,5 @@
 with CryptoLib.X509.Certificates;
+with CryptoLib.X509.Policies;
 
 --  @summary Validating one proposed certificate path against explicit trust.
 --
@@ -64,10 +65,15 @@ package CryptoLib.X509.Validation is
       --  interpret, so what it means cannot be established.
       Duplicate_Certificate,
       --  The same certificate appears twice, which is a loop.
-      No_Trust_Anchor);
+      No_Trust_Anchor,
       --  The path is well formed and ends somewhere the caller does not
       --  trust. This is the failure that means "correct but not trusted",
       --  and it is deliberately not the same as a bad signature.
+      Policy_Not_Established);
+      --  RFC 5280 section 6.1 policy processing rejected the path: some
+      --  certificate demanded an explicit policy that nothing below it
+      --  provides. Only reachable when a certificate asks for it, or when
+      --  the caller does.
 
    --  What a caller insists on.
    type Validation_Policy is record
@@ -75,13 +81,22 @@ package CryptoLib.X509.Validation is
       Require_Basic_Constraints : Boolean := True;
       Require_Key_Cert_Sign     : Boolean := True;
       Reject_Unknown_Critical   : Boolean := True;
+
+      --  RFC 5280 section 6.1's three initial inputs. All off by default,
+      --  which records policies without letting them refuse a path: a caller
+      --  that has not thought about policies gets the behaviour it expects,
+      --  and one that has can demand an explicit policy of the whole chain.
+      Policy_Options            : CryptoLib.X509.Policies.Policy_Options :=
+        CryptoLib.X509.Policies.Default_Options;
    end record;
 
    Default_Policy : constant Validation_Policy :=
      (Maximum_Path_Length       => 8,
       Require_Basic_Constraints => True,
       Require_Key_Cert_Sign     => True,
-      Reject_Unknown_Critical   => True);
+      Reject_Unknown_Critical   => True,
+      Policy_Options            =>
+        CryptoLib.X509.Policies.Default_Options);
 
    --  Why a path failed, and where.
    --
@@ -92,6 +107,12 @@ package CryptoLib.X509.Validation is
       Valid   : Boolean := False;
       Failure : Validation_Failure := None;
       Index   : Natural := 0;
+
+      --  The policies the authorities in the path actually agreed on, which
+      --  is not the same as what the leaf asserts: a certificate may name a
+      --  policy its issuers never granted, and this is the set that survived
+      --  every one of them. Empty when no certificate named any.
+      Policies : CryptoLib.X509.Policies.Policy_Outcome;
    end record;
 
    --  Render a failure as short diagnostic text.

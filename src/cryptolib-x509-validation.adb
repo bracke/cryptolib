@@ -13,6 +13,7 @@ package body CryptoLib.X509.Validation is
 
    package X509C renames CryptoLib.X509.Certificates;
    package XE renames CryptoLib.X509.Extensions;
+   package PP renames CryptoLib.X509.Policies;
    package NC renames CryptoLib.X509.Name_Constraints;
    package XS renames CryptoLib.X509.Signatures;
 
@@ -32,6 +33,7 @@ package body CryptoLib.X509.Validation is
          when Invalid_Basic_Constraints  => return "invalid basic constraints";
          when Path_Length_Exceeded       => return "path length exceeded";
          when Invalid_Key_Usage          => return "invalid key usage";
+         when Policy_Not_Established     => return "policy not established";
          when Name_Constraint_Violation  =>
             return "name constraint violation";
          when Unsupported_Name_Constraint =>
@@ -45,7 +47,10 @@ package body CryptoLib.X509.Validation is
 
    function Fail
      (Failure : Validation_Failure; Index : Natural) return Validation_Result
-   is ((Valid => False, Failure => Failure, Index => Index));
+   is ((Valid    => False,
+        Failure  => Failure,
+        Index    => Index,
+        Policies => (others => <>)));
 
    --  Do these two encoded names match?
    --
@@ -235,7 +240,61 @@ package body CryptoLib.X509.Validation is
          return Fail (No_Trust_Anchor, Path_Length);
       end if;
 
-      return (Valid => True, Failure => None, Index => 0);
+      --  RFC 5280 section 6.1 policy processing, last because it is the only
+      --  check that can succeed on a path nothing else would accept: it says
+      --  which policies hold, not whether the chain does.
+      --
+      --  Driven from the anchor downwards. The RFC numbers certificates in
+      --  issuing order and this path is held leaf-first, so the two run
+      --  opposite ways -- certificate i of the RFC is Get (Path_Length - i)
+      --  here, and the anchor itself is not one of them.
+      declare
+         Below  : constant Natural := Path_Length - 1;
+         Engine : PP.Engine (Path_Length => Natural'Max (Below, 1));
+         Ok     : Boolean;
+         None_Wanted : constant PP.Policy_Array (1 .. 0) := [others => <>];
+      begin
+         if Below = 0 then
+            --  A path of the anchor alone establishes no policies and needs
+            --  none; there is no certificate to process.
+            return (Valid => True, Failure => None, Index => 0,
+                    Policies => (others => <>));
+         end if;
+
+         PP.Start (Engine, Policy.Policy_Options);
+
+         for I in reverse 1 .. Below loop
+            declare
+               Subject : constant Certificate := Get (I);
+               Issuer  : constant Certificate := Get (I + 1);
+
+               --  A self-issued certificate is one a CA wrote for itself,
+               --  typically to change keys. It does not lengthen the path,
+               --  so it does not spend any of the policy allowances.
+               Self_Issued : constant Boolean :=
+                 Same_Name
+                   (X509C.Subject_Bytes (Subject),
+                    X509C.Issuer_Bytes (Subject));
+            begin
+               pragma Unreferenced (Issuer);
+               PP.Step (Engine, Subject, Self_Issued, Ok);
+               if not Ok then
+                  return Fail (Policy_Not_Established, I);
+               end if;
+            end;
+         end loop;
+
+         declare
+            Outcome : constant PP.Policy_Outcome :=
+              PP.Finish (Engine, None_Wanted);
+         begin
+            if not Outcome.Acceptable then
+               return Fail (Policy_Not_Established, 1);
+            end if;
+            return (Valid => True, Failure => None, Index => 0,
+                    Policies => Outcome);
+         end;
+      end;
    end Validate_Path;
 
 end CryptoLib.X509.Validation;

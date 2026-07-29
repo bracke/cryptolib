@@ -30,6 +30,7 @@ The reference sources are:
 | PBES2 (`PBES2`, `PKCS8`, `PKCS12`) | password-based decryption: PBKDF2 over HMAC-SHA1/256/384/512, AES-128/192/256-CBC | keys written by `openssl pkcs8 -topk8` open to the byte-identical scalar OpenSSL holds; a wrong password is refused |
 | PKCS#12 (`PKCS12`) | reading a bundle, MAC verified before its contents are parsed | bundles written by this crate and by `openssl pkcs12 -export` both open, including OpenSSL's default layout with the certificates in encrypted content; the extracted certificates hash identically to the originals |
 | RSA | PKCS#1 v1.5 and PSS verification, SHA-256/384/512 | signatures produced by OpenSSL at 2048 and 3072 bits; a cube-root forgery against a low exponent is refused; PSS checked at both salt lengths OpenSSL emits, and a signature does not verify under a salt length or hash other than the one its parameters state |
+| Certificate policies (`X509.Policies`) | RFC 5280 §6.1 policy tree, mapping, and the three counters | every verdict cross-checked against `openssl verify -policy_check -policy ...` on the same chains: explicit-policy demands, a policy no issuer granted, anyPolicy, anyPolicy withdrawn by `inhibitAnyPolicy`, a mapped policy, and mapping inhibited |
 | X.509 parsing (`ASN1`, `PEM`, `X509.*`) | DER reader, PEM armour, certificate decode, extensions, signature verification | field-by-field against `openssl x509 -text` on the same certificates; an OpenSSL-issued RSA chain verifies here and under `openssl verify`; the 122 system roots parse identically before and after the ambiguity checks below |
 | Revocation (`X509.CRLs`, `OCSP`) | CRL and OCSP parsing and signature checking | against a CRL and OCSP responses OpenSSL produced through `openssl ca -revoke`; the request builder is byte-identical to `openssl ocsp -reqout`, with and without a nonce; a delegate without OCSP-signing authority is refused; revocation times and reasons match `openssl crl -text`, and the CRL and OCSP paths agree with each other on the same certificate; a CRL scoped by a critical `issuingDistributionPoint` is refused rather than read as a complete list; a validly signed OCSP response carrying an unrecognised critical extension is refused, in its own extensions or in the entry about the certificate |
 | Service identity (`X509.Identity`) | RFC 9525 DNS and IP matching | negative cases pinned: a wildcard matches neither the bare domain nor across two labels, an address is never matched as text, and the common name is consulted only when a caller asks for it |
@@ -188,15 +189,21 @@ every status reading `Ok` while every key it produces is predictable.
   of its relative names; a URI subtree constrains the host the URI names,
   ignoring any credentials, port or path; a mail subtree is read as a mailbox,
   a host or a domain according to its own shape, and covers an address in the
-  subject when the certificate carries no rfc822 alternative name. **Certificate policy
-  processing is not implemented**: `certificatePolicies` is recognised because
-  it restricts nothing without a caller-supplied policy set, while a critical
-  `policyConstraints` or `inhibitAnyPolicy` makes a chain fail, since honouring
-  those needs processing this does not do. That refusal is the
-  security-relevant half of not implementing RFC 5280 §6.1 -- honouring the
-  extension is a capability, but appearing to honour it while ignoring it is a
-  bypass -- and it is pinned by a test built from four CAs that share one key
-  and sign one leaf, so the only variable is the extension. **Revocation (CRL/OCSP) is not
+  subject when the certificate carries no rfc822 alternative name. **Certificate policy processing
+  is implemented** (RFC 5280 §6.1): the valid_policy_tree, policy mapping, and
+  the `explicit_policy` / `policy_mapping` / `inhibit_anyPolicy` counters.
+  `certificatePolicies`, `policyConstraints` and `inhibitAnyPolicy` are all
+  honoured, so a chain carrying them is processed rather than refused --
+  which is what it used to be. `Validation_Result.Policies` reports the
+  policies the authorities in the path actually agreed on, which is not what
+  the leaf asserts: a certificate may name a policy no issuer above it
+  granted, and that certificate is refused when an explicit policy is
+  required. The three initial inputs are in `Validation_Policy.Policy_Options`
+  and all default off, so a caller that has not thought about policies sees no
+  change in behaviour. The tree is bounded; running out of room makes the
+  outcome unacceptable rather than truncating it, because a partial tree is
+  missing exactly the nodes that pruning would have removed and can only be
+  too permissive. **Revocation (CRL/OCSP) is not
   consulted** by the validator. There is no path building here: finding a chain
   through
   cross-signed roots is `X509.Path_Building`, kept separate: it searches and

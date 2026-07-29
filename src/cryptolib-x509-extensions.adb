@@ -783,17 +783,22 @@ package body CryptoLib.X509.Extensions is
          Consider (OID_Table.Subject_Key_Identifier);
          Consider (OID_Table.Authority_Key_Identifier);
 
-         --  Name constraints are here because CryptoLib.X509.Validation
-         --  applies them. Certificate policies are here because they impose
-         --  nothing by themselves: they say under which policies a
-         --  certificate was issued, and it takes a caller asking for a
-         --  particular policy to make that restrict anything. Policy
-         --  constraints and inhibitAnyPolicy are deliberately absent -- they
-         --  demand policy processing this crate does not do, so a chain
-         --  carrying them critically is refused rather than accepted with the
-         --  demand ignored.
+         --  These are here because CryptoLib.X509.Validation applies them:
+         --  name constraints by X509.Name_Constraints, and the three policy
+         --  extensions by X509.Policies, which implements RFC 5280 section
+         --  6.1. Recognising one without enforcing it would be worse than
+         --  refusing the certificate, so a change that stops applying any of
+         --  them has to take the identifier out of this list at the same
+         --  time.
+         --
+         --  policyMappings is deliberately not here. It is not defined as a
+         --  critical extension by RFC 5280 and nothing in the wild marks it
+         --  so; a certificate that did would be asking for something this
+         --  list cannot promise.
          Consider (OID_Table.Name_Constraints);
          Consider (OID_Table.Certificate_Policies);
+         Consider (OID_Table.Policy_Constraints);
+         Consider (OID_Table.Inhibit_Any_Policy);
          return Known;
       end Understood;
    begin
