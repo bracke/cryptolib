@@ -6735,6 +6735,246 @@ procedure Tests is
       CryptoLib.Curve25519.Clear (B_Private);
    end Check_X25519_Shared_Secret;
 
+   --  The chain checks nothing was asserting.
+   --
+   --  Path_Length_Exceeded, Invalid_Basic_Constraints and Invalid_Key_Usage
+   --  are three of the oldest questions X.509 asks -- how deep may this CA
+   --  delegate, is the issuer a CA at all, is it allowed to sign
+   --  certificates -- and no test named any of them. They work. Nothing
+   --  would have said so if they stopped.
+   --
+   --  Each chain below is one an attacker would build, and OpenSSL refuses
+   --  all four.
+   procedure Check_Chain_Constraint_Bypasses is
+      package X509C renames CryptoLib.X509.Certificates;
+      package XV renames CryptoLib.X509.Validation;
+      use type XV.Validation_Failure;
+
+      Len0_Root_DER : constant String :=
+        "3082016f30820115a0030201020214690ed1841f04a45804ebb557f0c83b8fa695a755300a06082a8648" &
+        "ce3d04030230143112301006035504030c094c656e3020526f6f74301e170d3236303732393131353635" &
+        "365a170d3334313031353131353635365a30143112301006035504030c094c656e3020526f6f74305930" &
+        "1306072a8648ce3d020106082a8648ce3d03010703420004cd75bd0da20c5fcd91f18b814c2757b4c7db" &
+        "5a15e73d765e4541f1c4a29b2f8a0b496a32cef7647a199c08346947689523416b0d99a2d1758d0f34ac" &
+        "7ee37abda345304330120603551d130101ff040830060101ff020100300e0603551d0f0101ff04040302" &
+        "0204301d0603551d0e04160414adbcc4910226acf0e9296785ee777b96efe3bf28300a06082a8648ce3d" &
+        "04030203480030450221008bb75c643a4c4192cbe9baae18440f256dd7f0666ceb3fa8c3f0c97749b618" &
+        "6702204561e485d5d7e895f4f0193a8169a5fe3a2176adab830fc58af3d29f4a41cbad";
+
+      Len0_Inter_DER : constant String :=
+        "3082018e30820135a003020102021443d5d6a988536afc0a43fab23b9403399437190a300a06082a8648" &
+        "ce3d04030230143112301006035504030c094c656e3020526f6f74301e170d3236303732393131353635" &
+        "365a170d3332303131393131353635365a30163114301206035504030c0b457874726120496e74657230" &
+        "59301306072a8648ce3d020106082a8648ce3d0301070342000433ebd00a784f41a1ba1dc0707c4ea79e" &
+        "ec188fa5a4f5885cdbcd3806be3dc0db0955c21b7875e2b1e6f751f5aa15c4d2693adadfce4a74291e01" &
+        "5a0eb5731402a3633061300f0603551d130101ff040530030101ff300e0603551d0f0101ff0404030202" &
+        "04301d0603551d0e04160414aa2fcce67c3a21569341ed348b0cb465ea9cce1f301f0603551d23041830" &
+        "168014adbcc4910226acf0e9296785ee777b96efe3bf28300a06082a8648ce3d04030203470030440220" &
+        "6173b33bbc95b8dc76d42dd92606fddca40cdd0e08c93778ce12bbe99c49a26102203e655e3b10cf8a29" &
+        "dcca7475ec57454ea795ea7a0ebe0bab5a21da299f18a8a6";
+
+      Len0_Leaf_DER : constant String :=
+        "308201a030820146a0030201020214711ff84d161a762b0dbb338664a3be3eb6dbbd3c300a06082a8648" &
+        "ce3d04030230163114301206035504030c0b457874726120496e746572301e170d323630373239313135" &
+        "3635365a170d3332303131393131353635365a301b3119301706035504030c10686f73742e6578616d70" &
+        "6c652e636f6d3059301306072a8648ce3d020106082a8648ce3d030107034200047a9fefa5958775b469" &
+        "d028962a7129fa68421df7a2ce5ea0aeeb0c9114dfc72f9453cb376acdd67a378dc261290bf05f943f3c" &
+        "7c62c8298a6b69ff57f6daa3c9a36d306b300c0603551d130101ff04023000301b0603551d1104143012" &
+        "8210686f73742e6578616d706c652e636f6d301d0603551d0e04160414dd288838f636c9d009a8686fb0" &
+        "ecad1a35b83905301f0603551d23041830168014aa2fcce67c3a21569341ed348b0cb465ea9cce1f300a" &
+        "06082a8648ce3d0403020348003045022100a0a67504604b313169110b0e6a8a2843e70874913c374d05" &
+        "ea151c8921a09be702201d39aa9381e8ec4a070b1bface211f1e3813a35d8803bf95f88fd826cfdff113";
+
+      NC_Root_DER : constant String :=
+        "308201873082012da00302010202143e123bb37b6caf84d51d4c5d9fd398aeaddf1733300a06082a8648" &
+        "ce3d04030230123110300e06035504030c074e4320526f6f74301e170d3236303732393131353635365a" &
+        "170d3334313031353131353635365a30123110300e06035504030c074e4320526f6f743059301306072a" &
+        "8648ce3d020106082a8648ce3d03010703420004cd75bd0da20c5fcd91f18b814c2757b4c7db5a15e73d" &
+        "765e4541f1c4a29b2f8a0b496a32cef7647a199c08346947689523416b0d99a2d1758d0f34ac7ee37abd" &
+        "a361305f300f0603551d130101ff040530030101ff300e0603551d0f0101ff040403020204301d060355" &
+        "1d1e0101ff04133011a00f300d820b6578616d706c652e636f6d301d0603551d0e04160414adbcc49102" &
+        "26acf0e9296785ee777b96efe3bf28300a06082a8648ce3d040302034800304502206bfecd47bfc6dcc4" &
+        "70d977ce573810c5825faca9956cef6a8423369f5db58052022100b6dd016810e498f249438280c8b04e" &
+        "b34ddbf7c48205f6f5ca925529c4df42a6";
+
+      NoSign_Inter_DER : constant String :=
+        "3082018e30820135a0030201020214201f05f60f265bd1b925ff010c47b1641fb8693d300a06082a8648" &
+        "ce3d04030230123110300e06035504030c074e4320526f6f74301e170d3236303732393131353830385a" &
+        "170d3332303131393131353830385a30183116301406035504030c0d4e6f205369676e20496e74657230" &
+        "59301306072a8648ce3d020106082a8648ce3d0301070342000433ebd00a784f41a1ba1dc0707c4ea79e" &
+        "ec188fa5a4f5885cdbcd3806be3dc0db0955c21b7875e2b1e6f751f5aa15c4d2693adadfce4a74291e01" &
+        "5a0eb5731402a3633061300f0603551d130101ff040530030101ff300e0603551d0f0101ff0404030207" &
+        "80301d0603551d0e04160414aa2fcce67c3a21569341ed348b0cb465ea9cce1f301f0603551d23041830" &
+        "168014adbcc4910226acf0e9296785ee777b96efe3bf28300a06082a8648ce3d04030203470030440220" &
+        "46577421c0961d235aef6aa7820b619fbdc25af0fae401df8b2fe17c6f2b9fc7022047dc4ff4c9cb4dc0" &
+        "536fa55904f9059c69d787b6660861e4563472f99e016743";
+
+      NoSign_Leaf_DER : constant String :=
+        "308201a330820148a00302010202145ff94cb5f18b8e4762f9cec4fac9f9d304084474300a06082a8648" &
+        "ce3d04030230183116301406035504030c0d4e6f205369676e20496e746572301e170d32363037323931" &
+        "31353830385a170d3332303131393131353830385a301b3119301706035504030c10686f73742e657861" &
+        "6d706c652e636f6d3059301306072a8648ce3d020106082a8648ce3d030107034200047a9fefa5958775" &
+        "b469d028962a7129fa68421df7a2ce5ea0aeeb0c9114dfc72f9453cb376acdd67a378dc261290bf05f94" &
+        "3f3c7c62c8298a6b69ff57f6daa3c9a36d306b300c0603551d130101ff04023000301b0603551d110414" &
+        "30128210686f73742e6578616d706c652e636f6d301d0603551d0e04160414dd288838f636c9d009a868" &
+        "6fb0ecad1a35b83905301f0603551d23041830168014aa2fcce67c3a21569341ed348b0cb465ea9cce1f" &
+        "300a06082a8648ce3d04030203490030460221008c2b697165a5279e6a28d223b9f1f27c5a22dccd218b" &
+        "01eaabe436d66c8b7822022100b35413738ae7218be68245f6c8289712b61da535b9c926ba79bd95d586" &
+        "203009";
+
+      NotCA_Inter_DER : constant String :=
+        "308201873082012da0030201020214201f05f60f265bd1b925ff010c47b1641fb8693e300a06082a8648" &
+        "ce3d04030230123110300e06035504030c074e4320526f6f74301e170d3236303732393131353830385a" &
+        "170d3332303131393131353830385a30133111300f06035504030c084e6f742041204341305930130607" &
+        "2a8648ce3d020106082a8648ce3d0301070342000433ebd00a784f41a1ba1dc0707c4ea79eec188fa5a4" &
+        "f5885cdbcd3806be3dc0db0955c21b7875e2b1e6f751f5aa15c4d2693adadfce4a74291e015a0eb57314" &
+        "02a360305e300c0603551d130101ff04023000300e0603551d0f0101ff040403020204301d0603551d0e" &
+        "04160414aa2fcce67c3a21569341ed348b0cb465ea9cce1f301f0603551d23041830168014adbcc49102" &
+        "26acf0e9296785ee777b96efe3bf28300a06082a8648ce3d0403020348003045022100c44fd96cbd955c" &
+        "60250a51dba6bfc3651b1dc09a69f1547e55c47fbf0cc4c1d40220745439dbeaea43471d28e931e705a0" &
+        "28dd98974991865260e420ff2dca178781";
+
+      NotCA_Leaf_DER : constant String :=
+        "3082019e30820143a0030201020214120667dceb6184dc84f601fa4f33991979893bb3300a06082a8648" &
+        "ce3d04030230133111300f06035504030c084e6f742041204341301e170d323630373239313135383038" &
+        "5a170d3332303131393131353830385a301b3119301706035504030c10686f73742e6578616d706c652e" &
+        "636f6d3059301306072a8648ce3d020106082a8648ce3d030107034200047a9fefa5958775b469d02896" &
+        "2a7129fa68421df7a2ce5ea0aeeb0c9114dfc72f9453cb376acdd67a378dc261290bf05f943f3c7c62c8" &
+        "298a6b69ff57f6daa3c9a36d306b300c0603551d130101ff04023000301b0603551d1104143012821068" &
+        "6f73742e6578616d706c652e636f6d301d0603551d0e04160414dd288838f636c9d009a8686fb0ecad1a" &
+        "35b83905301f0603551d23041830168014aa2fcce67c3a21569341ed348b0cb465ea9cce1f300a06082a" &
+        "8648ce3d0403020349003046022100caf8a3066dbb8553491bd36e5495eced74f7cd584c97e0a47ad79c" &
+        "c0b824fcf9022100bb1b53376d51487a7c6fc373bc72dd5c2ad207a810fe20282a290cdc2b6512f7";
+
+      Rogue_Inter_DER : constant String :=
+        "308201ae30820155a0030201020214201f05f60f265bd1b925ff010c47b1641fb8693f300a06082a8648" &
+        "ce3d04030230123110300e06035504030c074e4320526f6f74301e170d3236303732393131353933315a" &
+        "170d3332303131393131353933315a30163114301206035504030c0b526f67756520496e746572305930" &
+        "1306072a8648ce3d020106082a8648ce3d0301070342000433ebd00a784f41a1ba1dc0707c4ea79eec18" &
+        "8fa5a4f5885cdbcd3806be3dc0db0955c21b7875e2b1e6f751f5aa15c4d2693adadfce4a74291e015a0e" &
+        "b5731402a38184308181300f0603551d130101ff040530030101ff300e0603551d0f0101ff0404030202" &
+        "04301e0603551d11041730158213726f6775652e61747461636b65722e74657374301d0603551d0e0416" &
+        "0414aa2fcce67c3a21569341ed348b0cb465ea9cce1f301f0603551d23041830168014adbcc4910226ac" &
+        "f0e9296785ee777b96efe3bf28300a06082a8648ce3d04030203470030440220747de90d9eec3f9c2885" &
+        "08482082ad8aa0e293b5e929166fc369b609dd89c37c02206163971cda614fbc7cea4b1e3617692cd47c" &
+        "36fb748f125ef6ba31ca8ffafae2";
+
+      Rogue_Leaf_DER : constant String :=
+        "308201a130820146a0030201020214080d97a7eae74b03ff8233adcd831314b89e39f5300a06082a8648" &
+        "ce3d04030230163114301206035504030c0b526f67756520496e746572301e170d323630373239313135" &
+        "3933315a170d3332303131393131353933315a301b3119301706035504030c10686f73742e6578616d70" &
+        "6c652e636f6d3059301306072a8648ce3d020106082a8648ce3d030107034200047a9fefa5958775b469" &
+        "d028962a7129fa68421df7a2ce5ea0aeeb0c9114dfc72f9453cb376acdd67a378dc261290bf05f943f3c" &
+        "7c62c8298a6b69ff57f6daa3c9a36d306b300c0603551d130101ff04023000301b0603551d1104143012" &
+        "8210686f73742e6578616d706c652e636f6d301d0603551d0e04160414dd288838f636c9d009a8686fb0" &
+        "ecad1a35b83905301f0603551d23041830168014aa2fcce67c3a21569341ed348b0cb465ea9cce1f300a" &
+        "06082a8648ce3d0403020349003046022100b77f7ae9cf1b07f6ca5be3d0a7539815d435ca8b8c538456" &
+        "036b723d445addb4022100a71d2f09b05305121238f5cd6ebc753ab62a6d45c3af4a5fd072fd8e5c2425" &
+        "e6";
+
+      Status : CryptoLib.ASN1.Errors.Decode_Status;
+
+      function From_Hex
+        (Text : String) return Ada.Streams.Stream_Element_Array
+      is
+         Result : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (Text'Length / 2));
+         function Nibble (C : Character) return Natural
+         is (case C is
+                when '0' .. '9' => Character'Pos (C) - Character'Pos ('0'),
+                when others     => Character'Pos (C) - Character'Pos ('a') + 10);
+      begin
+         for I in Result'Range loop
+            Result (I) :=
+              Ada.Streams.Stream_Element
+                (Nibble (Text (Text'First + 2 * Natural (I - 1))) * 16
+                 + Nibble (Text (Text'First + 2 * Natural (I - 1) + 1)));
+         end loop;
+         return Result;
+      end From_Hex;
+
+      function Decoded (Hex : String) return X509C.Certificate
+      is (X509C.Decode_DER
+            (From_Hex (Hex), CryptoLib.ASN1.Default_Limits, Status));
+
+      type Which is (Overlong, Not_A_CA, Cannot_Sign, Rogue_Name);
+
+      type Three (Kind : Which) is limited new XV.Path_Source with null record;
+
+      overriding function Length (Source : Three) return Positive is (3);
+
+      overriding function Certificate_At
+        (Source : Three; Index : Positive) return X509C.Certificate
+      is (case Source.Kind is
+             when Overlong =>
+               (case Index is
+                   when 1 => Decoded (Len0_Leaf_DER),
+                   when 2 => Decoded (Len0_Inter_DER),
+                   when others => Decoded (Len0_Root_DER)),
+             when Not_A_CA =>
+               (case Index is
+                   when 1 => Decoded (NotCA_Leaf_DER),
+                   when 2 => Decoded (NotCA_Inter_DER),
+                   when others => Decoded (NC_Root_DER)),
+             when Cannot_Sign =>
+               (case Index is
+                   when 1 => Decoded (NoSign_Leaf_DER),
+                   when 2 => Decoded (NoSign_Inter_DER),
+                   when others => Decoded (NC_Root_DER)),
+             when Rogue_Name =>
+               (case Index is
+                   when 1 => Decoded (Rogue_Leaf_DER),
+                   when 2 => Decoded (Rogue_Inter_DER),
+                   when others => Decoded (NC_Root_DER)));
+
+      overriding function Is_Trust_Anchor
+        (Source : Three; Item : X509C.Certificate) return Boolean
+      is (X509C.Subject_Bytes (Item)
+          = X509C.Subject_Bytes
+              (Decoded (if Source.Kind = Overlong
+                        then Len0_Root_DER else NC_Root_DER)));
+
+      At_Time : constant CryptoLib.X509.Certificate_Time :=
+        (Year => 2026, Month => 9, Day => 1,
+         Hour => 12, Minute => 0, Second => 0);
+
+      function Verdict (Kind : Which) return XV.Validation_Result
+      is (XV.Validate_Path (Three'(Kind => Kind), At_Time));
+   begin
+      --  A root that says pathlen:0 has said no CA below it may issue
+      --  another. The intermediate is genuine, signed by that root, and
+      --  issues anyway.
+      Check (not Verdict (Overlong).Valid
+             and then Verdict (Overlong).Failure = XV.Path_Length_Exceeded,
+             "a CA issuing below a pathlen:0 root is refused, got "
+             & XV.Failure_Image (Verdict (Overlong).Failure));
+
+      --  An issuer whose own basic constraints say it is not a CA. Its
+      --  signature over the leaf is perfectly good, which is the point.
+      Check (not Verdict (Not_A_CA).Valid
+             and then Verdict (Not_A_CA).Failure
+                      = XV.Invalid_Basic_Constraints,
+             "an issuer that is not a CA is refused, got "
+             & XV.Failure_Image (Verdict (Not_A_CA).Failure));
+
+      --  A CA whose key usage does not include keyCertSign. It signed the
+      --  leaf; it was never permitted to.
+      Check (not Verdict (Cannot_Sign).Valid
+             and then Verdict (Cannot_Sign).Failure = XV.Invalid_Key_Usage,
+             "a CA without keyCertSign is refused, got "
+             & XV.Failure_Image (Verdict (Cannot_Sign).Failure));
+
+      --  Name constraints reach the intermediate itself, not only the leaf.
+      --  Here the leaf is inside the permitted subtree and the CA that
+      --  issued it is not.
+      Check (not Verdict (Rogue_Name).Valid
+             and then Verdict (Rogue_Name).Failure
+                      = XV.Name_Constraint_Violation,
+             "a constrained CA cannot issue an intermediate named outside "
+             & "its own subtree, got "
+             & XV.Failure_Image (Verdict (Rogue_Name).Failure));
+   end Check_Chain_Constraint_Bypasses;
+
    procedure Check_X509_Extensions is
       use type CryptoLib.ASN1.Errors.Decode_Status;
       use type CryptoLib.PEM.Decode_Status;
@@ -11667,6 +11907,7 @@ begin
    Check_DH_Group14;
    Check_DH_Group1;
    Check_X25519_Shared_Secret;
+   Check_Chain_Constraint_Bypasses;
    Check_Random_Fails_Closed;
    Check_Off_Curve_Key;
    Check_Ed25519_Encoding;

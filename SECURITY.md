@@ -201,6 +201,16 @@ every status reading `Ok` while every key it produces is predictable.
   is wrong with the pair, and saying otherwise would be a claim this cannot
   support. That test used Ed448 for both until Ed448 became something this
   crate decides, which is the right way for such an example to go stale.
+- **The oldest chain questions are pinned, not assumed.** How deep a CA may
+  delegate (`pathLenConstraint`), whether an issuer is a CA at all, and
+  whether it is permitted to sign certificates are each asserted against a
+  chain built to break them -- a genuine intermediate issuing below a
+  `pathlen:0` root, an issuer whose own basic constraints say `CA:FALSE`, and
+  a CA whose key usage omits `keyCertSign`. In each the signature over the
+  leaf is perfectly good, which is what makes the check the only thing
+  standing there. Name constraints are asserted against the intermediate's
+  own name as well as the leaf's, since a constrained CA may not issue a CA
+  named outside its subtree either. OpenSSL refuses all four.
 - **Path validation checks a supplied path; it does not build one.**
   `X509.Validation` verifies signatures along a chain, issuer/subject linkage,
   validity windows against a caller-supplied time, basic constraints and path
