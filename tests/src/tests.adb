@@ -648,6 +648,56 @@ procedure Tests is
                       "and it chains");
             end;
 
+            --  RSASSA-PSS as a certificate signature. This crate could
+            --  verify a PSS-signed certificate long before it could make one,
+            --  which was the last algorithm it could check and not produce.
+            --
+            --  PSS states its hash, mask function and salt length in the
+            --  algorithm identifier rather than in its name, and the same
+            --  block has to appear in the signed body and beside the
+            --  signature. Two verifiers are asked: this crate's own, and
+            --  OpenSSL, because agreeing with itself would prove nothing about
+            --  a parameter block assembled wrongly.
+            declare
+               CA_Key : constant String :=
+                 CryptoLib.Certificates.RSA_Private_Key_PEM
+                   (N, E, D, P, Q, DP, DQ, QI);
+               PSS_CA, PSS_Leaf : Ada.Strings.Unbounded.Unbounded_String;
+               SPKI : constant String :=
+                 CryptoLib.Certificates.RSA_Public_Key_Info (N, E);
+               SPKI_Bytes : Ada.Streams.Stream_Element_Array
+                 (1 .. Ada.Streams.Stream_Element_Offset (SPKI'Length));
+            begin
+               for I in SPKI_Bytes'Range loop
+                  SPKI_Bytes (I) :=
+                    Character'Pos (SPKI (SPKI'First + Natural (I - 1)));
+               end loop;
+               Check (CryptoLib.Certificates.Create_CA_For_Key
+                        ("cryptolib-pss-ca", CA_Key, PSS_CA,
+                         Use_PSS => True)
+                        = CryptoLib.Certificates.Ok,
+                      "a PSS-signed CA certificate is issued");
+               Check (CryptoLib.Certificates.Issue_Server_Certificate_For_Key
+                        (Ada.Strings.Unbounded.To_String (PSS_CA), CA_Key,
+                         "pss-leaf.example",
+                         [1 => Ada.Strings.Unbounded.To_Unbounded_String
+                                 ("pss-leaf.example")],
+                         SPKI_Bytes, PSS_Leaf, Use_PSS => True)
+                        = CryptoLib.Certificates.Ok,
+                      "and a PSS-signed leaf under it");
+               Check (OpenSSL_Interop.Chain_Verifies
+                        (Ada.Strings.Unbounded.To_String (PSS_CA),
+                         Ada.Strings.Unbounded.To_String (PSS_Leaf)),
+                      "OpenSSL verifies the PSS chain");
+
+               --  Both directions are already covered without asking this
+               --  crate to read what it just wrote, which would be the weaker
+               --  check: Check_RSA_PSS verifies PSS certificates OpenSSL made,
+               --  and OpenSSL verifies the ones made here. Reading our own
+               --  output would only show the writer and reader agree with each
+               --  other.
+            end;
+
             --  A supplied key with an empty SPKI is refused rather than
             --  certified as nothing.
             declare

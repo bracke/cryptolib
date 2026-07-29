@@ -224,11 +224,15 @@ package CryptoLib.Certificates is
    --  @param Certificate_PEM    receives the CA certificate in PEM form
    --  @param Valid_Days         how long the CA is valid, counted from now
    --  @return Ok on success, otherwise a deterministic failure status
+   --  @param Use_PSS            sign with RSASSA-PSS rather than PKCS#1
+   --    v1.5; meaningful only for an RSA key, since every other algorithm here
+   --    has one signature scheme
    function Create_CA_For_Key
      (Common_Name        : String;
       CA_Private_Key_PEM : String;
       Certificate_PEM    : out Unbounded_String;
-      Valid_Days         : Positive := Default_CA_Days)
+      Valid_Days         : Positive := Default_CA_Days;
+      Use_PSS            : Boolean := False)
       return Certificate_Status;
 
    --  Issue a certificate for a public key the caller already holds.
@@ -252,6 +256,7 @@ package CryptoLib.Certificates is
    --  @param Certificate_PEM    receives the issued certificate in PEM form
    --  @param Valid_Days         how long the certificate is valid, from now
    --  @return Ok on success, otherwise a deterministic failure status
+   --  @param Use_PSS            sign with RSASSA-PSS rather than PKCS#1 v1.5
    function Issue_Server_Certificate_For_Key
      (CA_Certificate_PEM : String;
       CA_Private_Key_PEM : String;
@@ -259,7 +264,8 @@ package CryptoLib.Certificates is
       Names              : Subject_Alternative_Name_List;
       Subject_SPKI       : Ada.Streams.Stream_Element_Array;
       Certificate_PEM    : out Unbounded_String;
-      Valid_Days         : Positive := Default_Certificate_Days)
+      Valid_Days         : Positive := Default_Certificate_Days;
+      Use_PSS            : Boolean := False)
       return Certificate_Status;
 
    --  As Issue_Server_Certificate_For_Key, with the TLS client profile.
@@ -271,6 +277,7 @@ package CryptoLib.Certificates is
    --  @param Certificate_PEM    receives the issued certificate in PEM form
    --  @param Valid_Days         how long the certificate is valid, from now
    --  @return Ok on success, otherwise a deterministic failure status
+   --  @param Use_PSS            sign with RSASSA-PSS rather than PKCS#1 v1.5
    function Issue_Client_Certificate_For_Key
      (CA_Certificate_PEM : String;
       CA_Private_Key_PEM : String;
@@ -278,7 +285,8 @@ package CryptoLib.Certificates is
       Names              : Subject_Alternative_Name_List;
       Subject_SPKI       : Ada.Streams.Stream_Element_Array;
       Certificate_PEM    : out Unbounded_String;
-      Valid_Days         : Positive := Default_Certificate_Days)
+      Valid_Days         : Positive := Default_Certificate_Days;
+      Use_PSS            : Boolean := False)
       return Certificate_Status;
 
    --  As Issue_Server_Certificate_For_Key, with the email profile.
@@ -290,6 +298,7 @@ package CryptoLib.Certificates is
    --  @param Certificate_PEM    receives the issued certificate in PEM form
    --  @param Valid_Days         how long the certificate is valid, from now
    --  @return Ok on success, otherwise a deterministic failure status
+   --  @param Use_PSS            sign with RSASSA-PSS rather than PKCS#1 v1.5
    function Issue_Email_Certificate_For_Key
      (CA_Certificate_PEM : String;
       CA_Private_Key_PEM : String;
@@ -297,7 +306,8 @@ package CryptoLib.Certificates is
       Names              : Subject_Alternative_Name_List;
       Subject_SPKI       : Ada.Streams.Stream_Element_Array;
       Certificate_PEM    : out Unbounded_String;
-      Valid_Days         : Positive := Default_Certificate_Days)
+      Valid_Days         : Positive := Default_Certificate_Days;
+      Use_PSS            : Boolean := False)
       return Certificate_Status;
 
    --  Is this a DNS name, an IP address, an email address that may stand as a

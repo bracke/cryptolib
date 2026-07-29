@@ -309,6 +309,10 @@ package body CryptoLib.Certificates is
               & Byte (16#3D#) & Byte (16#04#) & Byte (16#03#) & Byte (16#02#)));
    end P256_Signature_Algorithm;
 
+   --  The salt length PSS signatures here use, matching the digest's own
+   --  length as everything in practice does.
+   RSA_PSS_Salt_Length : constant := 32;
+
    --  1.2.840.113549.1.1.1 rsaEncryption, with the explicit NULL parameters
    --  RFC 3279 requires.
    --
@@ -335,6 +339,41 @@ package body CryptoLib.Certificates is
          & Byte (16#05#) & Byte (16#00#));
    end RSA_Signature_Algorithm;
 
+   --  1.2.840.113549.1.1.10 id-RSASSA-PSS, with the parameters spelled out.
+   --
+   --  PSS carries which hash, which mask generation function and how long a
+   --  salt in the algorithm identifier rather than in its name, so the whole
+   --  block has to be built and has to appear identically in the signed body
+   --  and beside the signature -- a verifier that finds them differing refuses
+   --  the certificate.
+   --
+   --  These bytes were taken from a certificate OpenSSL signed with
+   --  -sigopt rsa_padding_mode:pss and compared octet for octet, rather than
+   --  assembled from the RFC and hoped over. RFC 4055 permits the hash's own
+   --  parameters to be absent; OpenSSL writes an explicit NULL, and matching
+   --  what it writes is what keeps the two agreeing. The trailer field is left
+   --  out because its only legal value is the default.
+   function RSA_PSS_Signature_Algorithm return String is
+      SHA256_Identifier : constant String :=
+        Seq (OID (Byte (16#60#) & Byte (16#86#) & Byte (16#48#)
+                  & Byte (16#01#) & Byte (16#65#) & Byte (16#03#)
+                  & Byte (16#04#) & Byte (16#02#) & Byte (16#01#))
+             & Byte (16#05#) & Byte (16#00#));
+      MGF1_Identifier : constant String :=
+        Seq (OID (Byte (16#2A#) & Byte (16#86#) & Byte (16#48#)
+                  & Byte (16#86#) & Byte (16#F7#) & Byte (16#0D#)
+                  & Byte (16#01#) & Byte (16#01#) & Byte (16#08#))
+             & SHA256_Identifier);
+   begin
+      return Seq
+        (OID (Byte (16#2A#) & Byte (16#86#) & Byte (16#48#) & Byte (16#86#)
+              & Byte (16#F7#) & Byte (16#0D#) & Byte (16#01#) & Byte (16#01#)
+              & Byte (16#0A#))
+         & Seq (Explicit (0, SHA256_Identifier)
+                & Explicit (1, MGF1_Identifier)
+                & Explicit (2, Integer_DER (RSA_PSS_Salt_Length))));
+   end RSA_PSS_Signature_Algorithm;
+
    --  1.3.101.113 id-Ed448. Like Ed25519 it names the hash inside the
    --  scheme, so the key and the signature share one identifier.
    function Ed448_Algorithm return String is
@@ -353,14 +392,21 @@ package body CryptoLib.Certificates is
                  when RSA_Key     => RSA_Algorithm);
    end Algorithm_Identifier;
 
-   function Signature_Algorithm (Algorithm : Key_Algorithm) return String is
+   --  Use_PSS only means anything for RSA: every other algorithm here has one
+   --  signature scheme, and PSS is a second way to sign with an RSA key rather
+   --  than a second kind of key.
+   function Signature_Algorithm
+     (Algorithm : Key_Algorithm; Use_PSS : Boolean := False) return String is
    begin
       return (case Algorithm is
                  when Ed25519_Key => Ed25519_Algorithm,
                  when P256_Key    => P256_Signature_Algorithm,
                  when P384_Key    => P384_Signature_Algorithm,
                  when Ed448_Key   => Ed448_Algorithm,
-                 when RSA_Key     => RSA_Signature_Algorithm);
+                 when RSA_Key     =>
+                   (if Use_PSS
+                    then RSA_PSS_Signature_Algorithm
+                    else RSA_Signature_Algorithm));
    end Signature_Algorithm;
 
    --  How wide the private and public halves are for each algorithm, in one
@@ -1474,7 +1520,8 @@ package body CryptoLib.Certificates is
       Not_After_Limit : Ada.Calendar.Time := Ada.Calendar.Clock;
       Subject_SPKI    : String := "";
       Sign_Modulus    : Ada.Streams.Stream_Element_Array := [1 .. 0 => 0];
-      Sign_Exponent   : Ada.Streams.Stream_Element_Array := [1 .. 0 => 0])
+      Sign_Exponent   : Ada.Streams.Stream_Element_Array := [1 .. 0 => 0];
+      Use_PSS         : Boolean := False)
       return String
    is
       --  The signer's algorithm and the subject's need not agree: a CSR brings
@@ -1483,7 +1530,7 @@ package body CryptoLib.Certificates is
         Seq
           (Explicit (0, Integer_DER (2))
            & Integer_From_Bytes (Serial)
-           & Signature_Algorithm (Algorithm)
+           & Signature_Algorithm (Algorithm, Use_PSS)
            & Name_DER (Issuer_CN)
            & Validity_DER (Valid_Days, Limit_Present, Not_After_Limit)
            & Name_DER (Subject_CN)
@@ -1505,15 +1552,26 @@ package body CryptoLib.Certificates is
                  (1 .. Sign_Modulus'Length);
             begin
                CryptoLib.Random.Initialize_Production (Rng);
-               if CryptoLib.RSA.Sign_PKCS1_V1_5
-                    (Sign_Modulus, Sign_Exponent, Sign_Seed,
-                     CryptoLib.RSA.SHA256, To_Bytes (TBS), Rng, Sig)
-                 /= CryptoLib.Errors.Ok
+               --  The identifier beside the signature has to be the same one
+               --  the signed body carries, PSS parameters included, or a
+               --  verifier refuses the certificate.
+               if Use_PSS then
+                  if CryptoLib.RSA.Sign_PSS
+                       (Sign_Modulus, Sign_Exponent, Sign_Seed,
+                        CryptoLib.RSA.SHA256, RSA_PSS_Salt_Length,
+                        To_Bytes (TBS), Rng, Sig) /= CryptoLib.Errors.Ok
+                  then
+                     return "";
+                  end if;
+               elsif CryptoLib.RSA.Sign_PKCS1_V1_5
+                       (Sign_Modulus, Sign_Exponent, Sign_Seed,
+                        CryptoLib.RSA.SHA256, To_Bytes (TBS), Rng, Sig)
+                       /= CryptoLib.Errors.Ok
                then
                   return "";
                end if;
                return Seq
-                 (TBS & Signature_Algorithm (Algorithm)
+                 (TBS & Signature_Algorithm (Algorithm, Use_PSS)
                   & Bits (To_String (Sig)));
             end;
 
@@ -2695,7 +2753,8 @@ package body CryptoLib.Certificates is
      (Common_Name        : String;
       CA_Private_Key_PEM : String;
       Certificate_PEM    : out Unbounded_String;
-      Valid_Days         : Positive := Default_CA_Days)
+      Valid_Days         : Positive := Default_CA_Days;
+      Use_PSS            : Boolean := False)
       return Certificate_Status
    is
       Rng  : CryptoLib.Random.Random_Source;
@@ -2752,7 +2811,8 @@ package body CryptoLib.Certificates is
                  Subject_Algorithm => Algorithm,
                  Valid_Days  => Valid_Days,
                  Sign_Modulus    => Value (CA_N),
-                 Sign_Exponent   => Value (CA_E)));
+                 Sign_Exponent   => Value (CA_E),
+                 Use_PSS         => Use_PSS));
       end;
 
       if Length (Cert) = 0 then
@@ -2777,7 +2837,8 @@ package body CryptoLib.Certificates is
       Subject_SPKI       : Ada.Streams.Stream_Element_Array;
       Profile            : Certificate_Profile;
       Certificate_PEM    : out Unbounded_String;
-      Valid_Days         : Positive) return Certificate_Status
+      Valid_Days         : Positive;
+      Use_PSS            : Boolean) return Certificate_Status
    is
       Rng : CryptoLib.Random.Random_Source;
 
@@ -2854,7 +2915,8 @@ package body CryptoLib.Certificates is
                  Not_After_Limit => CA_Ends,
                  Subject_SPKI    => To_String (Subject_SPKI),
                  Sign_Modulus    => Value (CA_N),
-                 Sign_Exponent   => Value (CA_E)));
+                 Sign_Exponent   => Value (CA_E),
+                 Use_PSS         => Use_PSS));
       end;
 
       if Length (Cert) = 0 then
@@ -2878,12 +2940,13 @@ package body CryptoLib.Certificates is
       Names              : Subject_Alternative_Name_List;
       Subject_SPKI       : Ada.Streams.Stream_Element_Array;
       Certificate_PEM    : out Unbounded_String;
-      Valid_Days         : Positive := Default_Certificate_Days)
+      Valid_Days         : Positive := Default_Certificate_Days;
+      Use_PSS            : Boolean := False)
       return Certificate_Status is
    begin
       return Issue_For_Supplied_Key
         (CA_Certificate_PEM, CA_Private_Key_PEM, Common_Name, Names,
-         Subject_SPKI, Server_Profile, Certificate_PEM, Valid_Days);
+         Subject_SPKI, Server_Profile, Certificate_PEM, Valid_Days, Use_PSS);
    end Issue_Server_Certificate_For_Key;
 
    function Issue_Email_Certificate_For_Key
@@ -2893,12 +2956,13 @@ package body CryptoLib.Certificates is
       Names              : Subject_Alternative_Name_List;
       Subject_SPKI       : Ada.Streams.Stream_Element_Array;
       Certificate_PEM    : out Unbounded_String;
-      Valid_Days         : Positive := Default_Certificate_Days)
+      Valid_Days         : Positive := Default_Certificate_Days;
+      Use_PSS            : Boolean := False)
       return Certificate_Status is
    begin
       return Issue_For_Supplied_Key
         (CA_Certificate_PEM, CA_Private_Key_PEM, Common_Name, Names,
-         Subject_SPKI, Email_Profile, Certificate_PEM, Valid_Days);
+         Subject_SPKI, Email_Profile, Certificate_PEM, Valid_Days, Use_PSS);
    end Issue_Email_Certificate_For_Key;
 
    function Issue_Client_Certificate_For_Key
@@ -2908,12 +2972,13 @@ package body CryptoLib.Certificates is
       Names              : Subject_Alternative_Name_List;
       Subject_SPKI       : Ada.Streams.Stream_Element_Array;
       Certificate_PEM    : out Unbounded_String;
-      Valid_Days         : Positive := Default_Certificate_Days)
+      Valid_Days         : Positive := Default_Certificate_Days;
+      Use_PSS            : Boolean := False)
       return Certificate_Status is
    begin
       return Issue_For_Supplied_Key
         (CA_Certificate_PEM, CA_Private_Key_PEM, Common_Name, Names,
-         Subject_SPKI, Client_Profile, Certificate_PEM, Valid_Days);
+         Subject_SPKI, Client_Profile, Certificate_PEM, Valid_Days, Use_PSS);
    end Issue_Client_Certificate_For_Key;
 
 
