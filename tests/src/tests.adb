@@ -7532,6 +7532,136 @@ procedure Tests is
       end;
    end Check_Cipher_Names;
 
+   --  Which group a server may talk this client into.
+   --
+   --  In group exchange the server proposes the prime and the generator, and
+   --  this is the only thing that decides whether to accept them: it matches
+   --  the proposal against the three RFC 3526 primes and names which one it
+   --  is, or refuses. A match it should not have made is a key exchange
+   --  carried out in a group the server chose, which is the whole reason the
+   --  client is meant to check rather than take what it is handed.
+   --
+   --  ssh_lib calls it on the server's reply. Nothing here called it at all.
+   procedure Check_Gex_Group_Selection is
+      use type CryptoLib.Diffie_Hellman.Supported_Gex_Group;
+
+      Gex_P14 : constant String :=
+        "00ffffffffffffffffc90fdaa22168c234c4c6628b80dc1cd129024e088a67cc74020bbea63b139b2251" &
+        "4a08798e3404ddef9519b3cd3a431b302b0a6df25f14374fe1356d6d51c245e485b576625e7ec6f44c42" &
+        "e9a637ed6b0bff5cb6f406b7edee386bfb5a899fa5ae9f24117c4b1fe649286651ece45b3dc2007cb8a1" &
+        "63bf0598da48361c55d39a69163fa8fd24cf5f83655d23dca3ad961c62f356208552bb9ed52907709696" &
+        "6d670c354e4abc9804f1746c08ca18217c32905e462e36ce3be39e772c180e86039b2783a2ec07a28fb5" &
+        "c55df06f4c52c9de2bcbf6955817183995497cea956ae515d2261898fa051015728e5a8aacaa68ffffff" &
+        "ffffffffff";
+      Gex_P16 : constant String :=
+        "00ffffffffffffffffc90fdaa22168c234c4c6628b80dc1cd129024e088a67cc74020bbea63b139b2251" &
+        "4a08798e3404ddef9519b3cd3a431b302b0a6df25f14374fe1356d6d51c245e485b576625e7ec6f44c42" &
+        "e9a637ed6b0bff5cb6f406b7edee386bfb5a899fa5ae9f24117c4b1fe649286651ece45b3dc2007cb8a1" &
+        "63bf0598da48361c55d39a69163fa8fd24cf5f83655d23dca3ad961c62f356208552bb9ed52907709696" &
+        "6d670c354e4abc9804f1746c08ca18217c32905e462e36ce3be39e772c180e86039b2783a2ec07a28fb5" &
+        "c55df06f4c52c9de2bcbf6955817183995497cea956ae515d2261898fa051015728e5a8aaac42dad3317" &
+        "0d04507a33a85521abdf1cba64ecfb850458dbef0a8aea71575d060c7db3970f85a6e1e4c7abf5ae8cdb" &
+        "0933d71e8c94e04a25619dcee3d2261ad2ee6bf12ffa06d98a0864d87602733ec86a64521f2b18177b20" &
+        "0cbbe117577a615d6c770988c0bad946e208e24fa074e5ab3143db5bfce0fd108e4b82d120a92108011a" &
+        "723c12a787e6d788719a10bdba5b2699c327186af4e23c1a946834b6150bda2583e9ca2ad44ce8dbbbc2" &
+        "db04de8ef92e8efc141fbecaa6287c59474e6bc05d99b2964fa090c3a2233ba186515be7ed1f612970ce" &
+        "e2d7afb81bdd762170481cd0069127d5b05aa993b4ea988d8fddc186ffb7dc90a6c08f4df435c9340631" &
+        "99ffffffffffffffff";
+      Gex_P18 : constant String :=
+        "00ffffffffffffffffc90fdaa22168c234c4c6628b80dc1cd129024e088a67cc74020bbea63b139b2251" &
+        "4a08798e3404ddef9519b3cd3a431b302b0a6df25f14374fe1356d6d51c245e485b576625e7ec6f44c42" &
+        "e9a637ed6b0bff5cb6f406b7edee386bfb5a899fa5ae9f24117c4b1fe649286651ece45b3dc2007cb8a1" &
+        "63bf0598da48361c55d39a69163fa8fd24cf5f83655d23dca3ad961c62f356208552bb9ed52907709696" &
+        "6d670c354e4abc9804f1746c08ca18217c32905e462e36ce3be39e772c180e86039b2783a2ec07a28fb5" &
+        "c55df06f4c52c9de2bcbf6955817183995497cea956ae515d2261898fa051015728e5a8aaac42dad3317" &
+        "0d04507a33a85521abdf1cba64ecfb850458dbef0a8aea71575d060c7db3970f85a6e1e4c7abf5ae8cdb" &
+        "0933d71e8c94e04a25619dcee3d2261ad2ee6bf12ffa06d98a0864d87602733ec86a64521f2b18177b20" &
+        "0cbbe117577a615d6c770988c0bad946e208e24fa074e5ab3143db5bfce0fd108e4b82d120a92108011a" &
+        "723c12a787e6d788719a10bdba5b2699c327186af4e23c1a946834b6150bda2583e9ca2ad44ce8dbbbc2" &
+        "db04de8ef92e8efc141fbecaa6287c59474e6bc05d99b2964fa090c3a2233ba186515be7ed1f612970ce" &
+        "e2d7afb81bdd762170481cd0069127d5b05aa993b4ea988d8fddc186ffb7dc90a6c08f4df435c9340284" &
+        "9236c3fab4d27c7026c1d4dcb2602646dec9751e763dba37bdf8ff9406ad9e530ee5db382f413001aeb0" &
+        "6a53ed9027d831179727b0865a8918da3edbebcf9b14ed44ce6cbaced4bb1bdb7f1447e6cc254b332051" &
+        "512bd7af426fb8f401378cd2bf5983ca01c64b92ecf032ea15d1721d03f482d7ce6e74fef6d55e702f46" &
+        "980c82b5a84031900b1c9e59e7c97fbec7e8f323a97a7e36cc88be0f1d45b7ff585ac54bd407b22b4154" &
+        "aacc8f6d7ebf48e1d814cc5ed20f8037e0a79715eef29be32806a1d58bb7c5da76f550aa3d8a1fbff0eb" &
+        "19ccb1a313d55cda56c9ec2ef29632387fe8d76e3c0468043e8f663f4860ee12bf2d5b0b7474d6e694f9" &
+        "1e6dbe115974a3926f12fee5e438777cb6a932df8cd8bec4d073b931ba3bc832b68d9dd300741fa7bf8a" &
+        "fc47ed2576f6936ba424663aab639c5ae4f5683423b4742bf1c978238f16cbe39d652de3fdb8befc848a" &
+        "d922222e04a4037c0713eb57a81a23f0c73473fc646cea306b4bcbc8862f8385ddfa9d4b7fa2c087e879" &
+        "683303ed5bdd3a062b3cf5b3a278a66d2a13f83f44f82ddf310ee074ab6a364597e899a0255dc164f31c" &
+        "c50846851df9ab48195ded7ea1b1d510bd7ee74d73faf36bc31ecfa268359046f4eb879f924009438b48" &
+        "1c6cd7889a002ed5ee382bc9190da6fc026e479558e4475677e9aa9e3050e2765694dfc81f56e880b96e" &
+        "7160c980dd98edd3dfffffffffffffffff";
+      Gex_P14_Altered : constant String :=
+        "00ffffffffffffffffc90fdaa22168c234c4c6628b80dc1cd129024e088a67cc74020bbea63b139b2251" &
+        "4a08798e3404ddef9519b3cd3a431b302b0a6df25f14374fe1356d6d51c245e485b576625e7ec6f44c42" &
+        "e9a637ed6b0bff5cb6f406b7edee386bfb5a899fa5ae9f24117c4b1fe649286651ece45b3dc2007cb8a1" &
+        "63bf0598da48361c55d39a69163fa8fd24cf5f83655d23dca3ad961c62f356208552bb9ed52907709696" &
+        "6d670c354e4abc9804f1746c08ca18217c32905e462e36ce3be39e772c180e86039b2783a2ec07a28fb5" &
+        "c55df06f4c52c9de2bcbf6955817183995497cea956ae515d2261898fa051015728e5a8aacaa68ffffff" &
+        "fffffffffe";
+
+      Generator_2 : constant String := "02";
+      Generator_5 : constant String := "05";
+
+      function From_Hex
+        (Text : String) return Ada.Streams.Stream_Element_Array
+      is
+         Result : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (Text'Length / 2));
+         function Nibble (C : Character) return Natural
+         is (case C is
+                when '0' .. '9' => Character'Pos (C) - Character'Pos ('0'),
+                when others     => Character'Pos (C) - Character'Pos ('a') + 10);
+      begin
+         for I in Result'Range loop
+            Result (I) :=
+              Ada.Streams.Stream_Element
+                (Nibble (Text (Text'First + 2 * Natural (I - 1))) * 16
+                 + Nibble (Text (Text'First + 2 * Natural (I - 1) + 1)));
+         end loop;
+         return Result;
+      end From_Hex;
+
+      function Chosen (Prime, Generator : String)
+        return CryptoLib.Diffie_Hellman.Supported_Gex_Group
+      is (CryptoLib.Diffie_Hellman.Select_Group_Exchange_Group
+            (From_Hex (Prime), From_Hex (Generator)));
+   begin
+      --  The three groups this crate knows, each recognised as itself.
+      Check (Chosen (Gex_P14, Generator_2)
+             = CryptoLib.Diffie_Hellman.Gex_Group14,
+             "the group14 prime is recognised as group14");
+      Check (Chosen (Gex_P16, Generator_2)
+             = CryptoLib.Diffie_Hellman.Gex_Group16,
+             "the group16 prime as group16");
+      Check (Chosen (Gex_P18, Generator_2)
+             = CryptoLib.Diffie_Hellman.Gex_Group18,
+             "and the group18 prime as group18");
+
+      --  One bit away from a group everybody agreed on is not that group.
+      --  A server proposing it is proposing its own, and the client has no
+      --  way to know what is wrong with it.
+      Check (Chosen (Gex_P14_Altered, Generator_2)
+             = CryptoLib.Diffie_Hellman.No_Supported_Gex_Group,
+             "a prime one bit from group14 is refused rather than taken for "
+             & "it");
+
+      --  The generator is part of the agreement too.
+      Check (Chosen (Gex_P14, Generator_5)
+             = CryptoLib.Diffie_Hellman.No_Supported_Gex_Group,
+             "the right prime under the wrong generator is refused");
+
+      --  And nothing small or absent slips through.
+      Check (Chosen ("fffffffb", Generator_2)
+             = CryptoLib.Diffie_Hellman.No_Supported_Gex_Group,
+             "a small prime nobody agreed to is refused");
+      Check (Chosen (Gex_P14, "")
+             = CryptoLib.Diffie_Hellman.No_Supported_Gex_Group,
+             "and a proposal with no generator at all");
+   end Check_Gex_Group_Selection;
+
    procedure Check_X509_Extensions is
       use type CryptoLib.ASN1.Errors.Decode_Status;
       use type CryptoLib.PEM.Decode_Status;
@@ -12537,6 +12667,7 @@ begin
    Check_DH_Group14;
    Check_DH_Group1;
    Check_DH_Generators;
+   Check_Gex_Group_Selection;
    Check_Cipher_Names;
    Check_X25519_Shared_Secret;
    Check_Chain_Constraint_Bypasses;
