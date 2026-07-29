@@ -4307,6 +4307,110 @@ procedure Tests is
              & XV.Failure_Image (Verdict (Wildcard, Other).Failure));
    end Check_Self_Issued_Policy_Allowance;
 
+   --  An algorithm this crate cannot verify says so.
+   --
+   --  "Could not check" and "the signature is bad" are different answers and
+   --  the second is a claim this has no right to make. Ed448 is the case
+   --  today: the certificate below is perfectly good, signed by OpenSSL, and
+   --  nothing here can verify it.
+   procedure Check_Unsupported_Algorithm is
+      package XS renames CryptoLib.X509.Signatures;
+      use type CryptoLib.ASN1.Errors.Decode_Status;
+      use type CryptoLib.Identities.Identity_Status;
+      use type CryptoLib.X509.Public_Key_Algorithm;
+      use type XS.Verification_Result;
+
+      package X509C renames CryptoLib.X509.Certificates;
+      package ID renames CryptoLib.Identities;
+
+      Ed448_Cert_DER : constant String :=
+        "3082019030820110a0030201020214499b72a92f60b85fae688c2d7b0df77a3783a599300506032b6571301831" &
+        "16301406035504030c0d65643434382e6578616d706c65301e170d3236303732393038313835395a170d323730" &
+        "3532353038313835395a30183116301406035504030c0d65643434382e6578616d706c653043300506032b6571" &
+        "033a00a843c98a9d526246cff10fcdb578e45782bc944079d28d44b81d055b2fc8592ead3229cd8470c9759f48" &
+        "09199c458db9582d0cee1c6413cc80a3533051301d0603551d0e04160414c58ea9ff9d69a59d32de045bf29d96" &
+        "94299ee732301f0603551d23041830168014c58ea9ff9d69a59d32de045bf29d9694299ee732300f0603551d13" &
+        "0101ff040530030101ff300506032b65710373003f53b85bf2e3b390a754665a2301898ea1d0d441abb6bfe792" &
+        "dd83428207a84c1ce5b27c82fe72a69b2a79f204ea49d11d3050adc030651500ec90b47ce66780aad0ff78418f" &
+        "aadfa693bf1d8f553c16db02827eb5a788377eb000f12f1f755e15d6619c9ec9ce8cc5b238eea39031ca3500";
+
+      Ed448_Chain_PEM : constant String :=
+        "-----BEGIN CERTIFICATE-----" & ASCII.LF &
+        "MIIBkDCCARCgAwIBAgIUSZtyqS9guF+uaIwtew33ejeDpZkwBQYDK2VxMBgxFjAU" & ASCII.LF &
+        "BgNVBAMMDWVkNDQ4LmV4YW1wbGUwHhcNMjYwNzI5MDgxODU5WhcNMjcwNTI1MDgx" & ASCII.LF &
+        "ODU5WjAYMRYwFAYDVQQDDA1lZDQ0OC5leGFtcGxlMEMwBQYDK2VxAzoAqEPJip1S" & ASCII.LF &
+        "YkbP8Q/NtXjkV4K8lEB50o1EuB0FWy/IWS6tMinNhHDJdZ9ICRmcRY25WC0M7hxk" & ASCII.LF &
+        "E8yAo1MwUTAdBgNVHQ4EFgQUxY6p/51ppZ0y3gRb8p2WlCme5zIwHwYDVR0jBBgw" & ASCII.LF &
+        "FoAUxY6p/51ppZ0y3gRb8p2WlCme5zIwDwYDVR0TAQH/BAUwAwEB/zAFBgMrZXED" & ASCII.LF &
+        "cwA/U7hb8uOzkKdUZlojAYmOodDUQau2v+eS3YNCggeoTBzlsnyC/nKmmyp58gTq" & ASCII.LF &
+        "SdEdMFCtwDBlFQDskLR85meAqtD/eEGPqt+mk78dj1U8FtsCgn61p4g3frAA8S8f" & ASCII.LF &
+        "dV4V1mGcnsnOjMWyOO6jkDHKNQA=" & ASCII.LF &
+        "-----END CERTIFICATE-----" & ASCII.LF;
+
+      Ed448_Key_PEM : constant String :=
+        "-----BEGIN PRIVATE KEY-----" & ASCII.LF &
+        "MEcCAQAwBQYDK2VxBDsEOci3ZCBNjftMDBeqGGJGuncwUvsWNKRSM6Zbgqe9TkkA" & ASCII.LF &
+        "uIxd9O1mfjnMfIsTwKhGn+MzadUIIx+CPQ==" & ASCII.LF &
+        "-----END PRIVATE KEY-----" & ASCII.LF;
+
+      function From_Hex
+        (Text : String) return Ada.Streams.Stream_Element_Array
+      is
+         Result : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (Text'Length / 2));
+         function Nibble (C : Character) return Natural
+         is (case C is
+                when '0' .. '9' => Character'Pos (C) - Character'Pos ('0'),
+                when others     => Character'Pos (C) - Character'Pos ('a') + 10);
+      begin
+         for I in Result'Range loop
+            Result (I) :=
+              Ada.Streams.Stream_Element
+                (Nibble (Text (Text'First + 2 * Natural (I - 1))) * 16
+                 + Nibble (Text (Text'First + 2 * Natural (I - 1) + 1)));
+         end loop;
+         return Result;
+      end From_Hex;
+
+      Status : CryptoLib.ASN1.Errors.Decode_Status;
+      Cert   : constant X509C.Certificate :=
+        X509C.Decode_DER
+          (From_Hex (Ed448_Cert_DER), CryptoLib.ASN1.Default_Limits, Status);
+   begin
+      --  It decodes. A certificate carrying a key this crate cannot use is
+      --  still a certificate, and its other fields still mean what they say.
+      Check (Status = CryptoLib.ASN1.Errors.Ok
+             and then X509C.Is_Present (Cert),
+             "an Ed448 certificate decodes: "
+             & CryptoLib.ASN1.Errors.Status_Image (Status));
+      Check (X509C.Public_Key_Algorithm_Of (Cert) = CryptoLib.X509.Ed448,
+             "and its key algorithm is named rather than guessed at");
+
+      --  The signature is genuine -- OpenSSL made it -- and unverifiable
+      --  here. Reporting Invalid_Signature would be saying the certificate
+      --  was altered, which this cannot know.
+      Check (XS.Verify_Certificate_Signature (Cert, Cert)
+             = XS.Unsupported_Algorithm,
+             "a self-signature this crate cannot check is reported as "
+             & "unchecked, not as bad, got "
+             & XS.Result_Image (XS.Verify_Certificate_Signature (Cert, Cert)));
+
+      --  Same distinction one level up. The key really does belong to the
+      --  certificate; Identities cannot establish that, and says so with a
+      --  status of its own rather than the one meaning "these do not match".
+      declare
+         Item : ID.Local_Identity;
+         St   : ID.Identity_Status;
+      begin
+         ID.Decode (Ed448_Chain_PEM, Ed448_Key_PEM, Item, St);
+         Check (St = ID.Unsupported_Key,
+                "an identity whose key this cannot check reports unsupported "
+                & "rather than mismatched, got " & ID.Status_Image (St));
+         Check (not ID.Is_Present (Item),
+                "and nothing is handed back");
+      end;
+   end Check_Unsupported_Algorithm;
+
    procedure Check_X509_Extensions is
       use type CryptoLib.ASN1.Errors.Decode_Status;
       use type CryptoLib.PEM.Decode_Status;
@@ -5926,6 +6030,32 @@ procedure Tests is
       List : constant XC.Revocation_List :=
         XC.Decode_DER
           (From_Hex (CRL_DER), CryptoLib.ASN1.Default_Limits, Status);
+
+      --  For the separation check at the end.
+      package XV renames CryptoLib.X509.Validation;
+
+      type Revoked_Path is limited new XV.Path_Source with null record;
+
+      overriding function Length (Source : Revoked_Path) return Positive
+      is (2);
+
+      overriding function Certificate_At
+        (Source : Revoked_Path; Index : Positive) return X509C.Certificate
+      is (if Index = 1
+          then X509C.Decode_DER
+                 (From_Hex (CRL_Leaf_DER), CryptoLib.ASN1.Default_Limits,
+                  Status)
+          else X509C.Decode_DER
+                 (From_Hex (CRL_CA_DER), CryptoLib.ASN1.Default_Limits,
+                  Status));
+
+      overriding function Is_Trust_Anchor
+        (Source : Revoked_Path; Item : X509C.Certificate) return Boolean
+      is (X509C.Subject_Bytes (Item)
+          = X509C.Subject_Bytes
+              (X509C.Decode_DER
+                 (From_Hex (CRL_CA_DER), CryptoLib.ASN1.Default_Limits,
+                  Status)));
    begin
       Check (Status = CryptoLib.ASN1.Errors.Ok and then XC.Is_Present (List),
              "the CRL decodes: "
@@ -6000,6 +6130,38 @@ procedure Tests is
                       "an altered CRL does not verify");
             end if;
          end;
+      end;
+      --  Path validation does not consult revocation, and that is a
+      --  decision rather than an oversight: the material has to come from
+      --  somewhere, fetching it is the application's, and a validator that
+      --  went to the network would make every validation a request that can
+      --  hang. What it must not do is imply otherwise.
+      --
+      --  So: a certificate this very CRL revokes still passes Validate_Path.
+      --  A caller reading a valid result as "not revoked" is reading
+      --  something that was never checked, and the day Validate_Path starts
+      --  consulting a CRL it did not receive, this check is what says so.
+      declare
+         use type XV.Validation_Failure;
+         use type CryptoLib.X509.Revocation.Revocation_Answer;
+
+         Inside : constant CryptoLib.X509.Certificate_Time :=
+           (Year => 2026, Month => 8, Day => 1,
+            Hour => 0, Minute => 0, Second => 0);
+
+         Verdict : constant XV.Validation_Result :=
+           XV.Validate_Path (Revoked_Path'(null record), Inside);
+      begin
+         --  The premise: the CRL really does revoke this certificate.
+         Check (CryptoLib.X509.Revocation.Check_Against_CRL
+                  (Leaf, CA, List, Inside)
+                = CryptoLib.X509.Revocation.Revoked,
+                "fixture: the list revokes the leaf");
+
+         Check (Verdict.Valid,
+                "and path validation still accepts it, because revocation "
+                & "is not among the things it checks: "
+                & XV.Failure_Image (Verdict.Failure));
       end;
    end Check_X509_CRL;
 
@@ -9159,6 +9321,7 @@ begin
    Check_Policy_Qualifiers;
    Check_Policy_Aware_Path_Building;
    Check_Self_Issued_Policy_Allowance;
+   Check_Unsupported_Algorithm;
    Check_Random_Fails_Closed;
    Check_Off_Curve_Key;
    Check_Ed25519_Encoding;
