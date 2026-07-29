@@ -454,7 +454,10 @@ procedure Tests is
             To_String (Leaf_Key),
             "localhost",
             "secret",
-            Bundle) = CryptoLib.Certificates.Ok,
+            Bundle,
+            --  Cheap on purpose: this checks that a bundle comes out, not
+            --  how hard it is to open. Check_PKCS12_Work_Factor covers that.
+            Iterations => 4_096) = CryptoLib.Certificates.Ok,
          "PKCS#12 generation succeeds");
       Check
         (Ada.Strings.Unbounded.Element (Bundle, 1) = Character'Val (16#30#),
@@ -2611,6 +2614,86 @@ procedure Tests is
                 "and a self-signed CA points at its own key");
       end;
    end Check_Key_Identifiers;
+
+   --  How much work a password has to be put through to open a bundle.
+   --
+   --  A PKCS#12 file holds a private key, so a copy of it is an offline
+   --  guessing target and the iteration count is the only thing standing
+   --  between a weak password and the key.
+   procedure Check_PKCS12_Work_Factor is
+      use type CryptoLib.PKCS12.Open_Status;
+
+      package P12 renames CryptoLib.PKCS12;
+
+      --  Above 16#8000#, where the DER integer encoder used to emit a
+      --  leading zero octet that DER does not permit -- so a bundle written
+      --  with a count in this range was refused by this crate's own reader.
+      --  Small enough to keep the suite quick.
+      Count : constant := 32_768;
+
+      --  02 03 00 80 00: an INTEGER, three content octets, 32_768 with the
+      --  pad that keeps it positive.
+      Encoded : constant String :=
+        Character'Val (16#02#) & Character'Val (16#03#)
+        & Character'Val (16#00#) & Character'Val (16#80#)
+        & Character'Val (16#00#);
+
+      CA_PEM, CA_Key, Bundle : Unbounded_String;
+      Outcome : CryptoLib.Certificates.Certificate_Status;
+      Seen    : Natural := 0;
+   begin
+      --  The default itself is floored by a Compile_Time_Error in the spec,
+      --  which is where a check the compiler can settle belongs. What is
+      --  worth checking here is that the count reaches the bundle at all.
+      Outcome :=
+        CryptoLib.Certificates.Create_Local_CA
+          ("p12-work-ca", CA_PEM, CA_Key, CryptoLib.Certificates.P384_Key);
+      Check (Outcome = CryptoLib.Certificates.Ok, "fixture: CA created");
+
+      Outcome :=
+        CryptoLib.Certificates.Generate_PKCS12
+          (To_String (CA_PEM), To_String (CA_Key), "work", "secret",
+           Bundle, Iterations => Count);
+      Check (Outcome = CryptoLib.Certificates.Ok,
+             "a bundle is written at this count");
+
+      --  Both the MAC and the encryption derive from the password, so an
+      --  attacker tests guesses against whichever is cheaper. Raising one
+      --  and leaving the other buys nothing, which is why the count has to
+      --  appear twice.
+      declare
+         Text : constant String := To_String (Bundle);
+      begin
+         for I in Text'First .. Text'Last - Encoded'Length + 1 loop
+            if Text (I .. I + Encoded'Length - 1) = Encoded then
+               Seen := Seen + 1;
+            end if;
+         end loop;
+      end;
+      Check (Seen = 2,
+             "the count governs both the MAC and the encryption, found"
+             & Natural'Image (Seen) & " of 2");
+
+      --  And the bundle still opens, which is what the old encoder broke:
+      --  a count in this range came out non-canonical and this crate's own
+      --  reader refused the file it had just written.
+      declare
+         Text : constant String := To_String (Bundle);
+         Raw  : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (Text'Length));
+         Item : P12.Bundle;
+         St   : P12.Open_Status;
+      begin
+         for I in Text'Range loop
+            Raw (Ada.Streams.Stream_Element_Offset (I - Text'First + 1)) :=
+              Character'Pos (Text (I));
+         end loop;
+
+         P12.Open (Raw, "secret", CryptoLib.ASN1.Default_Limits, Item, St);
+         Check (St = P12.Ok,
+                "and it opens, got " & P12.Status_Image (St));
+      end;
+   end Check_PKCS12_Work_Factor;
 
    procedure Check_X509_Extensions is
       use type CryptoLib.ASN1.Errors.Decode_Status;
@@ -6368,7 +6451,7 @@ procedure Tests is
       Outcome :=
         CryptoLib.Certificates.Generate_PKCS12
           (To_String (CA_PEM), To_String (CA_Key), "friendly", "secret",
-           Bundle);
+           Bundle, Iterations => 4_096);
       Check (Outcome = CryptoLib.Certificates.Ok, "fixture: bundle written");
 
       declare
@@ -7459,6 +7542,7 @@ begin
    Check_Serial_Numbers;
    Check_Validity_Window;
    Check_Key_Identifiers;
+   Check_PKCS12_Work_Factor;
    Check_Decoder_Robustness;
    Check_Certificate_Ambiguity;
    Check_X509_Access_Locations;

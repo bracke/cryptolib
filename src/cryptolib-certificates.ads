@@ -213,10 +213,43 @@ package CryptoLib.Certificates is
    --  @param Password the password protecting the bundle
    --  @param Bundle_Data receives the PKCS#12 bundle
    --  @return Ok on success, otherwise a deterministic failure status
+   --  How much work a password has to be put through to open a bundle.
+   --
+   --  A PKCS#12 file holds a private key, so a copy of it is an offline
+   --  guessing target: the only thing between a weak password and the key is
+   --  the cost of trying one. The old value was 2048, which is what
+   --  `openssl pkcs12 -export` still writes and roughly three hundred times
+   --  cheaper to attack than current guidance for PBKDF2-HMAC-SHA256.
+   --
+   --  It applies to the bundle's MAC as well as to its encryption, and that
+   --  is not a detail: both derive from the password, so an attacker tests
+   --  guesses against whichever is cheaper. Raising one and leaving the
+   --  other is worth nothing at all.
+   Default_PKCS12_Iterations : constant := 600_000;
+
+   --  A floor, enforced where lowering it cannot be missed. A test could
+   --  only say the constant is what it is, which the compiler already knows;
+   --  this makes weakening the default fail the build instead.
+   pragma Compile_Time_Error
+     (Default_PKCS12_Iterations < 200_000,
+      "the default PKCS#12 work factor must not be lowered: a bundle holds "
+      & "a private key, and the count is what an offline guess costs");
+
+   --  Write a PKCS#12 bundle holding a certificate and its private key.
+   --  @param Certificate_PEM the certificate in PEM form
+   --  @param Private_Key_PEM its private key in PEM form
+   --  @param Friendly_Name the name to label the bundle's entries with
+   --  @param Password the password protecting the bundle
+   --  @param Bundle_Data receives the bundle
+   --  @param Iterations how much work opening it costs; lower only where
+   --  something other than the password's protection is being exercised
+   --  @return Ok on success, otherwise a deterministic failure status
    function Generate_PKCS12
      (Certificate_PEM : String;
       Private_Key_PEM : String;
       Friendly_Name   : String;
       Password        : String;
-      Bundle_Data     : out Unbounded_String) return Certificate_Status;
+      Bundle_Data     : out Unbounded_String;
+      Iterations      : Positive := Default_PKCS12_Iterations)
+      return Certificate_Status;
 end CryptoLib.Certificates;

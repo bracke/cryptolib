@@ -187,6 +187,25 @@ The RNG **fails closed**: if no OS source is available it returns
   responders. The nonce must be unpredictable (`CryptoLib.Random`, not a
   counter); without one, a captured "good" response replays until its
   `nextUpdate`.
+- **Opening a PKCS#12 bundle costs real work.** The bundle holds a private
+  key, so a copy of one is an offline guessing target and the iteration count
+  is the only thing between a weak password and the key. It was 2048 -- what
+  `openssl pkcs12 -export` still writes, and roughly three hundred times
+  cheaper to attack than current guidance for PBKDF2-HMAC-SHA256. It is now
+  600,000, floored by a `Compile_Time_Error` so lowering it fails the build
+  rather than a review. The count governs the bundle's **MAC as well as its
+  encryption**: both derive from the password, an attacker tests guesses
+  against whichever is cheaper, and raising one alone would have bought
+  nothing. `Generate_PKCS12` takes the count so a caller can go lower where
+  something other than the password's protection is being exercised.
+  OpenSSL opens the result and reports both counts; a wrong password is
+  refused.
+- **DER integers are emitted in the shortest form.** The encoder wrote a
+  fixed four octets for any value at or above `16#8000#`, so 600,000 came out
+  as `00 09 27 C0` -- a leading zero DER permits only when the next octet
+  would otherwise read as negative. Nothing had ever encoded a value in that
+  range, so the first bundle written at the new work factor was refused by
+  this crate's own reader. Encoder and decoder now agree by construction.
 - **An issued certificate names its own key and its signer's.** Neither
   `subjectKeyIdentifier` nor `authorityKeyIdentifier` was emitted, and RFC
   5280 requires both -- SKI in every CA certificate, AKI in everything but a

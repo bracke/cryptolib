@@ -131,20 +131,37 @@ package body CryptoLib.Certificates is
    function UTF8 (Value : String) return String is (TLV (16#0C#, Value));
    function UTC (Value : String) return String is (TLV (16#17#, Value));
 
+   --  A non-negative INTEGER in the shortest form DER permits.
+   --
+   --  The previous shape emitted a fixed four octets for anything at or
+   --  above 16#8000#, so 600_000 came out as 00 09 27 C0 -- a leading zero
+   --  octet that DER allows only when the next one would otherwise read as
+   --  negative. Nothing encoded a value in that range until something did,
+   --  and then this crate wrote a bundle its own reader refused. The bound
+   --  is the same one the decoder enforces, so the two now agree by
+   --  construction rather than by luck.
    function Integer_DER (Value : Natural) return String is
+      Content : String (1 .. 5);
+      First   : Natural := Content'Last;
+      Rest    : Natural := Value;
    begin
-      if Value < 128 then
-         return TLV (16#02#, "" & Byte (Value));
-      elsif Value < 16#8000# then
-         return TLV (16#02#, Byte (Value / 256) & Byte (Value mod 256));
-      else
-         return TLV
-           (16#02#,
-            Byte (Value / 16#1000000#)
-            & Byte ((Value / 16#10000#) mod 256)
-            & Byte ((Value / 256) mod 256)
-            & Byte (Value mod 256));
+      --  Least significant octet first, keeping at least one.
+      Content (First) := Byte (Rest mod 256);
+      Rest := Rest / 256;
+      while Rest > 0 loop
+         First := First - 1;
+         Content (First) := Byte (Rest mod 256);
+         Rest := Rest / 256;
+      end loop;
+
+      --  A leading octet at or above 16#80# would read as a negative
+      --  number, so a zero goes in front of it -- and only then.
+      if Character'Pos (Content (First)) >= 16#80# then
+         First := First - 1;
+         Content (First) := Byte (0);
       end if;
+
+      return TLV (16#02#, Content (First .. Content'Last));
    end Integer_DER;
 
    function OID (Content : String) return String is
@@ -435,9 +452,9 @@ package body CryptoLib.Certificates is
    function Mac_Data
      (Authenticated_Safe : String;
       Password           : String;
-      Salt               : Ada.Streams.Stream_Element_Array) return String
+      Salt               : Ada.Streams.Stream_Element_Array;
+      Iterations         : Positive) return String
    is
-      Iterations : constant Positive := 2048;
       Key        : constant Ada.Streams.Stream_Element_Array :=
         CryptoLib.Macs.PKCS12_KDF_SHA1
           --  The plain password: PKCS12_KDF_SHA1 widens it to a BMPString
@@ -1931,11 +1948,12 @@ package body CryptoLib.Certificates is
       Private_Key_PEM : String;
       Friendly_Name   : String;
       Password        : String;
-      Bundle_Data     : out Unbounded_String) return Certificate_Status
+      Bundle_Data     : out Unbounded_String;
+      Iterations      : Positive := Default_PKCS12_Iterations)
+      return Certificate_Status
    is
       Cert_DER        : constant String := Base64_Decode (Certificate_PEM);
       Key_DER         : constant String := Base64_Decode (Private_Key_PEM);
-      Iterations      : constant Positive := 2048;
       Padded_Key      : constant Ada.Streams.Stream_Element_Array :=
         PKCS7_Pad (Key_DER, 16);
       Rng             : CryptoLib.Random.Random_Source;
@@ -2006,7 +2024,9 @@ package body CryptoLib.Certificates is
                 (Seq
                    (Integer_DER (3)
                     & Auth_Safe
-                    & Mac_Data (Authenticated_Safe, Password, Mac_Salt)));
+                    & Mac_Data
+                        (Authenticated_Safe, Password, Mac_Salt,
+                         Iterations)));
             return Ok;
          end;
       end;
