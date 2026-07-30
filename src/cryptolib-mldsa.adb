@@ -16,21 +16,36 @@ package body CryptoLib.MLDSA is
 
    --  Everything the three parameter sets differ in.
    type Parameters is record
-      K, L   : Positive;             --  matrix dimensions
-      Eta    : Positive;             --  secret coefficient bound
-      PK_Len : Positive;
-      SK_Len : Positive;
+      K, L    : Positive;            --  matrix dimensions
+      Eta     : Positive;            --  secret coefficient bound
+      Tau     : Positive;            --  non-zero coefficients in the challenge
+      Beta    : Positive;            --  Tau * Eta
+      Gamma1  : Positive;            --  mask range
+      Gamma2  : Positive;            --  decomposition modulus
+      Omega   : Positive;            --  hint weight ceiling
+      C_Bytes : Positive;            --  challenge digest length
+      PK_Len  : Positive;
+      SK_Len  : Positive;
       Sig_Len : Positive;
    end record;
 
    function Params (Set : Parameter_Set) return Parameters is
      (case Set is
-         when ML_DSA_44 => (K => 4, L => 4, Eta => 2,
-                            PK_Len => 1312, SK_Len => 2560, Sig_Len => 2420),
-         when ML_DSA_65 => (K => 6, L => 5, Eta => 4,
-                            PK_Len => 1952, SK_Len => 4032, Sig_Len => 3309),
-         when ML_DSA_87 => (K => 8, L => 7, Eta => 2,
-                            PK_Len => 2592, SK_Len => 4896, Sig_Len => 4627));
+         when ML_DSA_44 =>
+           (K => 4, L => 4, Eta => 2, Tau => 39, Beta => 78,
+            Gamma1 => 2 ** 17, Gamma2 => (Q - 1) / 88, Omega => 80,
+            C_Bytes => 32,
+            PK_Len => 1312, SK_Len => 2560, Sig_Len => 2420),
+         when ML_DSA_65 =>
+           (K => 6, L => 5, Eta => 4, Tau => 49, Beta => 196,
+            Gamma1 => 2 ** 19, Gamma2 => (Q - 1) / 32, Omega => 55,
+            C_Bytes => 48,
+            PK_Len => 1952, SK_Len => 4032, Sig_Len => 3309),
+         when ML_DSA_87 =>
+           (K => 8, L => 7, Eta => 2, Tau => 60, Beta => 120,
+            Gamma1 => 2 ** 19, Gamma2 => (Q - 1) / 32, Omega => 75,
+            C_Bytes => 64,
+            PK_Len => 2592, SK_Len => 4896, Sig_Len => 4627));
 
    function Public_Key_Length (Set : Parameter_Set) return Positive is
      (Params (Set).PK_Len);
@@ -96,6 +111,15 @@ package body CryptoLib.MLDSA is
       end if;
       return R;
    end Mod_Q;
+
+   --  The representative in (-q/2, q/2], which is what the signature encoding
+   --  and the norm checks are stated in terms of. Reduced form is 0 .. q-1,
+   --  and packing that directly underflows the field width.
+   function Centred (Value : Coefficient) return Integer is
+      R : constant Integer := Mod_Q (Value);
+   begin
+      return (if R > (Q - 1) / 2 then R - Q else R);
+   end Centred;
 
    function Mul_Mod_Q (Left, Right : Coefficient) return Coefficient is
      (Coefficient (Long_Long_Integer (Left) * Long_Long_Integer (Right)
@@ -311,6 +335,33 @@ package body CryptoLib.MLDSA is
 
    --  The same, for values already non-negative (t1), where there is no
    --  offset to subtract from.
+   --  The unsigned counterpart of Pack_Bits_Plain, for t1. Unpack_Bits is
+   --  offset-based -- it returns Offset - value -- so reading a plain
+   --  unsigned field through it yields the negation, which then has to be
+   --  undone. Doing that twice is how verification came to compute
+   --  A*z + c*t1*2**d instead of minus.
+   function Unpack_Bits_Plain
+     (Data : Stream_Element_Array; Width : Positive) return Poly
+   is
+      Result : Poly := [others => 0];
+      Accum  : Natural := 0;
+      Bits   : Natural := 0;
+      Cursor : Stream_Element_Offset := Data'First;
+      Span   : constant Natural := 2 ** Width;
+   begin
+      for I in Poly_Index loop
+         while Bits < Width loop
+            Accum := Accum + Natural (Data (Cursor)) * (2 ** Bits);
+            Bits := Bits + 8;
+            Cursor := Cursor + 1;
+         end loop;
+         Result (I) := Integer (Accum mod Span);
+         Accum := Accum / Span;
+         Bits := Bits - Width;
+      end loop;
+      return Result;
+   end Unpack_Bits_Plain;
+
    procedure Pack_Bits_Plain
      (Values : Poly; Width : Positive; Into : out Stream_Element_Array)
    is
@@ -330,6 +381,180 @@ package body CryptoLib.MLDSA is
          end loop;
       end loop;
    end Pack_Bits_Plain;
+
+   --  Unpack Width-bit fields written by Pack_Bits/Pack_Bits_Plain. Offset is
+   --  what Pack_Bits subtracted from, so zero undoes Pack_Bits_Plain.
+   function Unpack_Bits
+     (Data : Stream_Element_Array; Width : Positive; Offset : Integer)
+      return Poly
+   is
+      Result : Poly := [others => 0];
+      Accum  : Natural := 0;
+      Bits   : Natural := 0;
+      Cursor : Stream_Element_Offset := Data'First;
+      Mask   : constant Natural := 2 ** Width - 1;
+   begin
+      for I in Poly_Index loop
+         while Bits < Width loop
+            Accum := Accum + Natural (Data (Cursor)) * (2 ** Bits);
+            Bits := Bits + 8;
+            Cursor := Cursor + 1;
+         end loop;
+         Result (I) := Offset - Integer (Accum mod (Mask + 1));
+         Accum := Accum / (Mask + 1);
+         Bits := Bits - Width;
+      end loop;
+      return Result;
+   end Unpack_Bits;
+
+   --  Decompose, algorithm 36: r = r1 * 2 * gamma2 + r0 with r0 centred.
+   procedure Decompose
+     (Value : Coefficient; Gamma2 : Positive;
+      High : out Integer; Low : out Integer)
+   is
+      R  : constant Integer := Mod_Q (Value);
+      R0 : Integer := R mod (2 * Gamma2);
+   begin
+      if R0 > Gamma2 then
+         R0 := R0 - 2 * Gamma2;
+      end if;
+      if R - R0 = Q - 1 then
+         High := 0;
+         Low := R0 - 1;
+      else
+         High := (R - R0) / (2 * Gamma2);
+         Low := R0;
+      end if;
+   end Decompose;
+
+   function High_Bits (Item : Poly; Gamma2 : Positive) return Poly is
+      Result : Poly;
+      H, L   : Integer;
+   begin
+      for I in Poly_Index loop
+         Decompose (Item (I), Gamma2, H, L);
+         Result (I) := H;
+      end loop;
+      return Result;
+   end High_Bits;
+
+   function Low_Bits (Item : Poly; Gamma2 : Positive) return Poly is
+      Result : Poly;
+      H, L   : Integer;
+   begin
+      for I in Poly_Index loop
+         Decompose (Item (I), Gamma2, H, L);
+         Result (I) := L;
+      end loop;
+      return Result;
+   end Low_Bits;
+
+   --  MakeHint / UseHint, algorithms 39 and 40.
+   function Make_Hint
+     (Z, R : Coefficient; Gamma2 : Positive) return Natural
+   is
+      H1, L1, H2, L2 : Integer;
+   begin
+      Decompose (R, Gamma2, H1, L1);
+      Decompose (Mod_Q (R + Z), Gamma2, H2, L2);
+      return (if H1 /= H2 then 1 else 0);
+   end Make_Hint;
+
+   function Use_Hint
+     (Hint : Natural; R : Coefficient; Gamma2 : Positive) return Integer
+   is
+      M      : constant Integer := (Q - 1) / (2 * Gamma2);
+      H, L   : Integer;
+   begin
+      Decompose (R, Gamma2, H, L);
+      if Hint = 0 then
+         return H;
+      elsif L > 0 then
+         return (H + 1) mod M;
+      else
+         return (H - 1) mod M;
+      end if;
+   end Use_Hint;
+
+   --  SampleInBall, algorithm 29: tau coefficients of plus or minus one,
+   --  placed by a Fisher-Yates pass driven by the challenge digest.
+   function Sample_In_Ball
+     (Seed : Stream_Element_Array; Tau : Positive) return Poly
+   is
+      Result : Poly := [others => 0];
+      Stream : constant Stream_Element_Array :=
+        CryptoLib.SHA3.SHAKE256 (Seed, 8 + 256);
+      Cursor : Stream_Element_Offset := Stream'First + 8;
+      Bit    : Natural := 0;
+
+      --  The first eight octets are the sign bits, read one at a time. They
+      --  are sixty-four bits and Natural is thirty-two, so accumulating them
+      --  into one integer overflows -- which it did.
+      function Next_Sign return Integer is
+         Octet : constant Stream_Element :=
+           Stream (Stream'First + Stream_Element_Offset (Bit / 8));
+         Value : constant Natural :=
+           Natural (Octet / (2 ** (Bit mod 8))) mod 2;
+      begin
+         Bit := Bit + 1;
+         return 1 - 2 * Value;
+      end Next_Sign;
+   begin
+      for I in N - Tau .. N - 1 loop
+         declare
+            J : Natural;
+         begin
+            loop
+               J := Natural (Stream (Cursor));
+               Cursor := Cursor + 1;
+               exit when J <= I;
+            end loop;
+            Result (I) := Result (J);
+            Result (J) := Next_Sign;
+         end;
+      end loop;
+      return Result;
+   end Sample_In_Ball;
+
+   --  ExpandMask, algorithm 34.
+   function Expand_Mask
+     (Seed : Stream_Element_Array; Index : Natural; Gamma1 : Positive)
+      return Poly
+   is
+      Width : constant Positive := (if Gamma1 = 2 ** 17 then 18 else 20);
+      Bytes : constant Natural := 32 * Width;
+      Stream : constant Stream_Element_Array :=
+        CryptoLib.SHA3.SHAKE256
+          (Seed & [Stream_Element (Index mod 256),
+                   Stream_Element (Index / 256)], Bytes);
+   begin
+      return Unpack_Bits (Stream, Width, Gamma1);
+   end Expand_Mask;
+
+   function Infinity_Norm (Item : Poly) return Natural is
+      Worst : Natural := 0;
+   begin
+      for I in Poly_Index loop
+         declare
+            R : constant Integer := Mod_Q (Item (I));
+            V : constant Integer := (if R > (Q - 1) / 2 then Q - R else R);
+         begin
+            if V > Worst then
+               Worst := V;
+            end if;
+         end;
+      end loop;
+      return Worst;
+   end Infinity_Norm;
+
+   --  The message representative of the external pure interface: a zero
+   --  octet, the context length, the context, then the message. The context
+   --  is bound in, so a signature made under one does not verify under
+   --  another.
+   function Representative
+     (Context : Stream_Element_Array; Message : Stream_Element_Array)
+      return Stream_Element_Array
+   is ([0, Stream_Element (Context'Length)] & Context & Message);
 
    function Key_From_Seed
      (Set         : Parameter_Set;
@@ -468,6 +693,454 @@ package body CryptoLib.MLDSA is
          Private_Key := [others => 0];
          return Internal_Error;
    end Key_From_Seed;
+
+   --  Rebuild A-hat, which both signing and verification need and neither
+   --  stores: it is a deterministic function of rho.
+   function Expand_A_Cell
+     (Rho : Stream_Element_Array; Row, Col : Natural) return Poly
+   is (Rej_NTT_Poly (Rho & [Stream_Element (Col), Stream_Element (Row)]));
+
+   function Sign
+     (Set           : Parameter_Set;
+      Private_Key   : Ada.Streams.Stream_Element_Array;
+      Message       : Ada.Streams.Stream_Element_Array;
+      Context       : Ada.Streams.Stream_Element_Array;
+      Rng           : in out CryptoLib.Random.Random_Source;
+      Deterministic : Boolean;
+      Signature     : out Ada.Streams.Stream_Element_Array)
+      return CryptoLib.Errors.Status
+   is
+      P : constant Parameters := Params (Set);
+      Eta_Width : constant Positive := (if P.Eta = 2 then 3 else 4);
+      Eta_Bytes : constant Stream_Element_Offset :=
+        Stream_Element_Offset (Eta_Width * 32);
+      Z_Width   : constant Positive := (if P.Gamma1 = 2 ** 17 then 18 else 20);
+   begin
+      Signature := [others => 0];
+      if Natural (Private_Key'Length) /= P.SK_Len
+        or else Natural (Signature'Length) /= P.Sig_Len
+        or else Context'Length > 255
+      then
+         return Handshake_Failed;
+      end if;
+
+      declare
+         Base   : constant Stream_Element_Offset := Private_Key'First;
+         Rho    : constant Stream_Element_Array := Private_Key (Base .. Base + 31);
+         K_Seed : constant Stream_Element_Array :=
+           Private_Key (Base + 32 .. Base + 63);
+         Tr     : constant Stream_Element_Array :=
+           Private_Key (Base + 64 .. Base + 127);
+         S1 : Poly_Vector (0 .. P.L - 1);
+         S2 : Poly_Vector (0 .. P.K - 1);
+         T0 : Poly_Vector (0 .. P.K - 1);
+         Cursor : Stream_Element_Offset := Base + 128;
+      begin
+         for R in S1'Range loop
+            S1 (R) := Unpack_Bits
+              (Private_Key (Cursor .. Cursor + Eta_Bytes - 1), Eta_Width, P.Eta);
+            Cursor := Cursor + Eta_Bytes;
+         end loop;
+         for R in S2'Range loop
+            S2 (R) := Unpack_Bits
+              (Private_Key (Cursor .. Cursor + Eta_Bytes - 1), Eta_Width, P.Eta);
+            Cursor := Cursor + Eta_Bytes;
+         end loop;
+         for R in T0'Range loop
+            T0 (R) := Unpack_Bits
+              (Private_Key (Cursor .. Cursor + 415), 13, 2 ** (D - 1));
+            Cursor := Cursor + 416;
+         end loop;
+
+         declare
+            Mu : constant Stream_Element_Array :=
+              CryptoLib.SHA3.SHAKE256
+                (Tr & Representative (Context, Message), 64);
+            Rnd : Stream_Element_Array (1 .. 32) := [others => 0];
+            S1_Hat : Poly_Vector (S1'Range) := S1;
+            S2_Hat : Poly_Vector (S2'Range) := S2;
+            T0_Hat : Poly_Vector (T0'Range) := T0;
+            Kappa  : Natural := 0;
+         begin
+            if not Deterministic
+              and then CryptoLib.Random.Fill (Rng, Rnd) /= Ok
+            then
+               return Internal_Error;
+            end if;
+            for I in S1_Hat'Range loop
+               NTT (S1_Hat (I));
+            end loop;
+            for I in S2_Hat'Range loop
+               NTT (S2_Hat (I));
+            end loop;
+            for I in T0_Hat'Range loop
+               NTT (T0_Hat (I));
+            end loop;
+
+            declare
+               Rho_2 : constant Stream_Element_Array :=
+                 CryptoLib.SHA3.SHAKE256 (K_Seed & Rnd & Mu, 64);
+            begin
+               for Attempt in 1 .. 1000 loop
+                  declare
+                     Y : Poly_Vector (0 .. P.L - 1);
+                     W : Poly_Vector (0 .. P.K - 1);
+                     W1 : Poly_Vector (0 .. P.K - 1);
+                     Y_Hat : Poly_Vector (0 .. P.L - 1);
+                  begin
+                     for I in Y'Range loop
+                        Y (I) := Expand_Mask (Rho_2, Kappa + I, P.Gamma1);
+                        Y_Hat (I) := Y (I);
+                        NTT (Y_Hat (I));
+                     end loop;
+
+                     for R in W'Range loop
+                        declare
+                           Acc : Poly := [others => 0];
+                        begin
+                           for C in 0 .. P.L - 1 loop
+                              declare
+                                 Term : constant Poly := Pointwise
+                                   (Expand_A_Cell (Rho, R, C), Y_Hat (C));
+                              begin
+                                 for I in Poly_Index loop
+                                    Acc (I) := Mod_Q (Acc (I) + Term (I));
+                                 end loop;
+                              end;
+                           end loop;
+                           Inverse_NTT (Acc);
+                           W (R) := Acc;
+                           W1 (R) := High_Bits (Acc, P.Gamma2);
+                        end;
+                     end loop;
+
+                     declare
+                        W1_Width : constant Positive :=
+                          (if P.Gamma2 = (Q - 1) / 88 then 6 else 4);
+                        W1_Bytes : constant Stream_Element_Offset :=
+                          Stream_Element_Offset (W1_Width * 32);
+                        Packed : Stream_Element_Array
+                          (1 .. W1_Bytes * Stream_Element_Offset (P.K));
+                     begin
+                        for R in W1'Range loop
+                           Pack_Bits_Plain
+                             (W1 (R), W1_Width,
+                              Packed (1 + Stream_Element_Offset (R) * W1_Bytes
+                                      .. (Stream_Element_Offset (R) + 1) * W1_Bytes));
+                        end loop;
+
+                        declare
+                           C_Tilde : constant Stream_Element_Array :=
+                             CryptoLib.SHA3.SHAKE256
+                               (Mu & Packed, P.C_Bytes);
+                           C_Poly : constant Poly :=
+                             Sample_In_Ball (C_Tilde, P.Tau);
+                           C_Hat  : Poly;
+                           Z  : Poly_Vector (0 .. P.L - 1);
+                           R0 : Poly_Vector (0 .. P.K - 1);
+                           CT0 : Poly_Vector (0 .. P.K - 1);
+                           Good : Boolean := True;
+                        begin
+                           C_Hat := C_Poly;
+                           NTT (C_Hat);
+
+                           for I in Z'Range loop
+                              declare
+                                 Term : Poly := Pointwise (C_Hat, S1_Hat (I));
+                              begin
+                                 Inverse_NTT (Term);
+                                 for J in Poly_Index loop
+                                    Z (I) (J) := Mod_Q (Y (I) (J) + Term (J));
+                                 end loop;
+                              end;
+                           end loop;
+
+                           for I in R0'Range loop
+                              declare
+                                 Term : Poly := Pointwise (C_Hat, S2_Hat (I));
+                              begin
+                                 Inverse_NTT (Term);
+                                 for J in Poly_Index loop
+                                    Term (J) := Mod_Q (W (I) (J) - Term (J));
+                                 end loop;
+                                 R0 (I) := Low_Bits (Term, P.Gamma2);
+                              end;
+                           end loop;
+
+                           for I in Z'Range loop
+                              if Infinity_Norm (Z (I)) >= P.Gamma1 - P.Beta then
+                                 Good := False;
+                              end if;
+                           end loop;
+                           for I in R0'Range loop
+                              if Infinity_Norm (R0 (I)) >= P.Gamma2 - P.Beta then
+                                 Good := False;
+                              end if;
+                           end loop;
+
+                           if Good then
+                              declare
+                                 Hints : array (0 .. P.K - 1, Poly_Index) of Natural :=
+                                   [others => [others => 0]];
+                                 Weight : Natural := 0;
+                              begin
+                                 for I in CT0'Range loop
+                                    declare
+                                       Term : Poly := Pointwise (C_Hat, T0_Hat (I));
+                                    begin
+                                       Inverse_NTT (Term);
+                                       CT0 (I) := Term;
+                                       if Infinity_Norm (Term) >= P.Gamma2 then
+                                          Good := False;
+                                       end if;
+                                    end;
+                                 end loop;
+
+                                 if Good then
+                                    for I in CT0'Range loop
+                                       declare
+                                          Term : Poly := Pointwise (C_Hat, S2_Hat (I));
+                                       begin
+                                          Inverse_NTT (Term);
+                                          for J in Poly_Index loop
+                                             declare
+                                                WCS : constant Integer :=
+                                                  Mod_Q (W (I) (J) - Term (J)
+                                                         + CT0 (I) (J));
+                                             begin
+                                                Hints (I, J) := Make_Hint
+                                                  (Mod_Q (-CT0 (I) (J)), WCS,
+                                                   P.Gamma2);
+                                                Weight := Weight + Hints (I, J);
+                                             end;
+                                          end loop;
+                                       end;
+                                    end loop;
+                                    if Weight > P.Omega then
+                                       Good := False;
+                                    end if;
+                                 end if;
+
+                                 if Good then
+                                    --  sigEncode: c~ || BitPack (z) || hints
+                                    declare
+                                       Cur : Stream_Element_Offset :=
+                                         Signature'First;
+                                       Z_Bytes : constant Stream_Element_Offset :=
+                                         Stream_Element_Offset (Z_Width * 32);
+                                       Fill : Natural := 0;
+                                    begin
+                                       Signature (Cur .. Cur
+                                         + Stream_Element_Offset (P.C_Bytes) - 1) :=
+                                         C_Tilde;
+                                       Cur := Cur
+                                         + Stream_Element_Offset (P.C_Bytes);
+                                       for I in Z'Range loop
+                                          declare
+                                             Zc : Poly;
+                                          begin
+                                             for J in Poly_Index loop
+                                                Zc (J) := Centred (Z (I) (J));
+                                             end loop;
+                                             Pack_Bits (Zc, Z_Width, P.Gamma1,
+                                                        Signature (Cur .. Cur + Z_Bytes - 1));
+                                          end;
+                                          Cur := Cur + Z_Bytes;
+                                       end loop;
+                                       --  HintBitPack: the indices, then the
+                                       --  running totals per polynomial.
+                                       for I in 0 .. P.K - 1 loop
+                                          for J in Poly_Index loop
+                                             if Hints (I, J) = 1 then
+                                                Signature
+                                                  (Cur + Stream_Element_Offset (Fill)) :=
+                                                  Stream_Element (J);
+                                                Fill := Fill + 1;
+                                             end if;
+                                          end loop;
+                                          Signature
+                                            (Cur + Stream_Element_Offset (P.Omega + I)) :=
+                                            Stream_Element (Fill);
+                                       end loop;
+                                    end;
+                                    return Ok;
+                                 end if;
+                              end;
+                           end if;
+                        end;
+                     end;
+                     Kappa := Kappa + P.L;
+                  end;
+               end loop;
+            end;
+         end;
+      end;
+      Signature := [others => 0];
+      return Internal_Error;
+   exception
+      when others =>
+         Signature := [others => 0];
+         return Internal_Error;
+   end Sign;
+
+   function Verify
+     (Set        : Parameter_Set;
+      Public_Key : Ada.Streams.Stream_Element_Array;
+      Message    : Ada.Streams.Stream_Element_Array;
+      Context    : Ada.Streams.Stream_Element_Array;
+      Signature  : Ada.Streams.Stream_Element_Array) return Boolean
+   is
+      P : constant Parameters := Params (Set);
+      Z_Width : constant Positive := (if P.Gamma1 = 2 ** 17 then 18 else 20);
+   begin
+      if Natural (Public_Key'Length) /= P.PK_Len
+        or else Natural (Signature'Length) /= P.Sig_Len
+        or else Context'Length > 255
+      then
+         return False;
+      end if;
+
+      declare
+         Rho : constant Stream_Element_Array :=
+           Public_Key (Public_Key'First .. Public_Key'First + 31);
+         T1  : Poly_Vector (0 .. P.K - 1);
+         C_Tilde : constant Stream_Element_Array :=
+           Signature (Signature'First
+                      .. Signature'First
+                         + Stream_Element_Offset (P.C_Bytes) - 1);
+         Z : Poly_Vector (0 .. P.L - 1);
+         Hints : array (0 .. P.K - 1, Poly_Index) of Natural :=
+           [others => [others => 0]];
+         Z_Bytes : constant Stream_Element_Offset :=
+           Stream_Element_Offset (Z_Width * 32);
+         Cur : Stream_Element_Offset :=
+           Signature'First + Stream_Element_Offset (P.C_Bytes);
+      begin
+         for R in T1'Range loop
+            declare
+               Base : constant Stream_Element_Offset :=
+                 Public_Key'First + 32 + Stream_Element_Offset (R) * 320;
+            begin
+               T1 (R) := Unpack_Bits_Plain
+                 (Public_Key (Base .. Base + 319), 10);
+            end;
+         end loop;
+
+         for I in Z'Range loop
+            Z (I) := Unpack_Bits
+              (Signature (Cur .. Cur + Z_Bytes - 1), Z_Width, P.Gamma1);
+            Cur := Cur + Z_Bytes;
+            if Infinity_Norm (Z (I)) >= P.Gamma1 - P.Beta then
+               return False;
+            end if;
+         end loop;
+
+         --  HintBitUnpack, algorithm 21, with its malformed-encoding
+         --  refusals: indices must ascend within a polynomial and the running
+         --  totals must not go backwards or past omega.
+         declare
+            Index : Natural := 0;
+         begin
+            for I in 0 .. P.K - 1 loop
+               declare
+                  Stop : constant Natural := Natural
+                    (Signature (Cur + Stream_Element_Offset (P.Omega + I)));
+                  Last : Integer := -1;
+               begin
+                  if Stop < Index or else Stop > P.Omega then
+                     return False;
+                  end if;
+                  while Index < Stop loop
+                     declare
+                        J : constant Natural := Natural
+                          (Signature (Cur + Stream_Element_Offset (Index)));
+                     begin
+                        if J <= Last then
+                           return False;
+                        end if;
+                        Last := J;
+                        Hints (I, J) := 1;
+                        Index := Index + 1;
+                     end;
+                  end loop;
+               end;
+            end loop;
+         end;
+
+         declare
+            Tr : constant Stream_Element_Array :=
+              CryptoLib.SHA3.SHAKE256 (Public_Key, 64);
+            Mu : constant Stream_Element_Array :=
+              CryptoLib.SHA3.SHAKE256
+                (Tr & Representative (Context, Message), 64);
+            C_Poly : constant Poly := Sample_In_Ball (C_Tilde, P.Tau);
+            C_Hat  : Poly;
+            W1 : Poly_Vector (0 .. P.K - 1);
+         begin
+            C_Hat := C_Poly;
+            NTT (C_Hat);
+
+            for R in 0 .. P.K - 1 loop
+               declare
+                  Acc : Poly := [others => 0];
+                  T1_Hat : Poly := T1 (R);
+               begin
+                  for I in Poly_Index loop
+                     T1_Hat (I) := Mod_Q (T1_Hat (I) * (2 ** D));
+                  end loop;
+                  NTT (T1_Hat);
+                  for C in 0 .. P.L - 1 loop
+                     declare
+                        Z_Hat : Poly := Z (C);
+                     begin
+                        NTT (Z_Hat);
+                        declare
+                           Term : constant Poly := Pointwise
+                             (Expand_A_Cell (Rho, R, C), Z_Hat);
+                        begin
+                           for I in Poly_Index loop
+                              Acc (I) := Mod_Q (Acc (I) + Term (I));
+                           end loop;
+                        end;
+                     end;
+                  end loop;
+                  declare
+                     CT : constant Poly := Pointwise (C_Hat, T1_Hat);
+                  begin
+                     for I in Poly_Index loop
+                        Acc (I) := Mod_Q (Acc (I) - CT (I));
+                     end loop;
+                  end;
+                  Inverse_NTT (Acc);
+                  for I in Poly_Index loop
+                     W1 (R) (I) := Use_Hint (Hints (R, I), Acc (I), P.Gamma2);
+                  end loop;
+               end;
+            end loop;
+
+            declare
+               W1_Width : constant Positive :=
+                 (if P.Gamma2 = (Q - 1) / 88 then 6 else 4);
+               W1_Bytes : constant Stream_Element_Offset :=
+                 Stream_Element_Offset (W1_Width * 32);
+               Packed : Stream_Element_Array
+                 (1 .. W1_Bytes * Stream_Element_Offset (P.K));
+            begin
+               for R in W1'Range loop
+                  Pack_Bits_Plain
+                    (W1 (R), W1_Width,
+                     Packed (1 + Stream_Element_Offset (R) * W1_Bytes
+                             .. (Stream_Element_Offset (R) + 1) * W1_Bytes));
+               end loop;
+               return CryptoLib.SHA3.SHAKE256 (Mu & Packed, P.C_Bytes)
+                 = C_Tilde;
+            end;
+         end;
+      end;
+   exception
+      when others =>
+         return False;
+   end Verify;
 
    function Generate_Keypair
      (Set         : Parameter_Set;

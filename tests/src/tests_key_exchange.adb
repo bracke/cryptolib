@@ -1287,6 +1287,142 @@ package body Tests_Key_Exchange is
       end;
    end Check_MLDSA;
 
+   --  ML-DSA signing and verification. The keys come from NIST ACVP seeds and
+   --  are the ones the keygen test already pins; the expected signatures come
+   --  from dilithium-py, which was checked against NIST's own sigGen vectors
+   --  (deterministic, external, pure) before being used as a source here.
+   procedure Check_MLDSA_Sign is
+      package M renames CryptoLib.MLDSA;
+
+      function Digest_Hex
+        (Data : Ada.Streams.Stream_Element_Array) return String
+      is
+         Digits_Set : constant String := "0123456789abcdef";
+         Digest : constant CryptoLib.Hashes.SHA256_Digest :=
+           CryptoLib.Hashes.SHA256 (Data);
+         Result : String (1 .. 64);
+         K      : Natural := 1;
+      begin
+         for B of Digest loop
+            Result (K) := Digits_Set (Natural (B) / 16 + 1);
+            Result (K + 1) := Digits_Set (Natural (B) mod 16 + 1);
+            K := K + 2;
+         end loop;
+         return Result;
+      end Digest_Hex;
+
+      Rng : CryptoLib.Random.Random_Source;
+      Msg : constant Ada.Streams.Stream_Element_Array :=
+        Bytes_From_String ("cryptolib ml-dsa");
+      Other_Msg : constant Ada.Streams.Stream_Element_Array :=
+        Bytes_From_String ("cryptolib ml-dsb");
+      Empty_Ctx : constant Ada.Streams.Stream_Element_Array (1 .. 0) :=
+        [others => 0];
+      Ctx : constant Ada.Streams.Stream_Element_Array :=
+        Bytes_From_String ("ctx");
+   begin
+      CryptoLib.Random.Initialize_Production (Rng);
+
+      declare
+         PK : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset
+                   (M.Public_Key_Length (M.ML_DSA_44)));
+         SK : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset
+                   (M.Private_Key_Length (M.ML_DSA_44)));
+         Sig : Ada.Streams.Stream_Element_Array (1 .. 2420);
+      begin
+         Check (M.Key_From_Seed (M.ML_DSA_44, Bytes_From_Hex
+                  ("7194b13c95231010afd2c909992bd2003ba6f437c3886bdbe3f6b867a14ba161"), PK, SK) = CryptoLib.Errors.Ok,
+                "ML-DSA-44 key for the signing vector");
+         Check (M.Sign (M.ML_DSA_44, SK, Msg, Empty_Ctx, Rng, True, Sig)
+                  = CryptoLib.Errors.Ok,
+                "ML-DSA-44 signs deterministically");
+         Check (Digest_Hex (Sig)
+                  = "26eb9f0e1f3d57a3d022cf2ee8c62fbaee2ebaed903ca1ea3be512ad718f9277",
+                "and the signature is the expected one");
+         Check (M.Verify (M.ML_DSA_44, PK, Msg, Empty_Ctx, Sig),
+                "and it verifies under its own key");
+         declare
+            Bad : Ada.Streams.Stream_Element_Array := Sig;
+         begin
+            Bad (Bad'Last) := Bad (Bad'Last) xor 1;
+            Check (not M.Verify (M.ML_DSA_44, PK, Msg, Empty_Ctx, Bad),
+                   "a tampered signature does not verify");
+         end;
+         Check (not M.Verify (M.ML_DSA_44, PK, Other_Msg, Empty_Ctx, Sig),
+                "nor does it over a different message");
+         Check (not M.Verify (M.ML_DSA_44, PK, Msg, Ctx, Sig),
+                "nor under a different context");
+      end;
+
+      declare
+         PK : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset
+                   (M.Public_Key_Length (M.ML_DSA_65)));
+         SK : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset
+                   (M.Private_Key_Length (M.ML_DSA_65)));
+         Sig : Ada.Streams.Stream_Element_Array (1 .. 3309);
+      begin
+         Check (M.Key_From_Seed (M.ML_DSA_65, Bytes_From_Hex
+                  ("a991fd42b071d49c48ae3e75c647459e0daad1e1ba356a04801912d3294bcff8"), PK, SK) = CryptoLib.Errors.Ok,
+                "ML-DSA-65 key for the signing vector");
+         Check (M.Sign (M.ML_DSA_65, SK, Msg, Empty_Ctx, Rng, True, Sig)
+                  = CryptoLib.Errors.Ok,
+                "ML-DSA-65 signs deterministically");
+         Check (Digest_Hex (Sig)
+                  = "5e6e8a286396650099ba687594c19f31c2a3d84393898b2e0b592aea15c20809",
+                "and the signature is the expected one");
+         Check (M.Verify (M.ML_DSA_65, PK, Msg, Empty_Ctx, Sig),
+                "and it verifies under its own key");
+         declare
+            Bad : Ada.Streams.Stream_Element_Array := Sig;
+         begin
+            Bad (Bad'Last) := Bad (Bad'Last) xor 1;
+            Check (not M.Verify (M.ML_DSA_65, PK, Msg, Empty_Ctx, Bad),
+                   "a tampered signature does not verify");
+         end;
+         Check (not M.Verify (M.ML_DSA_65, PK, Other_Msg, Empty_Ctx, Sig),
+                "nor does it over a different message");
+         Check (not M.Verify (M.ML_DSA_65, PK, Msg, Ctx, Sig),
+                "nor under a different context");
+      end;
+
+      declare
+         PK : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset
+                   (M.Public_Key_Length (M.ML_DSA_87)));
+         SK : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset
+                   (M.Private_Key_Length (M.ML_DSA_87)));
+         Sig : Ada.Streams.Stream_Element_Array (1 .. 4627);
+      begin
+         Check (M.Key_From_Seed (M.ML_DSA_87, Bytes_From_Hex
+                  ("a16f5b0796703e2d1a0140a35cbf36efabe70e752ba59b6a9a0e9c4b05302f73"), PK, SK) = CryptoLib.Errors.Ok,
+                "ML-DSA-87 key for the signing vector");
+         Check (M.Sign (M.ML_DSA_87, SK, Msg, Empty_Ctx, Rng, True, Sig)
+                  = CryptoLib.Errors.Ok,
+                "ML-DSA-87 signs deterministically");
+         Check (Digest_Hex (Sig)
+                  = "e1b932c2af1d3e983615cf36c3b87d943b3e7dbe969b4de8827865728c9d77f4",
+                "and the signature is the expected one");
+         Check (M.Verify (M.ML_DSA_87, PK, Msg, Empty_Ctx, Sig),
+                "and it verifies under its own key");
+         declare
+            Bad : Ada.Streams.Stream_Element_Array := Sig;
+         begin
+            Bad (Bad'Last) := Bad (Bad'Last) xor 1;
+            Check (not M.Verify (M.ML_DSA_87, PK, Msg, Empty_Ctx, Bad),
+                   "a tampered signature does not verify");
+         end;
+         Check (not M.Verify (M.ML_DSA_87, PK, Other_Msg, Empty_Ctx, Sig),
+                "nor does it over a different message");
+         Check (not M.Verify (M.ML_DSA_87, PK, Msg, Ctx, Sig),
+                "nor under a different context");
+      end;
+   end Check_MLDSA_Sign;
+
    --  AUnit routine wrappers. Each check is a test of its own, so a
    --  failure reports the check that failed and the rest still run.
    procedure Run_Check_DH_Peer_Validation (Item : in out AUnit.Test_Cases.Test_Case'Class);
@@ -1298,6 +1434,7 @@ package body Tests_Key_Exchange is
    procedure Run_Check_MLKEM_Core_Algebra (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_FFDHE (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_MLDSA (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_MLDSA_Sign (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_MLKEM768_Vectors (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_SNTRUP761_Vectors (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_Modexp_And_DH_Group18 (Item : in out AUnit.Test_Cases.Test_Case'Class);
@@ -1374,6 +1511,12 @@ package body Tests_Key_Exchange is
       Check_MLDSA;
    end Run_Check_MLDSA;
 
+   procedure Run_Check_MLDSA_Sign (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_MLDSA_Sign;
+   end Run_Check_MLDSA_Sign;
+
    overriding procedure Register_Tests (Item : in out Test_Case) is
       use AUnit.Test_Cases.Registration;
    begin
@@ -1386,6 +1529,7 @@ package body Tests_Key_Exchange is
       Register_Routine (Item, Run_Check_MLKEM_Core_Algebra'Access, "mlkem core algebra");
       Register_Routine (Item, Run_Check_FFDHE'Access, "ffdhe groups");
       Register_Routine (Item, Run_Check_MLDSA'Access, "ml-dsa keygen");
+      Register_Routine (Item, Run_Check_MLDSA_Sign'Access, "ml-dsa sign/verify");
       Register_Routine (Item, Run_Check_MLKEM768_Vectors'Access, "mlkem768 vectors");
       Register_Routine (Item, Run_Check_SNTRUP761_Vectors'Access, "sntrup761 vectors");
       Register_Routine (Item, Run_Check_Modexp_And_DH_Group18'Access, "modexp and dh group18");

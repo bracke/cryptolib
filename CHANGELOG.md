@@ -29,9 +29,11 @@ predecessor.
   ffdhe2048 through ffdhe8192, the groups TLS negotiates, distinct from the SSH
   MODP groups. Primes derived from the RFC's construction and confirmed by
   OpenSSL naming them back from p and g alone.
-* ML-DSA (FIPS 204) key generation for all three parameter sets, checked
-  against NIST's own ACVP vectors. Signing and verification are not
-  implemented yet, and the package says so.
+* ML-DSA (FIPS 204) for all three parameter sets: key generation, signing
+  and verification, checked against NIST's own ACVP vectors. Signing offers
+  both the deterministic and the hedged variant, and the FIPS 204 external
+  interface, so a signature made under one context string does not verify
+  under another.
 * X448 key agreement (RFC 7748), which the crate lacked while carrying Ed448
   signatures. Both are over p = 2**448 - 2**224 - 1 and now share one field
   arithmetic, `CryptoLib.Field448`, a private child.

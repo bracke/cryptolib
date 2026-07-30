@@ -63,6 +63,50 @@ package CryptoLib.MLDSA is
       Private_Key : out Ada.Streams.Stream_Element_Array)
       return CryptoLib.Errors.Status;
 
+   --  Sign a message.
+   --
+   --  FIPS 204's external pure interface: the context string is prefixed to
+   --  the message with its length, so a signature made under one context does
+   --  not verify under another. Pass an empty context when there is none.
+   --
+   --  Deterministic signing uses a zero randomiser, which makes the signature
+   --  a function of the key and the message alone. That is what the standard's
+   --  test vectors are stated in terms of, and it removes a dependency on the
+   --  random source; the hedged variant exists to blunt fault attacks, and is
+   --  what Deterministic => False selects.
+   --  @param Set           which parameter set
+   --  @param Private_Key   the encoded private key
+   --  @param Message       the message
+   --  @param Context       the context string, at most 255 octets
+   --  @param Rng           the random source, used only when hedging
+   --  @param Deterministic True for the zero randomiser
+   --  @param Signature     out: the signature, zeroed on failure
+   --  @return Ok, Handshake_Failed on a wrong-length argument, or
+   --    Internal_Error if signing does not converge
+   function Sign
+     (Set           : Parameter_Set;
+      Private_Key   : Ada.Streams.Stream_Element_Array;
+      Message       : Ada.Streams.Stream_Element_Array;
+      Context       : Ada.Streams.Stream_Element_Array;
+      Rng           : in out CryptoLib.Random.Random_Source;
+      Deterministic : Boolean;
+      Signature     : out Ada.Streams.Stream_Element_Array)
+      return CryptoLib.Errors.Status;
+
+   --  Is this signature that key's over this message and context?
+   --  @param Set        which parameter set
+   --  @param Public_Key the encoded public key
+   --  @param Message    the message
+   --  @param Context    the context string the signature was made under
+   --  @param Signature  the signature
+   --  @return True only when the signature verifies
+   function Verify
+     (Set        : Parameter_Set;
+      Public_Key : Ada.Streams.Stream_Element_Array;
+      Message    : Ada.Streams.Stream_Element_Array;
+      Context    : Ada.Streams.Stream_Element_Array;
+      Signature  : Ada.Streams.Stream_Element_Array) return Boolean;
+
    --  Generate a keypair from the random source.
    --  @param Set         which parameter set
    --  @param Rng         the random source
