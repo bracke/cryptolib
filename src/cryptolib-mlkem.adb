@@ -814,9 +814,22 @@ package body CryptoLib.MLKEM is
 
          declare
             --  0 when the re-encryption matched, 16#FF# when it did not.
-            Mask : constant Stream_Element :=
-              (if Equal = 0 then 0 else 16#FF#);
+            --
+            --  Folded down and negated rather than written as an if. Equal is
+            --  derived from the secret: it is the Fujisaki-Okamoto
+            --  re-encryption check, and whether it held is exactly what an
+            --  attacker submitting chosen ciphertexts wants to learn. A
+            --  conditional there is the classic leak in this construction.
+            --  This spreads any set bit down into bit 0 and subtracts it from
+            --  zero in modular arithmetic, which is the mask idiom used
+            --  everywhere else in this crate.
+            Folded : Unsigned_8 := Unsigned_8 (Equal);
+            Mask   : Stream_Element;
          begin
+            Folded := Folded or Shift_Right (Folded, 4);
+            Folded := Folded or Shift_Right (Folded, 2);
+            Folded := Folded or Shift_Right (Folded, 1);
+            Mask := Stream_Element (0) - Stream_Element (Folded and 1);
             for I in Shared_Key'Range loop
                declare
                   Offset : constant Stream_Element_Offset :=

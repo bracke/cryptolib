@@ -84,7 +84,16 @@ branches, memory indexing, or variable-latency arithmetic:
 - **sntrup761** (`SNTRUP761`) — `mod`/hardware-division freezes replaced by
   branchless Barrett multiply-shift; decapsulation selects and rho-substitutes
   branchlessly (constant-time implicit rejection).
-- **ML-KEM-768** — the FO re-encryption compare uses `Constant_Time.Equal`.
+- **ML-KEM** (all three parameter sets) — the Fujisaki-Okamoto re-encryption
+  check accumulates the difference over the whole ciphertext with no early
+  return, and turns it into a select mask by folding any set bit down into
+  bit 0 and subtracting from zero in modular arithmetic. Whether that check
+  held is exactly what an attacker submitting chosen ciphertexts wants to
+  learn, so it must not reach a branch. Writing it as `if Equal = 0` instead
+  costs one conditional jump under the development profile and none under
+  `--release`, where the optimiser emits a `cmov` -- which is the reason the
+  rule here is a branchless mask in the source rather than a jump count in
+  one profile's disassembly. It is measured both ways: 78 against 79.
 - **Authentication-tag comparison** — `Constant_Time.Equal` (accumulate-OR,
   no early return) is used for GCM, ChaCha20-Poly1305, and the ML-KEM check.
   Its shape is held to a jump budget, which says nothing about whether it
