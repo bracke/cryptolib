@@ -82,3 +82,87 @@ jobs:
       - name: Run the release preflight
         working-directory: cryptolib
         run: ./tools/bin/check_release_ready
+
+  # macOS and Windows. The preflight deliberately stays on Linux: its
+  # constant-time step disassembles the archive with objdump and matches ELF
+  # symbol names, which is not a portable question. What these jobs answer is
+  # the one nothing else could -- whether the per-OS entropy backend compiles,
+  # links and *runs* on its own platform. src-windows/cryptolib-os_random.adb
+  # calls BCryptGenRandom and, until this job existed, had never been executed
+  # anywhere; the Linux preflight only semantically compiles it.
+  portable:
+    name: ${{ matrix.os }} build and RNG
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # Report both platforms. A Windows failure should not hide a macOS one.
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            exe: ""
+          - os: windows-latest
+            exe: ".exe"
+    env:
+      ALIRE_NONINTERACTIVE: "true"
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Alire
+        uses: alire-project/setup-alire@v6
+        with:
+          toolchain: gnat_native=15.2.1 gprbuild
+
+      - name: Raise Alire solver timeout so slow runners get a complete solution
+        run: alr settings --global --set solver.timeout 600
+
+      # This is the real per-OS build: Source_Dirs picks src-macos or
+      # src-windows by host, so the backend compiled here is the one this
+      # platform ships, not the semantic check the Linux job runs.
+      - name: Build the library
+        run: |
+          alr --non-interactive update
+          alr --non-interactive build
+
+      # The examples link nothing but cryptolib -- no OpenSSL -- so they are
+      # what can be run on a platform where the test suite cannot yet link.
+      - name: Build the examples
+        run: alr exec -- gprbuild -q -f -P examples/examples.gpr
+
+      # Run the entropy source for real. Checked by output, not exit status:
+      # example_random prints "no entropy source available" and returns
+      # normally when Fill fails, so trusting its exit code would pass a job
+      # in which the RNG delivered nothing -- exactly the failure this job
+      # exists to catch.
+      # `tr -d '\r'` because GNAT's Text_IO writes CRLF on Windows and `$(...)`
+      # strips only the trailing newline, so the comparison would fail on the
+      # carriage return alone and report a broken RNG that was fine.
+      - name: Draw from the OS entropy source
+        run: |
+          out=$(./examples/bin/example_random${{ matrix.exe }} | tr -d '\r')
+          echo "$out"
+          test "$out" = "drew 32 bytes"
+
+      - name: Smoke the primitives
+        run: |
+          ./examples/bin/example_hashes${{ matrix.exe }}
+          ./examples/bin/example_secure_wipe${{ matrix.exe }}
+          ./examples/bin/example_macs${{ matrix.exe }}
+
+      # macOS only, for now. The suite links libcrypto for the certificate
+      # chain cross-check, and Homebrew's OpenSSL is a linkable one; the
+      # system library under /usr/lib is not. Windows has no equivalent that
+      # this Alire mingw toolchain can link against, so the Windows job stops
+      # at the examples above -- which is a gap, not a decision that the suite
+      # need not run there.
+      - name: Build and run the test suite
+        if: runner.os == 'macOS'
+        working-directory: tests
+        run: |
+          brew install openssl@3 || true
+          alr --non-interactive update
+          alr --non-interactive build -- -largs -L"$(brew --prefix openssl@3)/lib"
+          ./bin/tests
