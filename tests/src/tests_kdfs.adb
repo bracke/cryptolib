@@ -201,6 +201,90 @@ package body Tests_KDFs is
          16#B4#, 16#6A#, 16#AF#, 16#32#, 16#16#, 16#63#, 16#6E#, 16#01#];
    begin
       Check (Actual = Expected, "scrypt-SHA256 vector");
+
+      --  RFC 7914 section 11's own vectors. The one above is N=16, r=1, p=1,
+      --  which is the weakest set the function accepts and does not reach two
+      --  of its three moving parts: at r=1 BlockMix has two blocks to
+      --  interleave and the interleave is the identity, and at p=1 the
+      --  parallelism loop runs once. A transposition in either would have
+      --  passed. These two have r=8, and one has p=16.
+      declare
+         Vector_Two : constant Ada.Streams.Stream_Element_Array :=
+           CryptoLib.Macs.Scrypt_SHA256
+             (Bytes_From_String ("password"),
+              Bytes_From_String ("NaCl"),
+              1024, 8, 16, 64);
+      begin
+         Check (Vector_Two = Bytes_From_Hex
+                  ("fdbabe1c9d3472007856e7190d01e9fe"
+                   & "7c6ad7cbc8237830e77376634b373162"
+                   & "2eaf30d92e22a3886ff109279d9830da"
+                   & "c727afb94a83ee6d8360cbdfa2cc0640"),
+                "scrypt RFC 7914 N=1024 r=8 p=16");
+      end;
+
+      declare
+         Vector_Three : constant Ada.Streams.Stream_Element_Array :=
+           CryptoLib.Macs.Scrypt_SHA256
+             (Bytes_From_String ("pleaseletmein"),
+              Bytes_From_String ("SodiumChloride"),
+              16384, 8, 1, 64);
+      begin
+         Check (Vector_Three = Bytes_From_Hex
+                  ("7023bdcb3afd7348461c06cd81fd38eb"
+                   & "fda8fbba904f8e3ea9b543f6545da1f2"
+                   & "d5432955613f0fcf62d49705242a9af9"
+                   & "e61e85dc0d651e40dfcf017b45575887"),
+                "scrypt RFC 7914 N=16384 r=8 p=1");
+      end;
+
+      --  The empty password and empty salt, which is the RFC's first vector
+      --  and the one an off-by-one in the PBKDF2 wrapping shows up in.
+      declare
+         Empty : constant Ada.Streams.Stream_Element_Array (1 .. 0) :=
+           [others => 0];
+      begin
+         Check (CryptoLib.Macs.Scrypt_SHA256 (Empty, Empty, 16, 1, 1, 64)
+                  = Bytes_From_Hex
+                      ("77d6576238657b203b19ca42c18a0497"
+                       & "f16b4844e3074ae8dfdffa3fede21442"
+                       & "fcd0069ded0948f8326a753a0fc81f17"
+                       & "e8d3e0fb2e0d3628cf35e20c38d18906"),
+                "scrypt RFC 7914 empty password and salt");
+      end;
+
+      --  N = 32768 is what a good many scrypt-encrypted PKCS#8 keys carry,
+      --  and it used to be refused for being above a flat N <= 16384 limit.
+      --  Refusal here is not visible as an error -- it returns a zeroed key
+      --  -- so this asks for the real answer rather than for "not zero".
+      declare
+         Big_N : constant Ada.Streams.Stream_Element_Array :=
+           CryptoLib.Macs.Scrypt_SHA256
+             (Bytes_From_String ("passphrase"),
+              Bytes_From_String ("0123456789abcdef"),
+              32768, 8, 1, 32);
+      begin
+         Check (Big_N = Bytes_From_Hex
+                  ("28b9004db320ccf5a03eb0765f995315"
+                   & "07a1f019d8e28ad5ef8eae0377a23a47"),
+                "scrypt at N=32768, the cost a real key file carries");
+      end;
+
+      --  And the refusals still refuse, zeroed rather than wrong: a
+      --  non-power-of-two N, and a working set past the memory bound.
+      declare
+         Zeroes : constant Ada.Streams.Stream_Element_Array (1 .. 32) :=
+           [others => 0];
+      begin
+         Check (CryptoLib.Macs.Scrypt_SHA256
+                  (Bytes_From_String ("p"), Bytes_From_String ("s"),
+                   1000, 8, 1, 32) = Zeroes,
+                "scrypt refuses an N that is not a power of two");
+         Check (CryptoLib.Macs.Scrypt_SHA256
+                  (Bytes_From_String ("p"), Bytes_From_String ("s"),
+                   2 ** 30, 8, 1, 32) = Zeroes,
+                "and one whose working set would exceed the memory bound");
+      end;
    end Check_Scrypt_SHA256;
 
    procedure Check_Seven_Zip_AES_SHA256_KDF is

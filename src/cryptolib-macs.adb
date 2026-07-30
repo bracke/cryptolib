@@ -1,4 +1,5 @@
 with Ada.Streams; use Ada.Streams;
+with Ada.Unchecked_Deallocation;
 with Interfaces;
 with CryptoLib.Secure_Wipe;
 
@@ -942,15 +943,31 @@ package body CryptoLib.Macs is
           (Load_LE32 (Data, First) mod Interfaces.Unsigned_32 (N_Value));
    end Scrypt_Integerify;
 
+   --  V is 128 * r * N octets -- the whole point of scrypt, and far too large
+   --  for the stack. At the RFC's own interactive parameters (N = 16384,
+   --  r = 8) it is 16 MiB, and it was a stack object here, so every cost
+   --  setting worth using raised STORAGE_ERROR. Only the toy parameters the
+   --  single old test used fitted. It goes on the heap, and is wiped before
+   --  it is freed.
+   --  The largest working set ROMix will allocate: 256 MiB, which at r = 8
+   --  admits N up to 262144 -- past every cost setting a real key file
+   --  carries, and still a bound, because the parameters come from the file.
+   Scrypt_Memory_Cap : constant := 256 * 1024 * 1024;
+
+   type Scrypt_Buffer is access Stream_Element_Array;
+
+   procedure Free_Scrypt_Buffer is new Ada.Unchecked_Deallocation
+     (Stream_Element_Array, Scrypt_Buffer);
+
    procedure Scrypt_SMix
      (Block_Data : in out Stream_Element_Array;
       N_Value    : Positive;
       R_Value    : Positive)
    is
       Block_Size : constant Natural := 128 * R_Value;
-      V_Data     :
-        Stream_Element_Array (1 .. Stream_Element_Offset (N_Value * Block_Size)) :=
-          [others => 0];
+      V_Data     : Scrypt_Buffer :=
+        new Stream_Element_Array'
+          (1 .. Stream_Element_Offset (N_Value * Block_Size) => 0);
       X_Data     : Stream_Element_Array (1 .. Stream_Element_Offset (Block_Size)) :=
         Block_Data;
       Y_Data     : Stream_Element_Array (1 .. Stream_Element_Offset (Block_Size)) :=
@@ -961,7 +978,7 @@ package body CryptoLib.Macs is
             V_First : constant Stream_Element_Offset :=
               V_Data'First + Stream_Element_Offset (Index_Value * Block_Size);
          begin
-            V_Data
+            V_Data.all
               (V_First .. V_First + Stream_Element_Offset (Block_Size - 1)) :=
               X_Data;
             Scrypt_BlockMix (X_Data, R_Value, Y_Data);
@@ -980,7 +997,8 @@ package body CryptoLib.Macs is
                X_Data
                  (X_Data'First + Stream_Element_Offset (Offset_Value)) :=
                  X_Data (X_Data'First + Stream_Element_Offset (Offset_Value))
-                 xor V_Data (V_First + Stream_Element_Offset (Offset_Value));
+                 xor V_Data.all
+                       (V_First + Stream_Element_Offset (Offset_Value));
             end loop;
             Scrypt_BlockMix (X_Data, R_Value, Y_Data);
             X_Data := Y_Data;
@@ -988,9 +1006,20 @@ package body CryptoLib.Macs is
       end loop;
 
       Block_Data := X_Data;
-      Clear_Stream_Array (V_Data);
+      Clear_Stream_Array (V_Data.all);
+      Free_Scrypt_Buffer (V_Data);
       Clear_Stream_Array (X_Data);
       Clear_Stream_Array (Y_Data);
+   exception
+      when others =>
+         --  Do not leak the working set if anything above raises.
+         if V_Data /= null then
+            Clear_Stream_Array (V_Data.all);
+            Free_Scrypt_Buffer (V_Data);
+         end if;
+         Clear_Stream_Array (X_Data);
+         Clear_Stream_Array (Y_Data);
+         raise;
    end Scrypt_SMix;
 
    function Is_Power_Of_Two (Value : Positive) return Boolean
@@ -1023,10 +1052,20 @@ package body CryptoLib.Macs is
       if Output_Length = 0 then
          return Stream_Element_Array'(1 .. 0 => 0);
       end if;
+      --  Bound the working set rather than N alone. N > 16_384 used to be
+      --  refused outright, which rejected parameters that turn up in ordinary
+      --  files -- OpenSSL writes N = 16384 for a scrypt-encrypted PKCS#8 key
+      --  and 32768 and 65536 are both common -- and refusing returns a zeroed
+      --  key that a caller then decrypts with, so the failure surfaced as a
+      --  wrong passphrase rather than as an unsupported cost. What actually
+      --  needs limiting is 128 * r * N, the memory ROMix allocates, because
+      --  these numbers arrive from the file being opened and not from the
+      --  program.
       if not Is_Power_Of_Two (N)
         or else R > 32
         or else P > 32
-        or else N > 16_384
+        or else N > Scrypt_Memory_Cap / Block_Size
+        or else P > Scrypt_Memory_Cap / Block_Size
       then
          return [1 .. Stream_Element_Offset (Output_Length) => 0];
       end if;

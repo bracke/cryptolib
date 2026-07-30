@@ -28,7 +28,7 @@ Do not run plain system `gnat*`, `gnatmake`, `gnatls`, `gnatprove`,
 | `CryptoLib.Hashes` | MD5, SHA-1, SHA-256/384/512, XXH3 |
 | `CryptoLib.Checksums` | Adler-32 and CRC-32 |
 | `CryptoLib.SHA3` | SHA3-256/512, SHAKE128/256 |
-| `CryptoLib.Macs` | HMAC-SHA1/256/384/512, PBKDF2, PBKDF1, PKCS12KDF |
+| `CryptoLib.Macs` | HMAC-SHA1/256/384/512, PBKDF2, PBKDF1, PKCS12KDF, scrypt (RFC 7914) |
 | `CryptoLib.HKDF` | HKDF (RFC 5869) extract-and-expand over HMAC-SHA-256/384/512, for deriving keys from material that is already unguessable |
 | `CryptoLib.TLS13_KDF` | The TLS 1.3 key-schedule derivations (RFC 8446 §7.1): HKDF-Expand-Label and Derive-Secret |
 | `CryptoLib.ECDH` | ECDH key agreement on P-256/P-384/P-521, with full peer-point validation |

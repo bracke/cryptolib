@@ -254,13 +254,24 @@ package CryptoLib.Macs is
 
    --  Derive a key with the scrypt memory-hard KDF using PBKDF2-HMAC-SHA256 as
    --  its inner PRF (RFC 7914).
+   --
+   --  Refused parameters return a **zeroed key of the requested length**
+   --  rather than an error, which is the convention this function has always
+   --  had and which callers depend on. It is worth knowing: a caller that
+   --  does not distinguish "derived" from "declined" will decrypt with zeros
+   --  and report a wrong passphrase. Refused are a non-power-of-two N, an R
+   --  or P above 32, and any N or P whose working set would exceed 256 MiB
+   --  (128 * R * N octets, the memory ROMix needs -- the parameters usually
+   --  come from the file being opened, so they are bounded rather than
+   --  trusted).
    --  @param Password_Data the password/passphrase bytes
    --  @param Salt_Data     the salt bytes
    --  @param N             the CPU/memory cost parameter (a power of two)
    --  @param R             the block-size parameter
    --  @param P             the parallelization parameter
    --  @param Output_Length the number of derived key bytes to produce
-   --  @return the derived key of Output_Length bytes
+   --  @return the derived key of Output_Length bytes, or that many zero
+   --    octets when a parameter is refused
    function Scrypt_SHA256
      (Password_Data : Ada.Streams.Stream_Element_Array;
       Salt_Data     : Ada.Streams.Stream_Element_Array;
