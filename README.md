@@ -39,6 +39,7 @@ Do not run plain system `gnat*`, `gnatmake`, `gnatls`, `gnatprove`,
 | `CryptoLib.Ciphers` | AES-128/192/256 (CTR/CBC/GCM), 3DES, RC2 |
 | `CryptoLib.ChaCha20_Poly1305` | ChaCha20-Poly1305, both constructions: `Seal`/`Open` are the OpenSSH transport framing, `Seal_AEAD`/`Open_AEAD` are RFC 8439's standard AEAD (one 32-byte key, 96-bit nonce, additional data) |
 | `CryptoLib.Curve25519` | X25519 key agreement |
+| `CryptoLib.MLDSA` | ML-DSA (FIPS 204) post-quantum signatures — **key generation only so far** |
 | `CryptoLib.X448` | X448 key agreement (RFC 7748), the 448-bit counterpart |
 | `CryptoLib.Ed25519` | Ed25519 signatures |
 | `CryptoLib.Ed448` | Ed448 signatures (RFC 8032 PureEdDSA, empty context) |

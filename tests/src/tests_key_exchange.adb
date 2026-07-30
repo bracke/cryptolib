@@ -52,6 +52,7 @@ with CryptoLib.ECDSA;
 with CryptoLib.Errors;
 with CryptoLib.Macs;
 with CryptoLib.UMAC;
+with CryptoLib.MLDSA;
 with CryptoLib.MLKEM768;
 with CryptoLib.SNTRUP761;
 with CryptoLib.Curve25519;
@@ -1111,6 +1112,181 @@ package body Tests_Key_Exchange is
       end;
    end Check_FFDHE;
 
+   --  ML-DSA (FIPS 204) key generation against NIST's own ACVP vectors, taken
+   --  from usnistgov/ACVP-Server. The keys are kilobytes, so what is pinned
+   --  here is a SHA-256 of each; the seeds and the digests both come from
+   --  NIST's published prompt and expected-result files.
+   procedure Check_MLDSA is
+      package M renames CryptoLib.MLDSA;
+
+      function Digest_Hex
+        (Data : Ada.Streams.Stream_Element_Array) return String
+      is
+         Digits_Set : constant String := "0123456789abcdef";
+         Digest : constant CryptoLib.Hashes.SHA256_Digest :=
+           CryptoLib.Hashes.SHA256 (Data);
+         Result : String (1 .. 64);
+         K      : Natural := 1;
+      begin
+         for B of Digest loop
+            Result (K) := Digits_Set (Natural (B) / 16 + 1);
+            Result (K + 1) := Digits_Set (Natural (B) mod 16 + 1);
+            K := K + 2;
+         end loop;
+         return Result;
+      end Digest_Hex;
+   begin
+      Check (M.Public_Key_Length (M.ML_DSA_44) = 1312
+             and then M.Private_Key_Length (M.ML_DSA_44) = 2560
+             and then M.Signature_Length (M.ML_DSA_44) = 2420,
+             "the FIPS 204 lengths for ML-DSA-44");
+
+      declare
+         PK : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset
+                   (M.Public_Key_Length (M.ML_DSA_44)));
+         SK : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset
+                   (M.Private_Key_Length (M.ML_DSA_44)));
+      begin
+         Check (M.Key_From_Seed (M.ML_DSA_44,
+                                 Bytes_From_Hex
+                                   ("7194b13c95231010afd2c909992bd2003ba6f437c3886bdbe3f6b867a14ba161"),
+                                 PK, SK)
+                  = CryptoLib.Errors.Ok,
+                "ML-DSA-44 derives a key from ACVP seed 1");
+         Check (Digest_Hex (PK) = "838b88b6ac41e2c60698173e08ca173d0b0d2839205806e56a8a3d53195f3a03",
+                "and the public key is NIST's, vector 1");
+         Check (Digest_Hex (SK) = "1c911d163cd0a5563e06f22403f7e16334fee17c2abb66f11ddf39ca6307ec58",
+                "and so is the private key, vector 1");
+      end;
+
+      declare
+         PK : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset
+                   (M.Public_Key_Length (M.ML_DSA_44)));
+         SK : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset
+                   (M.Private_Key_Length (M.ML_DSA_44)));
+      begin
+         Check (M.Key_From_Seed (M.ML_DSA_44,
+                                 Bytes_From_Hex
+                                   ("2ebe5a4123398dfbcd5bdf0a42ebdd03112be3bc88a6e9b78d93120ab8d0120e"),
+                                 PK, SK)
+                  = CryptoLib.Errors.Ok,
+                "ML-DSA-44 derives a key from ACVP seed 2");
+         Check (Digest_Hex (PK) = "366cdfa62052438e03a4bb70e8aaa2c31c535584ef83a926b4efa1796605dacb",
+                "and the public key is NIST's, vector 2");
+         Check (Digest_Hex (SK) = "67c5410e10424bdb0a7a17755b9a08f86f52b3ebe372bb03caefd6bbfefd28a5",
+                "and so is the private key, vector 2");
+      end;
+
+      declare
+         PK : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset
+                   (M.Public_Key_Length (M.ML_DSA_65)));
+         SK : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset
+                   (M.Private_Key_Length (M.ML_DSA_65)));
+      begin
+         Check (M.Key_From_Seed (M.ML_DSA_65,
+                                 Bytes_From_Hex
+                                   ("a991fd42b071d49c48ae3e75c647459e0daad1e1ba356a04801912d3294bcff8"),
+                                 PK, SK)
+                  = CryptoLib.Errors.Ok,
+                "ML-DSA-65 derives a key from ACVP seed 3");
+         Check (Digest_Hex (PK) = "b1a7d0d2f0d7a04b9d5ffccd9bd578864dab4a01cdd7f70a05cd1f4f0672e43a",
+                "and the public key is NIST's, vector 3");
+         Check (Digest_Hex (SK) = "56c53ac82fbff7d81b7a8cfbbc73011ceccad677e16dc53f2ece66d49aa11edd",
+                "and so is the private key, vector 3");
+      end;
+
+      declare
+         PK : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset
+                   (M.Public_Key_Length (M.ML_DSA_65)));
+         SK : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset
+                   (M.Private_Key_Length (M.ML_DSA_65)));
+      begin
+         Check (M.Key_From_Seed (M.ML_DSA_65,
+                                 Bytes_From_Hex
+                                   ("494f29ad1c93abb2b9545bd14cc575a98ecd3062137b439b49eb1a8cc6652fc6"),
+                                 PK, SK)
+                  = CryptoLib.Errors.Ok,
+                "ML-DSA-65 derives a key from ACVP seed 4");
+         Check (Digest_Hex (PK) = "4f2a21f2bee92fc15c91ce7dc7d96f5dac1ee1f0f7eb7325823ea96dd12ecc84",
+                "and the public key is NIST's, vector 4");
+         Check (Digest_Hex (SK) = "bd37a2499543695d6d31afe6c5188fe18fa16f3980d2941edae7b5dbe5c71c14",
+                "and so is the private key, vector 4");
+      end;
+
+      declare
+         PK : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset
+                   (M.Public_Key_Length (M.ML_DSA_87)));
+         SK : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset
+                   (M.Private_Key_Length (M.ML_DSA_87)));
+      begin
+         Check (M.Key_From_Seed (M.ML_DSA_87,
+                                 Bytes_From_Hex
+                                   ("a16f5b0796703e2d1a0140a35cbf36efabe70e752ba59b6a9a0e9c4b05302f73"),
+                                 PK, SK)
+                  = CryptoLib.Errors.Ok,
+                "ML-DSA-87 derives a key from ACVP seed 5");
+         Check (Digest_Hex (PK) = "33f49649f05ec2fc3b050007b18ade043bbc8d1c0ded03a269d540486daaa5f4",
+                "and the public key is NIST's, vector 5");
+         Check (Digest_Hex (SK) = "c64e15742f27d7d8e2832f7d55a5c014f2c9536082f3a3181cfc6246908dd649",
+                "and so is the private key, vector 5");
+      end;
+
+      declare
+         PK : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset
+                   (M.Public_Key_Length (M.ML_DSA_87)));
+         SK : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset
+                   (M.Private_Key_Length (M.ML_DSA_87)));
+      begin
+         Check (M.Key_From_Seed (M.ML_DSA_87,
+                                 Bytes_From_Hex
+                                   ("e46d458a660285930d9656a88d14e751730cae7a4975b6e4fbe69e80e3f01e7f"),
+                                 PK, SK)
+                  = CryptoLib.Errors.Ok,
+                "ML-DSA-87 derives a key from ACVP seed 6");
+         Check (Digest_Hex (PK) = "f445cbb034fba125d17a8ac1be6ff617ddaca04a3e6b76ccf44e3dbc94cc7946",
+                "and the public key is NIST's, vector 6");
+         Check (Digest_Hex (SK) = "d679b094bb35dfba907e45fc449b5879353d7f32c65c6fe4430f55b2cef7a2f0",
+                "and so is the private key, vector 6");
+      end;
+
+      --  A generated key must have the shape the parameter set promises.
+      declare
+         Rng : CryptoLib.Random.Random_Source;
+         PK  : Ada.Streams.Stream_Element_Array (1 .. 1312);
+         SK  : Ada.Streams.Stream_Element_Array (1 .. 2560);
+      begin
+         CryptoLib.Random.Initialize_Production (Rng);
+         Check (M.Generate_Keypair (M.ML_DSA_44, Rng, PK, SK)
+                  = CryptoLib.Errors.Ok,
+                "ML-DSA-44 generates a keypair");
+         Check (PK /= [PK'Range => 0] and then SK /= [SK'Range => 0],
+                "and neither half is left empty");
+      end;
+
+      --  A wrong-length buffer is refused rather than truncated.
+      declare
+         Small : Ada.Streams.Stream_Element_Array (1 .. 16) := [others => 0];
+         SK    : Ada.Streams.Stream_Element_Array (1 .. 2560);
+      begin
+         Check (M.Key_From_Seed (M.ML_DSA_44,
+                                 Bytes_From_Hex ("00"), Small, SK)
+                  /= CryptoLib.Errors.Ok,
+                "a wrong-length seed is refused");
+      end;
+   end Check_MLDSA;
+
    --  AUnit routine wrappers. Each check is a test of its own, so a
    --  failure reports the check that failed and the rest still run.
    procedure Run_Check_DH_Peer_Validation (Item : in out AUnit.Test_Cases.Test_Case'Class);
@@ -1121,6 +1297,7 @@ package body Tests_Key_Exchange is
    procedure Run_Check_Hybrid_PQ_Names (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_MLKEM_Core_Algebra (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_FFDHE (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_MLDSA (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_MLKEM768_Vectors (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_SNTRUP761_Vectors (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_Modexp_And_DH_Group18 (Item : in out AUnit.Test_Cases.Test_Case'Class);
@@ -1191,6 +1368,12 @@ package body Tests_Key_Exchange is
       Check_FFDHE;
    end Run_Check_FFDHE;
 
+   procedure Run_Check_MLDSA (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_MLDSA;
+   end Run_Check_MLDSA;
+
    overriding procedure Register_Tests (Item : in out Test_Case) is
       use AUnit.Test_Cases.Registration;
    begin
@@ -1202,6 +1385,7 @@ package body Tests_Key_Exchange is
       Register_Routine (Item, Run_Check_Hybrid_PQ_Names'Access, "hybrid pq names");
       Register_Routine (Item, Run_Check_MLKEM_Core_Algebra'Access, "mlkem core algebra");
       Register_Routine (Item, Run_Check_FFDHE'Access, "ffdhe groups");
+      Register_Routine (Item, Run_Check_MLDSA'Access, "ml-dsa keygen");
       Register_Routine (Item, Run_Check_MLKEM768_Vectors'Access, "mlkem768 vectors");
       Register_Routine (Item, Run_Check_SNTRUP761_Vectors'Access, "sntrup761 vectors");
       Register_Routine (Item, Run_Check_Modexp_And_DH_Group18'Access, "modexp and dh group18");
