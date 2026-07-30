@@ -201,18 +201,23 @@ neither tested here nor called anywhere else in the library is zero. The last
 of them were ML-KEM's algebraic core, the two self-describing manifests, and a
 handful of small helpers.
 
-The ML-KEM core is checked by identity rather than by stored vectors, with one
-deliberately independent anchor: `Ring_Multiply_Reference` is held against a
-negacyclic convolution written out longhand in the test. That anchor has to
-exist because `Pointwise_Multiply` is implemented as `NTT (reference multiply
-(inverse NTT of each operand))` -- it is not a separate fast path -- so
-comparing the two would compare the reference multiply with itself and pass
-however wrong it was. Everything else chains off the verified base: the NTT
-round-trips, twelve-bit encoding is exact, a message survives its polynomial,
-the compressed encodings stay inside the FIPS 203 error bound and are checked
-to actually be lossy, matrix sampling depends on both row and column, and
-centred binomial noise stays within eta2. Making the reference multiply cyclic
-instead of negacyclic fails the suite.
+ML-KEM used to be checked by algebraic identity rather than by stored
+vectors, because no official vectors were wired in: the NTT round-tripped, the
+encodings were exact, the compressed forms stayed inside the FIPS 203 error
+bound, and `Ring_Multiply_Reference` was held against a negacyclic convolution
+written out longhand so that the chain had one independent anchor. That anchor
+was needed because `Pointwise_Multiply` was implemented as `NTT (reference
+multiply (inverse NTT of each operand))`, so comparing the two would have
+compared the reference multiply with itself.
+
+None of that is the arrangement any more. NIST's ACVP vectors cover all three
+parameter sets end to end, which subsumes every one of those identities -- an
+NTT, an encoding or a compression that is wrong cannot produce the right
+ciphertext -- and `CryptoLib.MLKEM` computes the base-case product directly
+from FIPS 203 rather than through a reference multiply, so the circularity
+that made the anchor necessary is gone with it. `CryptoLib.MLKEM768_Core`,
+which existed to expose that algebra for those tests, has been removed along
+with them, here and in `ssh_lib`.
 
 `Check_Consumer_Entry_Points` holds each to the code that consumes its answer
 rather than to a restatement of its body: the GCM key length is checked to be

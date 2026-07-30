@@ -1,5 +1,4 @@
 with Ada.Streams; use Ada.Streams;
-with System;
 
 with CryptoLib.Field448; use CryptoLib.Field448;
 with CryptoLib.Secure_Wipe;
@@ -7,10 +6,6 @@ with CryptoLib.Secure_Wipe;
 package body CryptoLib.X448 is
 
    use CryptoLib.Errors;
-
-   --  (A - 2) / 4 for curve448, whose A is 156326. The only curve constant
-   --  the ladder needs.
-   A24 : constant := 39081;
 
    Zero_Element : constant Field_Element := [others => 0];
    One_Element  : constant Field_Element := [1, others => 0];
@@ -211,7 +206,6 @@ package body CryptoLib.X448 is
    end Generate_Keypair;
 
    procedure Clear (Private_Item : out Private_Key) is
-      use System;
    begin
       Private_Item := [others => 0];
       CryptoLib.Secure_Wipe.Wipe (Private_Item'Address, Private_Item'Length);

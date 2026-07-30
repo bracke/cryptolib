@@ -1,6 +1,5 @@
 with Ada.Streams; use Ada.Streams;
 with Interfaces; use Interfaces;
-with System;
 
 with CryptoLib.SHA3;
 with CryptoLib.Secure_Wipe;
@@ -676,7 +675,6 @@ package body CryptoLib.MLKEM is
       Secret_Key : out Ada.Streams.Stream_Element_Array)
       return CryptoLib.Errors.Status
    is
-      use System;
       D : Stream_Element_Array (1 .. 32) := [others => 0];
       Z : Stream_Element_Array (1 .. 32) := [others => 0];
    begin
@@ -743,7 +741,6 @@ package body CryptoLib.MLKEM is
       Shared_Key : out Ada.Streams.Stream_Element_Array)
       return CryptoLib.Errors.Status
    is
-      use System;
       Message : Stream_Element_Array (1 .. 32) := [others => 0];
    begin
       Ciphertext := [others => 0];

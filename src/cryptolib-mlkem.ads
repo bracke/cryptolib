@@ -32,10 +32,7 @@ with CryptoLib.Random;
 --  exists once rather than twice. Its fixed-length subtypes are still the
 --  better interface for a caller that only wants that parameter set, and
 --  ssh_lib's key exchange is typed on them; only the implementation moved.
---
---  CryptoLib.MLKEM768_Core remains, and is no longer on this path: it is
---  exercised directly by tests here and in ssh_lib, which is why it was not
---  removed with the KEM logic it used to serve.
+
 package CryptoLib.MLKEM is
 
    --  Which parameter set. The numbers are FIPS 203's module ranks scaled to

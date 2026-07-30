@@ -27,7 +27,6 @@ with CryptoLib.TLS13_KDF;
 with CryptoLib.ECDH;
 with CryptoLib.Constant_Time_Proof;
 with CryptoLib.Constant_Time_Assurance;
-with CryptoLib.MLKEM768_Core;
 with CryptoLib.EC_Curves;
 with CryptoLib.Hybrid_PQ_Kex;
 with CryptoLib.Fingerprints;

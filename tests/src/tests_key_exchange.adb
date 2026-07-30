@@ -27,7 +27,6 @@ with CryptoLib.TLS13_KDF;
 with CryptoLib.ECDH;
 with CryptoLib.Constant_Time_Proof;
 with CryptoLib.Constant_Time_Assurance;
-with CryptoLib.MLKEM768_Core;
 with CryptoLib.EC_Curves;
 with CryptoLib.Hybrid_PQ_Kex;
 with CryptoLib.Fingerprints;
@@ -536,189 +535,6 @@ package body Tests_Key_Exchange is
    --  Checked by identity rather than by stored vectors: each routine is held
    --  against another routine that must agree with it, so neither can drift
    --  alone.
-   procedure Check_MLKEM_Core_Algebra is
-      package M renames CryptoLib.MLKEM768_Core;
-      use type M.Polynomial;
-
-      Q : constant Integer := M.Q_Value;
-      A, B : M.Polynomial := [others => 0];
-
-      function Congruent (Left, Right : M.Polynomial) return Boolean is
-      begin
-         for I in M.Polynomial'Range loop
-            if (Left (I) - Right (I)) mod Q /= 0 then
-               return False;
-            end if;
-         end loop;
-         return True;
-      end Congruent;
-
-      --  Distance on the circle mod q, so a wrap counts as near not far.
-      function Ring_Distance (Left, Right : Integer) return Integer is
-         D : constant Integer := (Left - Right) mod Q;
-      begin
-         return Integer'Min (D, Q - D);
-      end Ring_Distance;
-   begin
-      for I in M.Polynomial'Range loop
-         A (I) := (I * 7 + 3) mod Q;
-         B (I) := (I * 11 + 5) mod Q;
-      end loop;
-
-      Check (Congruent (M.Inverse_NTT (M.NTT (A)), A),
-             "the inverse NTT undoes the NTT");
-
-      --  The base everything else here rests on: the reference multiply,
-      --  against a negacyclic convolution written out longhand in this test.
-      --
-      --  This is the only genuinely independent check in the group, and it
-      --  has to be. Pointwise_Multiply is implemented as NTT (reference
-      --  multiply (inverse NTT of each operand)) -- it is not a separate fast
-      --  path -- so comparing the two would compare the reference multiply
-      --  with itself and pass however wrong it was. Rq is Zq[x]/(x**256 + 1),
-      --  so a product term that runs off the end comes back negated.
-      declare
-         Independent : M.Polynomial := [others => 0];
-         N : constant Natural := M.N_Value;
-      begin
-         for I in 0 .. N - 1 loop
-            for J in 0 .. N - 1 loop
-               declare
-                  K : constant Natural := (I + J) mod N;
-                  P : constant Integer := (A (I) * B (J)) mod Q;
-               begin
-                  if I + J < N then
-                     Independent (K) := (Independent (K) + P) mod Q;
-                  else
-                     Independent (K) := (Independent (K) - P) mod Q;
-                  end if;
-               end;
-            end loop;
-         end loop;
-         Check (Congruent (M.Ring_Multiply_Reference (A, B), Independent),
-                "the reference multiply is the negacyclic convolution");
-      end;
-
-      --  Given that, the NTT is a ring homomorphism over it.
-      Check (Congruent
-               (M.Inverse_NTT (M.Pointwise_Multiply (M.NTT (A), M.NTT (B))),
-                M.Ring_Multiply_Reference (A, B)),
-             "transforming, multiplying and transforming back is the product");
-
-      --  Dot_Product sums the reference multiply over the components. It is
-      --  not the pointwise product despite the vocabulary, and the two are
-      --  checked to differ so nobody swaps one for the other.
-      declare
-         U, V : M.Polyvec;
-         Sum_Reference, Sum_Pointwise : M.Polynomial := [others => 0];
-      begin
-         for K in M.Vector_Index loop
-            for I in M.Polynomial'Range loop
-               U (K)(I) := (I * (K + 2) + K) mod Q;
-               V (K)(I) := (I * (K + 5) + 1) mod Q;
-            end loop;
-         end loop;
-         for K in M.Vector_Index loop
-            Sum_Reference :=
-              M.Add (Sum_Reference, M.Ring_Multiply_Reference (U (K), V (K)));
-            Sum_Pointwise :=
-              M.Add (Sum_Pointwise, M.Pointwise_Multiply (U (K), V (K)));
-         end loop;
-         Check (Congruent (M.Dot_Product (U, V), Sum_Reference),
-                "a dot product sums the reference multiply");
-         Check (not Congruent (Sum_Reference, Sum_Pointwise),
-                "and that is not the same as summing pointwise products");
-      end;
-
-      --  Twelve-bit encoding is exact: it is how a public key survives a wire.
-      Check (M.Decode_12 (M.Encode_12 (A)) = A,
-             "twelve-bit encode and decode round-trip exactly");
-
-      --  A message survives the polynomial it is carried in.
-      declare
-         Message : M.MLKEM_Message := [others => 0];
-      begin
-         for I in Message'Range loop
-            Message (I) :=
-              Ada.Streams.Stream_Element ((Natural (I) * 37) mod 256);
-         end loop;
-         Check (M.Poly_To_Message (M.Message_To_Poly (Message)) = Message,
-                "a message round-trips through its polynomial");
-      end;
-
-      --  The compressed encodings are lossy on purpose; what matters is that
-      --  they lose no more than FIPS 203 allows, which is ceil (q / 2**(d+1)).
-      declare
-         R10 : constant M.Polynomial :=
-           M.Decode_Decompress_10 (M.Compress_Encode_10 (A));
-         R4  : constant M.Polynomial :=
-           M.Decode_Decompress_4 (M.Compress_Encode_4 (A));
-         Bound_10 : constant Integer := (Q + 2047) / 2048;
-         Bound_4  : constant Integer := (Q + 31) / 32;
-         Worst_10, Worst_4 : Integer := 0;
-      begin
-         for I in M.Polynomial'Range loop
-            Worst_10 := Integer'Max (Worst_10, Ring_Distance (R10 (I), A (I)));
-            Worst_4  := Integer'Max (Worst_4,  Ring_Distance (R4 (I), A (I)));
-         end loop;
-         Check (Worst_10 <= Bound_10,
-                "ten-bit compression stays inside its error bound, worst"
-                & Integer'Image (Worst_10) & " of" & Integer'Image (Bound_10));
-         Check (Worst_4 <= Bound_4,
-                "four-bit compression stays inside its error bound, worst"
-                & Integer'Image (Worst_4) & " of" & Integer'Image (Bound_4));
-         --  And they really are lossy: an exact round trip would mean the
-         --  compression was not happening at all.
-         Check (R4 /= A, "four-bit compression actually discards something");
-      end;
-
-      Check (M.Compress (0, 10) = 0 and then M.Decompress (0, 10) = 0,
-             "zero compresses and decompresses to zero");
-
-      --  Matrix sampling is a function of its seed and its indices.
-      declare
-         Rho : constant Ada.Streams.Stream_Element_Array (1 .. 32) :=
-           [others => 7];
-         P00 : constant M.Polynomial := M.Sample_NTT (Rho, 0, 0);
-         P00_Again : constant M.Polynomial := M.Sample_NTT (Rho, 0, 0);
-         P10 : constant M.Polynomial := M.Sample_NTT (Rho, 1, 0);
-         P01 : constant M.Polynomial := M.Sample_NTT (Rho, 0, 1);
-      begin
-         Check (P00 = P00_Again, "sampling the matrix is deterministic");
-         Check (P00 /= P10 and then P00 /= P01 and then P10 /= P01,
-                "row and column both change what is sampled -- a matrix whose "
-                & "entries collided would break the whole scheme");
-         Check ((for all I in M.Polynomial'Range =>
-                   P00 (I) >= 0 and then P00 (I) < Q),
-                "every sampled coefficient is a residue mod q");
-      end;
-
-      --  Centred binomial noise is small, which is the entire point of it.
-      declare
-         Bytes : Ada.Streams.Stream_Element_Array (1 .. 128) := [others => 0];
-         Noise : M.Polynomial;
-         Lowest, Highest : Integer := 0;
-      begin
-         for I in Bytes'Range loop
-            Bytes (I) :=
-              Ada.Streams.Stream_Element ((Natural (I) * 53) mod 256);
-         end loop;
-         Noise := M.CBD_Eta2 (Bytes);
-         for I in M.Polynomial'Range loop
-            declare
-               Centred : constant Integer :=
-                 (if Noise (I) > Q / 2 then Noise (I) - Q else Noise (I));
-            begin
-               Lowest := Integer'Min (Lowest, Centred);
-               Highest := Integer'Max (Highest, Centred);
-            end;
-         end loop;
-         Check (Lowest >= -M.Eta_2 and then Highest <= M.Eta_2,
-                "centred binomial noise stays within eta2, got"
-                & Integer'Image (Lowest) & " .." & Integer'Image (Highest));
-      end;
-   end Check_MLKEM_Core_Algebra;
-
    --  FIPS 203 ML-KEM-768 known-answer test.  Deterministic keygen from d || z
    --  and encaps from m, checked against the pq-crystals final ML-KEM reference
    --  (byte-identical to OpenSSH).  The 1184/2400/1088-byte ek/dk/ct are
@@ -1649,7 +1465,6 @@ package body Tests_Key_Exchange is
    procedure Run_Check_DH_Generators (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_Gex_Group_Selection (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_Hybrid_PQ_Names (Item : in out AUnit.Test_Cases.Test_Case'Class);
-   procedure Run_Check_MLKEM_Core_Algebra (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_FFDHE (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_MLDSA (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_MLDSA_Sign (Item : in out AUnit.Test_Cases.Test_Case'Class);
@@ -1694,12 +1509,6 @@ package body Tests_Key_Exchange is
    begin
       Check_Hybrid_PQ_Names;
    end Run_Check_Hybrid_PQ_Names;
-
-   procedure Run_Check_MLKEM_Core_Algebra (Item : in out AUnit.Test_Cases.Test_Case'Class) is
-      pragma Unreferenced (Item);
-   begin
-      Check_MLKEM_Core_Algebra;
-   end Run_Check_MLKEM_Core_Algebra;
 
    procedure Run_Check_MLKEM_All_Parameter_Sets
      (Item : in out AUnit.Test_Cases.Test_Case'Class) is
@@ -1753,7 +1562,6 @@ package body Tests_Key_Exchange is
       Register_Routine (Item, Run_Check_DH_Generators'Access, "dh generators");
       Register_Routine (Item, Run_Check_Gex_Group_Selection'Access, "gex group selection");
       Register_Routine (Item, Run_Check_Hybrid_PQ_Names'Access, "hybrid pq names");
-      Register_Routine (Item, Run_Check_MLKEM_Core_Algebra'Access, "mlkem core algebra");
       Register_Routine (Item, Run_Check_FFDHE'Access, "ffdhe groups");
       Register_Routine (Item, Run_Check_MLDSA'Access, "ml-dsa keygen");
       Register_Routine (Item, Run_Check_MLDSA_Sign'Access, "ml-dsa sign/verify");
