@@ -64,15 +64,24 @@ claims are meant to be checkable against the code.
   out `project_tools` beside this repo, builds the tools crate, and runs it. So
   the checks above are enforced on every push, and a change that only passes
   `alr build` is not a change that passes.
-- CI also builds on **macOS and Windows** and runs `example_random` there, so
-  the per-OS entropy backend is compiled, linked and executed on its own
-  platform rather than only semantically checked from Linux. The preflight
-  itself stays on Linux: its constant-time step disassembles with `objdump` and
-  matches ELF symbol names. Two constraints worth knowing before editing the
-  workflow: the macOS job must run on the **Intel** image, because the Alire
-  index has `gnat_native` 15.2.1 for macOS x86_64 only and none for Apple
-  Silicon; and the Windows job stops at the examples, because the suite links
-  libcrypto and this mingw toolchain has none to link against.
+- CI also builds on **Windows** and runs `example_random` there, so the
+  Windows entropy backend -- `BCryptGenRandom`, which nothing had ever
+  executed -- is compiled, linked and run on its own platform rather than only
+  semantically checked from Linux. That job stops at the examples: the suite
+  links libcrypto and this mingw toolchain has none to link against.
+- **There is no macOS job, and it is not an oversight.** The Alire index has no
+  Apple Silicon GNAT 15 -- 15.2.1 carries a macOS x86_64 origin and no
+  aarch64-darwin one -- so `macos-latest` cannot resolve the toolchain this
+  crate requires. 14.2.1 does have an aarch64-darwin build, but `^15` does not
+  accept it. The Intel images that could run 15.2.1 are retired and no longer
+  allocate: pinning `macos-13` did not fail, it queued until it was cancelled,
+  and it held seven runs unfinished for hours before anyone noticed. Restoring
+  macOS coverage waits on an Apple Silicon GNAT 15 in the index.
+- The `portable` job carries `timeout-minutes: 30` for that reason. A runner
+  label nothing satisfies queues for six hours by default rather than failing,
+  and a job that never finishes leaves the whole run unfinished.
+- The preflight itself stays on Linux: its constant-time step disassembles with
+  `objdump` and matches ELF symbol names.
 - **On a fresh checkout, `alr update` once before `alr build` — in the crate
   root as well as `tests/` and `tools/`.** Their `alire/`, `config/`, `obj/`,
   and `bin/` are generated and untracked, and `alr build` alone does not

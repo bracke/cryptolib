@@ -83,7 +83,17 @@ jobs:
         working-directory: cryptolib
         run: ./tools/bin/check_release_ready
 
-  # macOS and Windows. The preflight deliberately stays on Linux: its
+  # Windows only, and macOS is absent for a reason worth writing down rather
+  # than rediscovering. The Alire index has no Apple Silicon GNAT 15: version
+  # 15.2.1 carries a macOS x86_64 origin and no aarch64-darwin one, so
+  # macos-latest cannot resolve the toolchain this crate requires (^15) and
+  # fails in `alr toolchain --select`. 14.2.1 does have an aarch64-darwin
+  # build, but the crate does not accept 14. The Intel images that could run
+  # 15.2.1 are retired and no longer allocate. So macOS coverage here waits on
+  # an Apple Silicon GNAT 15 appearing in the index; until then src-macos gets
+  # the semantic compile the Linux preflight runs, and nothing more.
+  #
+  # The preflight deliberately stays on Linux: its
   # constant-time step disassembles the archive with objdump and matches ELF
   # symbol names, which is not a portable question. What these jobs answer is
   # the one nothing else could -- whether the per-OS entropy backend compiles,
@@ -93,19 +103,15 @@ jobs:
   portable:
     name: ${{ matrix.os }} build and RNG
     runs-on: ${{ matrix.os }}
+    # A runner label nothing can satisfy queues until the six-hour default
+    # rather than failing, and a job that never finishes leaves the whole run
+    # unfinished. That happened here: seven pushes sat "queued" for hours
+    # apiece behind a macOS job no runner would take. Fail in minutes instead.
+    timeout-minutes: 30
     strategy:
-      # Report both platforms. A Windows failure should not hide a macOS one.
       fail-fast: false
       matrix:
         include:
-          # macos-13 is the Intel image, and it has to be. The Alire index
-          # carries gnat_native 15.2.1 for macOS x86_64 only -- there is no
-          # aarch64-darwin binary -- so macos-latest, which is Apple Silicon,
-          # fails in `alr toolchain --select` with "Release within requested
-          # versions not found" before any step of this job runs. Do not
-          # "modernise" this to macos-latest without checking the index first.
-          - os: macos-13
-            exe: ""
           - os: windows-latest
             exe: ".exe"
     env:
@@ -158,17 +164,3 @@ jobs:
           ./examples/bin/example_secure_wipe${{ matrix.exe }}
           ./examples/bin/example_macs${{ matrix.exe }}
 
-      # macOS only, for now. The suite links libcrypto for the certificate
-      # chain cross-check, and Homebrew's OpenSSL is a linkable one; the
-      # system library under /usr/lib is not. Windows has no equivalent that
-      # this Alire mingw toolchain can link against, so the Windows job stops
-      # at the examples above -- which is a gap, not a decision that the suite
-      # need not run there.
-      - name: Build and run the test suite
-        if: runner.os == 'macOS'
-        working-directory: tests
-        run: |
-          brew install openssl@3 || true
-          alr --non-interactive update
-          alr --non-interactive build -- -largs -L"$(brew --prefix openssl@3)/lib"
-          ./bin/tests
