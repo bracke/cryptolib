@@ -23,6 +23,7 @@ with CryptoLib.PKCS12;
 with CryptoLib.Identities;
 with CryptoLib.X509.Policies;
 with CryptoLib.Argon2;
+with CryptoLib.Bcrypt;
 with CryptoLib.HKDF;
 with CryptoLib.TLS13_KDF;
 with CryptoLib.ECDH;
@@ -955,6 +956,117 @@ package body Tests_KDFs is
       end;
    end Check_Argon2;
 
+   --  bcrypt against the Python bcrypt module, which wraps the OpenBSD
+   --  implementation. One salt, three costs, and three password lengths
+   --  including the empty password and the 72-octet maximum.
+   procedure Check_Bcrypt is
+      package B renames CryptoLib.Bcrypt;
+      Salt_Bytes : constant B.Salt :=
+        Bytes_From_Hex ("71d79f8218a39259a7a29aabb2dbafc3");
+      Empty_Pw : constant Ada.Streams.Stream_Element_Array (1 .. 0) :=
+        [others => 0];
+      Max_Pw : constant Ada.Streams.Stream_Element_Array (1 .. 72) :=
+        [others => Character'Pos ('a')];
+      Ref_Hash : constant String := "$2b$04$abcdefghijklmnopqrstuughE8Ev8uGFaUgY2cNEySvxngrb/Jzdm";
+      Out_Hash : B.Hash_String;
+   begin
+      Check (B.Hash (Bytes_From_String ("password"), Salt_Bytes, 4, Out_Hash)
+               = CryptoLib.Errors.Ok,
+             "bcrypt cost 4 over a 8-octet password hashes");
+      Check (Out_Hash
+               = "$2b$04$abcdefghijklmnopqrstuughE8Ev8uGFaUgY2cNEySvxngrb/Jzdm",
+             "bcrypt cost 4 over a 8-octet password");
+
+      Check (B.Hash (Empty_Pw, Salt_Bytes, 4, Out_Hash)
+               = CryptoLib.Errors.Ok,
+             "bcrypt cost 4 over a 0-octet password hashes");
+      Check (Out_Hash
+               = "$2b$04$abcdefghijklmnopqrstuubyCG3zY1GIXMyxfivm.ClDiInHzxjiq",
+             "bcrypt cost 4 over a 0-octet password");
+
+      Check (B.Hash (Max_Pw, Salt_Bytes, 4, Out_Hash)
+               = CryptoLib.Errors.Ok,
+             "bcrypt cost 4 over a 72-octet password hashes");
+      Check (Out_Hash
+               = "$2b$04$abcdefghijklmnopqrstuuBzzIgyKkz7xMWYSzkIjUSnxEQFQ0WNe",
+             "bcrypt cost 4 over a 72-octet password");
+
+      Check (B.Hash (Bytes_From_String ("password"), Salt_Bytes, 5, Out_Hash)
+               = CryptoLib.Errors.Ok,
+             "bcrypt cost 5 over a 8-octet password hashes");
+      Check (Out_Hash
+               = "$2b$05$abcdefghijklmnopqrstuuWG29KuyeAicPCJODk1zjyGvyQUU2awu",
+             "bcrypt cost 5 over a 8-octet password");
+
+      Check (B.Hash (Empty_Pw, Salt_Bytes, 5, Out_Hash)
+               = CryptoLib.Errors.Ok,
+             "bcrypt cost 5 over a 0-octet password hashes");
+      Check (Out_Hash
+               = "$2b$05$abcdefghijklmnopqrstuu0oImNDIy4flhldV9YqunRgBAePKmw7m",
+             "bcrypt cost 5 over a 0-octet password");
+
+      Check (B.Hash (Max_Pw, Salt_Bytes, 5, Out_Hash)
+               = CryptoLib.Errors.Ok,
+             "bcrypt cost 5 over a 72-octet password hashes");
+      Check (Out_Hash
+               = "$2b$05$abcdefghijklmnopqrstuuGUnCqbfgs3htOkLrFduUjAyLBw1Rq/u",
+             "bcrypt cost 5 over a 72-octet password");
+
+      Check (B.Hash (Bytes_From_String ("password"), Salt_Bytes, 6, Out_Hash)
+               = CryptoLib.Errors.Ok,
+             "bcrypt cost 6 over a 8-octet password hashes");
+      Check (Out_Hash
+               = "$2b$06$abcdefghijklmnopqrstuuNBpXtlux7FnXJE0fnrtkSXNhdOGmWHu",
+             "bcrypt cost 6 over a 8-octet password");
+
+      Check (B.Hash (Empty_Pw, Salt_Bytes, 6, Out_Hash)
+               = CryptoLib.Errors.Ok,
+             "bcrypt cost 6 over a 0-octet password hashes");
+      Check (Out_Hash
+               = "$2b$06$abcdefghijklmnopqrstuuDqVCX9YSxXQXEJE1On1Ptib/W28qLxG",
+             "bcrypt cost 6 over a 0-octet password");
+
+      Check (B.Hash (Max_Pw, Salt_Bytes, 6, Out_Hash)
+               = CryptoLib.Errors.Ok,
+             "bcrypt cost 6 over a 72-octet password hashes");
+      Check (Out_Hash
+               = "$2b$06$abcdefghijklmnopqrstuuIBuNj.FHUDJuljpq724SoPkEleOzHW2",
+             "bcrypt cost 6 over a 72-octet password");
+
+      --  Verify accepts what Hash produced and refuses a wrong password.
+      Check (B.Verify (Bytes_From_String ("password"),
+                       "$2b$04$abcdefghijklmnopqrstuughE8Ev8uGFaUgY2cNEySvxngrb/Jzdm"),
+             "Verify accepts the right password");
+      Check (not B.Verify (Bytes_From_String ("passworC"),
+                           "$2b$04$abcdefghijklmnopqrstuughE8Ev8uGFaUgY2cNEySvxngrb/Jzdm"),
+             "and refuses a wrong one");
+      Check (not B.Verify (Bytes_From_String ("password"),
+                           "$2a$" & Ref_Hash (5 .. 60)),
+             "and refuses a prefix it does not implement");
+      Check (not B.Verify (Bytes_From_String ("password"), "short"),
+             "and a stored string of the wrong length");
+
+      --  The two limits the construction imposes are refused, not silently
+      --  applied: a password past 72 octets, and one containing a NUL.
+      declare
+         Too_Long : constant Ada.Streams.Stream_Element_Array (1 .. 73) :=
+           [others => Character'Pos ('x')];
+         With_Nul : constant Ada.Streams.Stream_Element_Array :=
+           [Character'Pos ('a'), 0, Character'Pos ('b')];
+      begin
+         Check (B.Hash (Too_Long, Salt_Bytes, 4, Out_Hash)
+                  /= CryptoLib.Errors.Ok,
+                "a password past 72 octets is refused, not truncated");
+         Check (Out_Hash = [Out_Hash'Range => ' '],
+                "and the result is left blank");
+         Check (B.Hash (With_Nul, Salt_Bytes, 4, Out_Hash)
+                  /= CryptoLib.Errors.Ok,
+                "and one containing a NUL octet");
+         Check (Out_Hash = [Out_Hash'Range => ' '],
+                "and the result is left blank");
+      end;
+   end Check_Bcrypt;
+
    --  AUnit routine wrappers. Each check is a test of its own, so a
    --  failure reports the check that failed and the rest still run.
    procedure Run_Check_PBKDF2_SHA1 (Item : in out AUnit.Test_Cases.Test_Case'Class);
@@ -965,6 +1077,7 @@ package body Tests_KDFs is
    procedure Run_Check_Seven_Zip_AES_SHA256_KDF (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_EVP_Bytes_To_Key_MD5 (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_Bcrypt_PBKDF (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Bcrypt (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_Argon2 (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_HKDF (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_TLS13_KDF (Item : in out AUnit.Test_Cases.Test_Case'Class);
@@ -1063,6 +1176,12 @@ package body Tests_KDFs is
       Check_Argon2;
    end Run_Check_Argon2;
 
+   procedure Run_Check_Bcrypt (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Bcrypt;
+   end Run_Check_Bcrypt;
+
    overriding procedure Register_Tests (Item : in out Test_Case) is
       use AUnit.Test_Cases.Registration;
    begin
@@ -1074,6 +1193,7 @@ package body Tests_KDFs is
       Register_Routine (Item, Run_Check_Seven_Zip_AES_SHA256_KDF'Access, "seven zip aes sha256 kdf");
       Register_Routine (Item, Run_Check_EVP_Bytes_To_Key_MD5'Access, "evp bytes to key md5");
       Register_Routine (Item, Run_Check_Bcrypt_PBKDF'Access, "bcrypt pbkdf");
+      Register_Routine (Item, Run_Check_Bcrypt'Access, "bcrypt");
       Register_Routine (Item, Run_Check_Argon2'Access, "argon2");
       Register_Routine (Item, Run_Check_HKDF'Access, "hkdf");
       Register_Routine (Item, Run_Check_TLS13_KDF'Access, "tls13 kdf");
