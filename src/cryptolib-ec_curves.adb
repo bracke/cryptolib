@@ -340,7 +340,6 @@ package body CryptoLib.EC_Curves is
       return CryptoLib.Errors.Ok;
    end Affine_Point;
 
-
    procedure Trim_To_Order
      (Cv : Curve_Data; Draw : in out Stream_Element_Array)
    is

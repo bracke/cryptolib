@@ -887,7 +887,6 @@ package body CryptoLib.RSA is
          return CryptoLib.Errors.Internal_Error;
    end Sign_PSS;
 
-
    procedure Wipe (Pair : in out Blinding_Pair) is
    begin
       CryptoLib.Secure_Wipe.Wipe (Pair.Factor'Address, Pair.Factor'Length);

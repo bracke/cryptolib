@@ -137,10 +137,11 @@ package CryptoLib.RSA is
    --
    --  The blinding factor's modular inverse is the most expensive part of a
    --  signature -- measured, about half of one, and more than the
-   --  exponentiation itself. It need not be paid every time: a pair can be carried forward and refreshed by squaring both
-   --  halves, which costs two modular multiplications instead of an inverse and
-   --  keeps the pair consistent, since squaring r and r inverse leaves them
-   --  inverses of each other.
+   --  exponentiation itself. It need not be paid every time: a pair can be
+   --  carried forward and refreshed by squaring both halves, which costs two
+   --  modular multiplications instead of an inverse and keeps the pair
+   --  consistent, since squaring r and r inverse leaves them inverses of each
+   --  other.
    --
    --  Worth using when signing repeatedly with the same key. Signing once --
    --  which is what issuing a certificate does -- gains nothing, and the

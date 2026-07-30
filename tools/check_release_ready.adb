@@ -98,6 +98,22 @@ begin
 
    Require_Alire_GNAT_15;
 
+   --  Where the style and warning bar actually bites, and it did not until
+   --  this step existed.
+   --
+   --  The switches come from the Alire profile, not from cryptolib.gpr, and
+   --  they differ per profile: `release` carries -gnatn and -gnatW8 and
+   --  nothing else -- no -gnatwa, no -gnatVa, no -gnaty at all -- while
+   --  `validation` adds the full style set plus -gnatwe, which turns every
+   --  warning and style breach into an error. A preflight that built only
+   --  --release and the default profile therefore printed style complaints at
+   --  most, and printing is not enforcing: three had accumulated unnoticed
+   --  (two double blank lines and a 122-column line against a 120 limit).
+   --
+   --  This runs first because a style breach should be the cheapest failure to
+   --  get, not one found after a full test run.
+   Step ("build cryptolib with warnings as errors", "alr build --validation -- -f");
+
    --  Forced, both of them. Everything after this inspects what the build
    --  produced -- the test binary's behaviour, and the library's generated
    --  code -- so a preflight that accepted whatever an incremental build

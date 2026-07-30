@@ -81,10 +81,25 @@ claims are meant to be checkable against the code.
   `Locate_Command` to ask whether a tool exists. The test harness reaches
   OpenSSL through `Import, Convention => C`, not by spawning the `openssl` CLI.
 - Style is enforced by GNAT flags, not a formatter: Ada 2022, 3-space indent, max
-  120 columns, `-gnatwa` (all warnings) + `-gnatVa` (validity). **Keep builds
-  warning-clean** — the bar is zero warnings; clear any in code you touch.
+  120 columns, no double blank lines, and the rest of the `-gnaty` set. **Keep
+  builds warning-clean** — the bar is zero warnings; clear any in code you touch.
   Warnings only surface when a file recompiles, so after editing a widely-`with`ed
   spec run a forced build (`alr build -- -f`) to see them all.
+- **Which switches you get depends on the Alire build profile**, and the
+  difference is not small. They come from the generated
+  `config/cryptolib_config.gpr`, which Alire rewrites on every build:
+  - `release` — `-gnatn` and `-gnatW8`, and that is all. No `-gnatwa`, no
+    `-gnatVa`, no `-gnaty` whatsoever. A clean `alr build --release` says
+    nothing about warnings or style.
+  - `development` (the default) — adds `-gnatwa`, `-gnatVa` and the full
+    `-gnaty` set. Reports style breaches, but only reports them.
+  - `validation` — adds `-gnatwe` on top, which makes every warning and style
+    breach an error.
+- The preflight's first step is `alr build --validation -- -f`, so that is where
+  the bar bites. Until that step existed the library had accumulated three
+  unnoticed breaches — two double blank lines and a 122-column line against a
+  120 limit — because nothing ever built in a profile that failed on them.
+  Run it yourself before proposing a change: `alr build --validation -- -f`.
 - What the zero-warning bar does *not* cover, because `cryptolib.gpr` and
   `tests/tests.gpr` both end their switch list with `-gnatwU` (the tools and
   examples projects do not): unused entities, including unused subprograms and
