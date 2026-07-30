@@ -169,10 +169,15 @@ procedure Check_Constant_Time is
       Jumps : out Natural;
       Found : out Boolean)
    is
+      --  Output_File rather than a `> file 2>/dev/null` redirection: the
+      --  redirection is the runner's job, not something to spell in a shell
+      --  string.
       Status : constant Integer :=
-        Project_Tools.Processes.Run_Shell
-          ("objdump -d --disassemble=" & Name & " " & Library_Path
-           & " > " & Dump_Path & " 2>/dev/null");
+        Project_Tools.Processes.Run_Shell_In_Directory
+          (Directory   => ".",
+           Command     =>
+             "objdump -d --disassemble=" & Name & " " & Library_Path,
+           Output_File => Dump_Path);
    begin
       Jumps := 0;
       Found := False;
@@ -258,9 +263,10 @@ begin
       Complain ("an AES T-table is in the library");
    end if;
 
-   if Project_Tools.Processes.Run_Shell ("command -v objdump > /dev/null 2>&1")
-      /= 0
-   then
+   --  Asked of PATH directly rather than by handing `command -v ... >/dev/null`
+   --  to a shell: the question is "is objdump there", and that is a lookup, not
+   --  a script.
+   if Project_Tools.Processes.Locate_Command ("objdump") = "" then
       Ada.Text_IO.Put_Line
         ("cryptolib constant-time check: objdump unavailable, so only the "
          & "lookup tables were checked");

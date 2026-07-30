@@ -1,4 +1,5 @@
 with Ada.Command_Line;
+with Ada.Directories;
 with Ada.Strings.Fixed;
 with Ada.Text_IO;
 
@@ -31,18 +32,33 @@ procedure Check_Release_Ready is
       Ada.Text_IO.Put_Line ("Alire GNAT 15 check passed: " & Output_Text);
    end Require_Alire_GNAT_15;
 
-   procedure Step (Label : String; Command : String) is
+   procedure Report (Label : String; Status : Integer) is
    begin
-      Ada.Text_IO.New_Line;
-      Ada.Text_IO.Put_Line ("==> " & Label);
-      if Project_Tools.Processes.Run_Shell (Command) /= 0 then
+      if Status /= 0 then
          Ada.Text_IO.Put_Line
            (Ada.Text_IO.Standard_Error,
             "cryptolib release preflight failed during " & Label);
          Ada.Command_Line.Set_Exit_Status (Ada.Command_Line.Failure);
          raise Program_Error;
       end if;
+   end Report;
+
+   procedure Step (Label : String; Command : String) is
+   begin
+      Ada.Text_IO.New_Line;
+      Ada.Text_IO.Put_Line ("==> " & Label);
+      Report (Label, Project_Tools.Processes.Run_Shell (Command));
    end Step;
+
+   procedure Step_In (Label : String; Directory : String; Command : String) is
+   begin
+      Ada.Text_IO.New_Line;
+      Ada.Text_IO.Put_Line ("==> " & Label);
+      Report
+        (Label,
+         Project_Tools.Processes.Run_Shell_In_Directory
+           (Directory => Directory, Command => Command));
+   end Step_In;
 
    --  Semantically check a per-OS backend this host does not build.
    --
@@ -50,13 +66,27 @@ procedure Check_Release_Ready is
    --  beside the caller, and running this from the root dropped one there on
    --  every preflight -- which is how a stale cryptolib-os_random.ali came to
    --  be committed. obj/ is ignored, so the artefact goes where artefacts go.
+   --
+   --  The directory is made and entered from Ada rather than by handing a
+   --  `mkdir -p ... && cd ... && ...` string to a shell. This crate's tooling
+   --  is Ada; a shell command line is how a program is invoked here, not where
+   --  logic is written.
+   Platform_Obj : constant String := "obj/platform-check";
+
    procedure Check_Backend (OS : String) is
+      Label : constant String := "check the " & OS & " backend";
    begin
-      Step ("check the " & OS & " backend",
-            "mkdir -p obj/platform-check && cd obj/platform-check && "
-            & "alr exec -- gcc -c -gnatc -gnat2022 -gnatwa "
-            & "-I../../src -I../../config "
-            & "../../src-" & OS & "/cryptolib-os_random.adb");
+      Ada.Text_IO.New_Line;
+      Ada.Text_IO.Put_Line ("==> " & Label);
+      Ada.Directories.Create_Path (Platform_Obj);
+      Report
+        (Label,
+         Project_Tools.Processes.Run_Shell_In_Directory
+           (Directory => Platform_Obj,
+            Command   =>
+              "alr exec -- gcc -c -gnatc -gnat2022 -gnatwa "
+              & "-I../../src -I../../config "
+              & "../../src-" & OS & "/cryptolib-os_random.adb"));
    end Check_Backend;
 begin
    if Ada.Command_Line.Argument_Count /= 0 then
@@ -100,7 +130,7 @@ begin
    Check_Backend ("windows");
 
    Step ("build cryptolib", "alr build -- -f");
-   Step ("build test suite", "cd tests && alr build -- -f");
+   Step_In ("build test suite", "tests", "alr build -- -f");
    Step ("run test suite", "./tests/bin/tests");
    Step ("check alire manifest", "tools/bin/check_alire_manifest");
    Step ("check test suite", "tools/bin/check_test_suite");

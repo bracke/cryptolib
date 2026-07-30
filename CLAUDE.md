@@ -55,6 +55,16 @@ claims are meant to be checkable against the code.
   `tools/`.** Their `alire/`, `config/`, `obj/`, and `bin/` are generated and
   untracked, and `alr build` alone does not resolve the path pins from nothing
   — it regenerates the directories and then fails to find `project_tools`.
+- **No scripts.** The repository is Ada, `.gpr`, `.toml`, Markdown and one CI
+  workflow — no `.sh`, no `.py`, no Makefile, nothing with an executable bit.
+  Tooling that would be a script elsewhere is an Ada program in `tools/`. Those
+  programs do invoke external commands, because building means running `alr`,
+  `gprbuild`, `gcc` and `objdump` — but a command line is how a program is
+  invoked, not where logic goes: no `&&`, no `cd`, no redirection, no shell
+  builtins. Use `Ada.Directories` to make or enter a directory,
+  `Project_Tools.Processes.Run_Shell_In_Directory` to run somewhere else, and
+  `Locate_Command` to ask whether a tool exists. The test harness reaches
+  OpenSSL through `Import, Convention => C`, not by spawning the `openssl` CLI.
 - Style is enforced by GNAT flags, not a formatter: Ada 2022, 3-space indent, max
   120 columns, `-gnatwa` (all warnings) + `-gnatVa` (validity). **Keep builds
   warning-clean** — the bar is zero warnings; clear any in code you touch. Note:
