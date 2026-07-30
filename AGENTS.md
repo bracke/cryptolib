@@ -63,8 +63,16 @@ claims are meant to be checkable against the code.
 - **CI runs that preflight**, not a subset — `.github/workflows/ci.yml` checks
   out `project_tools` beside this repo, builds the tools crate, and runs it. So
   the checks above are enforced on every push, and a change that only passes
-  `alr build` is not a change that passes. Linux only, though: `src-macos` and
-  `src-windows` get the semantic check and nothing more.
+  `alr build` is not a change that passes.
+- CI also builds on **macOS and Windows** and runs `example_random` there, so
+  the per-OS entropy backend is compiled, linked and executed on its own
+  platform rather than only semantically checked from Linux. The preflight
+  itself stays on Linux: its constant-time step disassembles with `objdump` and
+  matches ELF symbol names. Two constraints worth knowing before editing the
+  workflow: the macOS job must run on the **Intel** image, because the Alire
+  index has `gnat_native` 15.2.1 for macOS x86_64 only and none for Apple
+  Silicon; and the Windows job stops at the examples, because the suite links
+  libcrypto and this mingw toolchain has none to link against.
 - **On a fresh checkout, `alr update` once before `alr build` — in the crate
   root as well as `tests/` and `tools/`.** Their `alire/`, `config/`, `obj/`,
   and `bin/` are generated and untracked, and `alr build` alone does not

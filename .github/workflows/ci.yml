@@ -98,7 +98,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-latest
+          # macos-13 is the Intel image, and it has to be. The Alire index
+          # carries gnat_native 15.2.1 for macOS x86_64 only -- there is no
+          # aarch64-darwin binary -- so macos-latest, which is Apple Silicon,
+          # fails in `alr toolchain --select` with "Release within requested
+          # versions not found" before any step of this job runs. Do not
+          # "modernise" this to macos-latest without checking the index first.
+          - os: macos-13
             exe: ""
           - os: windows-latest
             exe: ".exe"
