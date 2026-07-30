@@ -14,6 +14,17 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          path: cryptolib
+
+      # The tools crate pins project_tools by path at ../../project_tools,
+      # relative to cryptolib/tools. Checking it out beside this repo is what
+      # lets CI run the same preflight a release runs, rather than a subset.
+      - name: Checkout project_tools beside it
+        uses: actions/checkout@v7
+        with:
+          repository: bracke/project_tools
+          path: project_tools
 
       - name: Set up Alire
         # Pin the toolchain the manifest requires. setup-alire@v5 defaults to alr
@@ -39,10 +50,35 @@ jobs:
             || sudo apt-get install -y libaunit24-dev
 
       - name: Build the library
-        run: alr --non-interactive build
-
-      - name: Build and run the test suite
-        working-directory: tests
+        working-directory: cryptolib
         run: |
+          alr --non-interactive update
+          alr --non-interactive build
+
+      # `alr update` first, and it is not optional on a fresh checkout: tests/
+      # pins cryptolib by path, alire/ is generated and untracked, and `alr
+      # build` alone regenerates the directory without resolving the pin --
+      # gprbuild then fails with `imported project file "cryptolib.gpr" not
+      # found`. Same for tools/ below.
+      - name: Build and run the test suite
+        working-directory: cryptolib/tests
+        run: |
+          alr --non-interactive update
           alr --non-interactive build
           ./bin/tests
+
+      # The preflight is the gate a release goes through: the constant-time
+      # budgets, the other platform's backend, the Alire manifest, the test
+      # suite's own shape, the README examples, and the GNATdoc tags. CI used
+      # to run two of those ten steps -- a build and the suite -- so six checks
+      # existed only when somebody ran them by hand, including the compile
+      # check for the Windows RNG that nothing else covers on Linux.
+      - name: Build the tools crate
+        working-directory: cryptolib/tools
+        run: |
+          alr --non-interactive update
+          alr --non-interactive build
+
+      - name: Run the release preflight
+        working-directory: cryptolib
+        run: ./tools/bin/check_release_ready

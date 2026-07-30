@@ -1,0 +1,45 @@
+# Changelog
+
+## 0.1.0-dev
+
+Initial development release. Nothing has been published to the Alire index yet,
+so everything below is the state of this version rather than a change against a
+predecessor.
+
+* Pure Ada 2022 crate with no Alire dependencies and no runtime OpenSSL
+  dependency. Every package is `CryptoLib.*`. The test crate links libcrypto,
+  and only the test crate: it is how the suite asks an independent
+  implementation whether a certificate this crate issued actually chains.
+* Hashes and MACs: SHA-1, SHA-256, SHA-384, SHA-512, SHA-3, UMAC, and the
+  shared `Hashes`, `Macs`, `Checksums` and `Fingerprints` interfaces.
+* Key derivation: HKDF (RFC 5869), the TLS 1.3 schedule (`TLS13_KDF`, RFC 8446
+  §7.1), PBES2, and `bcrypt_pbkdf`.
+* Ciphers and AEAD: `Ciphers`, and ChaCha20-Poly1305 in both constructions --
+  the OpenSSH one (`Seal`/`Open`) and RFC 8439's (`Seal_AEAD`/`Open_AEAD`).
+  AES uses a bit-sliced S-box rather than a lookup table, trading speed for the
+  absence of a cache-timing channel.
+* Key agreement: X25519, finite-field Diffie-Hellman over the fixed-width
+  Montgomery `Modexp` rather than `Big_Integers`, ECDH on P-256/384/521 with
+  full peer-point validation, and a hybrid post-quantum exchange.
+* Signatures: Ed25519, Ed448, ECDSA on P-256/384/521 with RFC 6979 deterministic
+  nonces, and RSA -- PKCS#1 v1.5 and PSS, verification and signing, with key
+  generation, base blinding, and CRT.
+* Post-quantum KEMs: ML-KEM-768 and sntrup761.
+* X.509: parsing, validation, path building, name constraints, policies,
+  purposes, revocation (CRL and OCSP), and issuance of CA, server, client and
+  email certificates for Ed25519, Ed448, P-256, P-384 and RSA keys.
+* Encodings: ASN.1/DER with canonical-form enforcement, PEM, PKCS#8, PKCS#10,
+  PKCS#12, and OID handling.
+* Constant-time discipline: `Constant_Time` for comparisons, `Secure_Wipe` for
+  scrubbing through an object's own address, and `Constant_Time_Assurance` and
+  `Constant_Time_Proof` for the properties the crate asserts about itself.
+  `tools/bin/check_constant_time` inspects the generated code against recorded
+  budgets; there is no automated gate beyond it.
+* Per-OS entropy backends in `src-linux`, `src-macos` and `src-windows`,
+  selected by `Source_Dirs`. The release preflight semantically checks all
+  three, so the two a given host does not build cannot rot unnoticed. The
+  Windows backend (`BCryptGenRandom`) has never been run on Windows -- see
+  `SECURITY.md`.
+* Release preflight (`tools/bin/check_release_ready`): a forced build, the
+  constant-time check, every per-OS backend, the test suite, the Alire manifest,
+  the test suite's own shape, the README examples, and GNATdoc tags. CI runs it.

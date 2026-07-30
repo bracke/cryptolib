@@ -43,6 +43,21 @@ procedure Check_Release_Ready is
          raise Program_Error;
       end if;
    end Step;
+
+   --  Semantically check a per-OS backend this host does not build.
+   --
+   --  Compiled from obj/, not the crate root: -gnatc still writes an .ali
+   --  beside the caller, and running this from the root dropped one there on
+   --  every preflight -- which is how a stale cryptolib-os_random.ali came to
+   --  be committed. obj/ is ignored, so the artefact goes where artefacts go.
+   procedure Check_Backend (OS : String) is
+   begin
+      Step ("check the " & OS & " backend",
+            "mkdir -p obj/platform-check && cd obj/platform-check && "
+            & "alr exec -- gcc -c -gnatc -gnat2022 -gnatwa "
+            & "-I../../src -I../../config "
+            & "../../src-" & OS & "/cryptolib-os_random.adb");
+   end Check_Backend;
 begin
    if Ada.Command_Line.Argument_Count /= 0 then
       Ada.Text_IO.Put_Line
@@ -67,16 +82,22 @@ begin
    Step ("build cryptolib for inspection", "alr build --release -- -f");
    Step ("check constant-time properties", "tools/bin/check_constant_time");
 
-   --  The per-OS backend that this host does not build. Source_Dirs picks
-   --  src-linux or src-windows by host, so whichever is not chosen is
-   --  compiled by nothing and can rot without anyone noticing until somebody
-   --  builds on the other platform. A semantic check is not a test -- it
-   --  cannot say BCryptGenRandom was called correctly -- but it does say the
-   --  file still compiles against the spec it implements, which is the part
-   --  that quietly breaks when a shared declaration changes.
-   Step ("check the other platform's backend",
-         "alr exec -- gcc -c -gnatc -gnat2022 -gnatwa -Isrc -Iconfig "
-         & "src-windows/cryptolib-os_random.adb");
+   --  The per-OS backends. Source_Dirs picks one of src-linux, src-macos and
+   --  src-windows by host, so the two that are not chosen are compiled by
+   --  nothing and can rot without anyone noticing until somebody builds on
+   --  that platform. A semantic check is not a test -- it cannot say
+   --  BCryptGenRandom was called correctly -- but it does say the file still
+   --  compiles against the spec it implements, which is the part that quietly
+   --  breaks when a shared declaration changes.
+   --
+   --  All three rather than "the other one": this checked src-windows alone,
+   --  so when src-macos was added it inherited exactly the rot this step
+   --  exists to prevent. Naming every backend costs one redundant compile of
+   --  whichever is the host's and makes the preflight say the same thing on
+   --  every platform. A new src-<os> must be added here too.
+   Check_Backend ("linux");
+   Check_Backend ("macos");
+   Check_Backend ("windows");
 
    Step ("build cryptolib", "alr build -- -f");
    Step ("build test suite", "cd tests && alr build -- -f");

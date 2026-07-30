@@ -4,3 +4,6 @@
 /config/
 /examples/obj/
 /examples/bin/
+
+# GNAT leaves these beside whatever invoked it; none belong in the tree.
+*.ali
