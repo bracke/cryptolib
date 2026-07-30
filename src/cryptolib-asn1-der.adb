@@ -497,6 +497,27 @@ package body CryptoLib.ASN1.DER is
          return;
       end if;
 
+      --  X.690 11.2.1: the bits after the last one shall be zero. Checked
+      --  here rather than left to each caller, because a caller that indexes
+      --  bits -- as the key-usage reader does -- otherwise reads padding as
+      --  value, and a certificate setting a bit in the padding would claim a
+      --  usage its own encoding does not grant. It also means the unused count
+      --  can be ignored by callers that only want the octets, which is why
+      --  several do.
+      if Unused_Bits > 0 then
+         declare
+            Final : constant Ada.Streams.Stream_Element := Data (Raw.Last);
+            Mask  : constant Ada.Streams.Stream_Element :=
+              Ada.Streams.Stream_Element (2 ** Unused_Bits - 1);
+         begin
+            if (Final and Mask) /= 0 then
+               Unused_Bits := 0;
+               Status := Non_Canonical_DER;
+               return;
+            end if;
+         end;
+      end if;
+
       Item := Raw;
       Item.First := Raw.First + 1;
       Position := Cursor;

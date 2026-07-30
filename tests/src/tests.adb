@@ -1610,6 +1610,46 @@ procedure Tests is
       Expect ([16#30#, 16#80#, 16#00#, 16#00#], Err.Unsupported_Encoding,
               "indefinite length is refused");
 
+      --  A BIT STRING's padding bits must be zero (X.690 11.2.1). This is not
+      --  pedantry: the key-usage reader indexes bits straight out of the
+      --  octets, so a certificate that set a bit inside the padding would
+      --  claim a usage its own encoding does not grant. 03 02 04 18 says four
+      --  unused bits over 0001_1000, whose lowest four are not all zero.
+      --
+      --  Read rather than Expect, because Expect drives the generic TLV
+      --  reader, which does not look inside a BIT STRING -- the first version
+      --  of this test used it and reported the rule missing when it was the
+      --  test aimed at the wrong door.
+      declare
+         procedure Expect_Bits
+           (Data    : Ada.Streams.Stream_Element_Array;
+            Wanted  : Err.Decode_Status;
+            Message : String)
+         is
+            Pos    : Ada.Streams.Stream_Element_Offset := Data'First;
+            Item   : ASN1_Element;
+            Unused : Natural;
+            Status : Err.Decode_Status;
+         begin
+            DER.Read_Bit_String
+              (Data, Pos, Data'Last, 0, Limits, Item, Unused, Status);
+            Check (Status = Wanted,
+                   Message & ": expected " & Err.Status_Image (Wanted)
+                   & ", got " & Err.Status_Image (Status));
+         end Expect_Bits;
+      begin
+         Expect_Bits ([16#03#, 16#02#, 16#04#, 16#18#], Err.Non_Canonical_DER,
+                      "a BIT STRING with a bit set in its padding is refused");
+         --  The same shape with the padding clear is accepted, so the refusal
+         --  is aimed at the padding and not the encoding around it.
+         Expect_Bits ([16#03#, 16#02#, 16#04#, 16#10#], Err.Ok,
+                      "and the same string with clear padding is accepted");
+         --  And a count above seven was already refused; kept beside its
+         --  neighbour so the two rules are read together.
+         Expect_Bits ([16#03#, 16#02#, 16#08#, 16#00#], Err.Invalid_Value,
+                      "more than seven unused bits is refused");
+      end;
+
       --  Long form where the short form would do.
       Expect ([16#04#, 16#81#, 16#01#, 16#41#], Err.Non_Canonical_DER,
               "a length in long form that fits the short form is refused");
@@ -10317,6 +10357,53 @@ procedure Tests is
                   = CryptoLib.Errors.Ok
                 and then Via_CRT = Plain,
                 "an incomplete CRT set signs the plain way");
+      end;
+
+      --  A revocation entry naming a negative serial number.
+      --
+      --  Serials are compared as magnitudes with leading zeros stripped, which
+      --  is right for the padded encodings a positive serial can have. It is
+      --  wrong across the sign: DER writes -1 as content FF and 255 as content
+      --  00 FF, and stripping leaves both as FF. A list naming -1 therefore
+      --  reported the certificate whose serial is 255 as revoked. RFC 5280
+      --  requires a serial to be positive; that requirement was read past.
+      --
+      --  Both lists below are the same bytes apart from the serial, so the
+      --  positive one passing is what says the refusal is aimed at the sign
+      --  and not at the hand-built list.
+      declare
+         package CRL renames CryptoLib.X509.CRLs;
+         Serial_255 : constant Ada.Streams.Stream_Element_Array :=
+           [16#00#, 16#FF#];
+         Negative : constant Ada.Streams.Stream_Element_Array := Bytes_From_Hex
+           ("3081853051020101300d06092a864886f70d01010b05003018311630"
+            & "140603550403130d6e65672d73657269616c2d6361170d3235303130"
+            & "313030303030305a301430120201ff170d3235303130313030303030"
+            & "305a300d06092a864886f70d01010b05000321000000000000000000"
+            & "000000000000000000000000000000000000000000000000");
+         Positive_One : constant Ada.Streams.Stream_Element_Array :=
+           Bytes_From_Hex
+           ("3081863052020101300d06092a864886f70d01010b05003018311630"
+            & "140603550403130d6e65672d73657269616c2d6361170d3235303130"
+            & "313030303030305a30153013020200ff170d32353031303130303030"
+            & "30305a300d06092a864886f70d01010b050003210000000000000000"
+            & "00000000000000000000000000000000000000000000000000");
+         St : CryptoLib.ASN1.Errors.Decode_Status;
+      begin
+         declare
+            Good : constant CRL.Revocation_List :=
+              CRL.Decode_DER (Positive_One, CryptoLib.ASN1.Default_Limits, St);
+         begin
+            Check (CRL.Is_Revoked (Good, Serial_255),
+                   "a list naming serial 255 revokes serial 255");
+         end;
+         declare
+            Bad : constant CRL.Revocation_List :=
+              CRL.Decode_DER (Negative, CryptoLib.ASN1.Default_Limits, St);
+         begin
+            Check (not CRL.Is_Revoked (Bad, Serial_255),
+                   "a list naming serial -1 does not revoke serial 255");
+         end;
       end;
 
       --  A multi-prime RSA key is refused rather than read as two of its

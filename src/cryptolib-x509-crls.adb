@@ -543,7 +543,15 @@ package body CryptoLib.X509.CRLs is
             Part := Row.First;
             DER_Reader.Read_Integer
               (Item.DER, Part, Row.Last, 4, Limits, Field, Minus, Status);
-            exit when Status /= Ok;
+            --  A serial number must be positive (RFC 5280 4.1.2.2), and a
+            --  negative one is not merely irregular here: serials are compared
+            --  as magnitudes with leading zeros stripped, so an entry naming
+            --  -1 -- content FF -- matches a certificate whose serial is 255,
+            --  whose content is 00 FF. That reported the wrong certificate
+            --  revoked. The entry is not skipped but the walk stops, because a
+            --  list with a malformed entry is not a list whose silence about
+            --  anything else can be trusted.
+            exit when Status /= Ok or else Minus;
 
             --  revocationDate is not optional: an entry that does not say
             --  when is malformed, and reading past it would put the

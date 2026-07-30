@@ -539,7 +539,11 @@ package body CryptoLib.OCSP is
 
          DER_Reader.Read_Integer
            (Data, Part, Cert_ID.Last, 9, Limits, Field, Minus, Status);
-         if Status /= Ok then
+         --  Positive, for the same reason as in a CRL: serials are compared as
+         --  magnitudes, so a response about -1 would answer for the
+         --  certificate whose serial is 255.
+         if Status /= Ok or else Minus then
+            Status := Invalid_Value;
             return;
          end if;
          Serial := (First => Field.First, Last => Field.Last);
