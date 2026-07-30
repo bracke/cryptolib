@@ -31,6 +31,14 @@ claims are meant to be checkable against the code.
 - Tests (KATs + negative/fail-closed tests): `(cd tests && alr build) && ./tests/bin/tests`
   — prints `cryptolib tests passed`. The suite links libcrypto for the
   certificate chain cross-check; the library does not.
+- **Test layout**: `tests/src/tests.adb` is only the driver — it calls each
+  check in order and holds a few inline vectors. The checks themselves live in
+  `tests/src/tests_<topic>.adb`, one package per topic, with the shared
+  assertion and hex/string helpers in `tests_support`. A new check goes in the
+  topic package (spec and body) **and must be called from the driver**: an
+  uncalled check passes without testing anything, which is what
+  `tools/bin/check_test_suite` refuses. Order is the driver's, so tests that
+  depend on a file an earlier test wrote keep working.
 - Release/verification tooling lives in the `cryptolib_tools` crate: `(cd tools && alr build)`
   (depends on the shared `project_tools` at `../../project_tools`). Run
   `tools/bin/check_release_ready` from the crate root for the full preflight
@@ -57,7 +65,7 @@ claims are meant to be checkable against the code.
   invariant range-check jumps are acceptable).
 - **Verify a new primitive against a reference vector BEFORE porting.** Check the
   algorithm in Python or against an RFC/NIST vector first, then port to Ada, then
-  add the KAT to `tests/src/tests.adb`. Hand-transcribed formulas (EC point
+  add the KAT to the matching `tests/src/tests_*.adb`. Hand-transcribed formulas (EC point
   addition, an S-box circuit, a curve order) are easily wrong — never trust one
   un-verified. (A wrong RCB point-addition transcription and a mistyped P-521
   order both cost real time here.)
@@ -84,6 +92,6 @@ claims are meant to be checkable against the code.
 
 ## When you change behavior
 
-Add or adjust the KAT in `tests/src/tests.adb`, keep `README.md` / `SECURITY.md`
+Add or adjust the KAT in the matching `tests/src/tests_*.adb`, keep `README.md` / `SECURITY.md`
 accurate, run the suite, and — for anything touching a security property —
 verify it (objdump for constant-time, live OpenSSH / pyca for correctness).

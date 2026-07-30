@@ -12,7 +12,7 @@ limitations. It describes the code as implemented — not aspirational goals.
 ## Algorithms and reference vectors
 
 Every primitive is validated against published test vectors in
-`tests/src/tests.adb` (run: `(cd tests && alr build) && ./tests/bin/tests`).
+`tests/src/tests_*.adb` (run: `(cd tests && alr build) && ./tests/bin/tests`).
 The reference sources are:
 
 | Area | Algorithms | Verified against |

@@ -40,6 +40,11 @@ predecessor.
   three, so the two a given host does not build cannot rot unnoticed. The
   Windows backend (`BCryptGenRandom`) has never been run on Windows -- see
   `SECURITY.md`.
+* The test suite is a driver (`tests/src/tests.adb`) plus one package per
+  topic (`tests/src/tests_<topic>.adb`), sharing the assertion and the
+  hex/string helpers through `tests_support`. It was a single 17,439-line
+  procedure; the largest file is now about a tenth of that. The driver's call
+  sequence is unchanged, so the tests still run in the order they did.
 * Release preflight (`tools/bin/check_release_ready`): a forced build, the
   constant-time check, every per-OS backend, the test suite, the Alire manifest,
   the test suite's own shape, the README examples, and GNATdoc tags. CI runs it.

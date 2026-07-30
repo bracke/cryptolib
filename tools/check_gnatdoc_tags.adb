@@ -36,8 +36,11 @@ begin
       return;
    end if;
 
+   --  Every per-OS directory, for the same reason the preflight compiles every
+   --  backend: naming two of the three is how src-macos went unchecked.
    Check_Dir ("src");
    Check_Dir ("src-linux");
+   Check_Dir ("src-macos");
    Check_Dir ("src-windows");
 
    Ada.Text_IO.Put_Line
