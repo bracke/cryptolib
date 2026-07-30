@@ -1035,6 +1035,8 @@ package body Tests_RSA is
             Good : constant CRL.Revocation_List :=
               CRL.Decode_DER (Positive_One, CryptoLib.ASN1.Default_Limits, St);
          begin
+            Check (CryptoLib.ASN1.Errors."=" (St, CryptoLib.ASN1.Errors.Ok),
+                   "the positive CRL fixture decodes");
             Check (CRL.Is_Revoked (Good, Serial_255),
                    "a list naming serial 255 revokes serial 255");
          end;
@@ -1042,6 +1044,8 @@ package body Tests_RSA is
             Bad : constant CRL.Revocation_List :=
               CRL.Decode_DER (Negative, CryptoLib.ASN1.Default_Limits, St);
          begin
+            Check (CryptoLib.ASN1.Errors."=" (St, CryptoLib.ASN1.Errors.Ok),
+                   "the negative-serial CRL fixture decodes");
             Check (not CRL.Is_Revoked (Bad, Serial_255),
                    "a list naming serial -1 does not revoke serial 255");
          end;

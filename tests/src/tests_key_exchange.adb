@@ -184,9 +184,13 @@ package body Tests_Key_Exchange is
       Check (CryptoLib.Diffie_Hellman.Compute_Group14_Shared_Secret
                (Fixed_Private, [1 => 0], Shared) /= CryptoLib.Errors.Ok,
              "a peer value of zero is refused here too");
+      Check (CryptoLib.Buffers.Is_Empty (Shared),
+             "and leaves no shared secret behind");
       Check (CryptoLib.Diffie_Hellman.Compute_Group14_Shared_Secret
                (Fixed_Private, [1 => 1], Shared) /= CryptoLib.Errors.Ok,
              "and a peer value of one");
+      Check (CryptoLib.Buffers.Is_Empty (Shared),
+             "and leaves no shared secret behind");
    end Check_DH_Group14;
 
    --  Group 1, the last of the four the table lists.
@@ -244,9 +248,13 @@ package body Tests_Key_Exchange is
       Check (CryptoLib.Diffie_Hellman.Compute_Group1_Shared_Secret
                (Fixed_Private, [1 => 0], Shared) /= CryptoLib.Errors.Ok,
              "a peer value of zero is refused in group1 too");
+      Check (CryptoLib.Buffers.Is_Empty (Shared),
+             "and leaves no shared secret behind");
       Check (CryptoLib.Diffie_Hellman.Compute_Group1_Shared_Secret
                (Fixed_Private, [1 => 1], Shared) /= CryptoLib.Errors.Ok,
              "and a peer value of one");
+      Check (CryptoLib.Buffers.Is_Empty (Shared),
+             "and leaves no shared secret behind");
    end Check_DH_Group1;
 
    --  Each DH keypair generator, against the function that consumes what it

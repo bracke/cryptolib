@@ -113,9 +113,11 @@ claims are meant to be checkable against the code.
   `-gnatwu`), but note that adding `-gnatwu` earlier in the list achieves nothing
   — `-gnatwU` comes last and wins. A clean build is not evidence that nothing is
   dead.
-- `tests/tests.gpr` additionally passes `-gnatwM` (no "useless assignment"
-  warnings); the reason is written down there. The library build does not get it
-  and is warning-clean with that warning on.
+- Nothing is suppressed beyond `-gnatwU`. The suite used to pass `-gnatwM` to
+  silence GNAT's useless-assignment warning at the 40 places a test calls an
+  operation for its status alone; those are now assertions that the out buffer
+  really was zeroed, which is what the crate promises on failure. If you add a
+  refusal test, assert the zeroing too — the warning will tell you if you forget.
 
 ## Security disciplines (this is a crypto library — not optional)
 

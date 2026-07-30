@@ -485,6 +485,7 @@ package body Tests_KDFs is
                   ("", From_Hex ("0102030405060708"), 8, Small)
                 /= CryptoLib.Errors.Ok,
                 "an empty passphrase is refused");
+                  Check (Small = [Small'Range => 0], "and the output is zeroed");
       end;
    end Check_Bcrypt_PBKDF;
 
@@ -555,8 +556,9 @@ package body Tests_KDFs is
             Other : Ada.Streams.Stream_Element_Array (1 .. 16);
          begin
             Check (H.Expand (H.SHA256, Secret, No_Prefix, Other)
-                     = CryptoLib.Errors.Ok
-                   and then Other /= Key16,
+                     = CryptoLib.Errors.Ok,
+                   "expanding with a hand-built info succeeds");
+            Check (Other /= Key16,
                    "the label is prefixed with 'tls13 ', not used bare");
          end;
 
@@ -629,18 +631,22 @@ package body Tests_KDFs is
          Check (K.Expand_Label (H.SHA256, Secret, Long_Label, Empty, Out16)
                   /= CryptoLib.Errors.Ok,
                 "a label past 249 characters is refused, not truncated");
+         Check (Out16 = [Out16'Range => 0], "and the output is zeroed");
 
          Check (K.Expand_Label (H.SHA256, Short, "key", Empty, Out16)
                   /= CryptoLib.Errors.Ok,
                 "a secret narrower than the hash is refused");
+         Check (Out16 = [Out16'Range => 0], "and the output is zeroed");
 
          Check (K.Expand_Label (H.SHA256, Secret, "key", Big, Out16)
                   /= CryptoLib.Errors.Ok,
                 "a context past 255 octets is refused");
+         Check (Out16 = [Out16'Range => 0], "and the output is zeroed");
 
          Check (K.Derive_Secret (H.SHA256, Secret, "derived", Empty, Out31)
                   /= CryptoLib.Errors.Ok,
                 "Derive-Secret refuses an output that is not the hash's width");
+         Check (Out31 = [Out31'Range => 0], "and the output is zeroed");
       end;
    end Check_TLS13_KDF;
 
@@ -799,6 +805,7 @@ package body Tests_KDFs is
          Status := HK.Expand (HK.SHA256, PRK, [1 .. 0 => 0], Nothing);
          Check (Status = CryptoLib.Errors.Ok,
                 "asking for no output at all is not an error");
+         Check (Nothing = [1 .. 0 => 0], "and returns nothing");
 
          --  A pseudorandom key shorter than the hash is not one.
          declare
@@ -809,6 +816,7 @@ package body Tests_KDFs is
             Check (HK.Expand (HK.SHA256, Short, [1 .. 0 => 0], Some_Out)
                    /= CryptoLib.Errors.Ok,
                    "a key shorter than the hash is refused");
+            Check (Some_Out = [Some_Out'Range => 0], "and the output is zeroed");
          end;
       end;
 

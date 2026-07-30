@@ -73,6 +73,21 @@ procedure Check_Release_Ready is
    --  logic is written.
    Platform_Obj : constant String := "obj/platform-check";
 
+   --  Remove the examples' build products, so their link cannot pick up an
+   --  object built against an earlier libCryptolib.a. Missing directories are
+   --  not an error: on a fresh checkout there is nothing to remove.
+   procedure Clear_Examples_Objects is
+      procedure Remove (Directory : String) is
+      begin
+         if Ada.Directories.Exists (Directory) then
+            Ada.Directories.Delete_Tree (Directory);
+         end if;
+      end Remove;
+   begin
+      Remove ("examples/obj");
+      Remove ("examples/bin");
+   end Clear_Examples_Objects;
+
    procedure Check_Backend (OS : String) is
       Label : constant String := "check the " & OS & " backend";
    begin
@@ -156,10 +171,14 @@ begin
    Step ("run test suite", "./tests/bin/tests");
    Step ("check alire manifest", "tools/bin/check_alire_manifest");
    Step ("check test suite", "tools/bin/check_test_suite");
-   --  Forced, like the builds above and for the same reason: examples/obj is
-   --  not cleaned between runs, and objects left there by a build against a
-   --  different libCryptolib.a link against the current one only by luck. That
-   --  failure was seen once here, and it is not one worth diagnosing twice.
+   --  Emptied first, then forced. examples/obj is not cleaned between runs,
+   --  and objects left there by a build against a different libCryptolib.a
+   --  link against the current one only by luck -- which matters more now that
+   --  the preflight builds the library three times, in three profiles, before
+   --  reaching this step. Forcing alone was not enough: the link failed twice
+   --  here and passed on an immediate retry, which is the signature of a stale
+   --  artefact rather than a broken example.
+   Clear_Examples_Objects;
    Step ("build README examples",
          "alr exec -- gprbuild -q -f -P examples/examples.gpr");
    Step ("check GNATdoc tags", "tools/bin/check_gnatdoc_tags");

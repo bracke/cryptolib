@@ -296,11 +296,14 @@ package body Tests_Runtime is
             Check (CryptoLib.Ciphers.Seal_GCM (Text, Key, Nonce, 0, Plain, Wire)
                      = CryptoLib.Errors.Ok,
                    "a key of that length is the length Seal_GCM wants");
+            Check (Wire /= [Wire'Range => 0], "and seals bytes into the buffer");
             Check (CryptoLib.Ciphers.Seal_GCM
                      (Text, Short, Nonce, 0, Plain, Wire)
                      /= CryptoLib.Errors.Ok,
                    "one octet short is refused, so " & Text
                    & "'s length is not merely a lower bound");
+            Check (Wire = [Wire'Range => 0],
+                   "and leaves the buffer zeroed");
          end;
       end Check_GCM_Width;
 

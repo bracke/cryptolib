@@ -409,6 +409,8 @@ package body Tests_X509_Revocation is
          Check (XR.Check_Against_CRL (Leaf, CA, List, Inside, Detail)
                 = XR.Revoked,
                 "and still answers");
+         Check (Detail.Present,
+                "and reports the revocation detail");
       end;
    end Check_Revocation_Details;
 
@@ -1429,6 +1431,8 @@ package body Tests_X509_Revocation is
              (From_Hex (OCSP_Unauthorized), CryptoLib.ASN1.Default_Limits,
               Status);
       begin
+         Check (CryptoLib.ASN1.Errors."=" (Status, CryptoLib.ASN1.Errors.Ok),
+                "the unauthorized-responder fixture decodes");
          Check (XR.Check_Against_OCSP (Leaf, CA, Rogue, Inside)
                   = XR.Untrusted_Signature,
                 "an unauthorized responder's answer is not trusted, got "

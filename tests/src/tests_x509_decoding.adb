@@ -1561,6 +1561,8 @@ package body Tests_X509_Decoding is
            (Year => 2036, Month => 8, Day => 1,
             Hour => 12, Minute => 0, Second => 0);
       begin
+         Check (CryptoLib.ASN1.Errors."=" (Status, CryptoLib.ASN1.Errors.Ok),
+                "fixture: the OCSP certificates decode");
          Check (not CryptoLib.OCSP.Has_Next_Update (Reply),
                 "fixture: the response names no nextUpdate");
          Check (RV.Check_Against_OCSP (Resp_Leaf, Resp_CA, Reply, Days_Later)

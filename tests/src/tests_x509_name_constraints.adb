@@ -1351,6 +1351,8 @@ package body Tests_X509_Name_Constraints is
            X509C.Find_Extension (CA, CryptoLib.ASN1.OIDs.Name_Constraints);
          use type NC.Verdict;
       begin
+         Check (CryptoLib.ASN1.Errors."=" (Status, CryptoLib.ASN1.Errors.Ok),
+                "fixture: the constrained certificates decode");
          Check (Where > 0, "fixture: the CA carries name constraints");
          Check (NC.Check (X509C.Extension_Value (CA, Where), Leaf)
                   = NC.Permitted,

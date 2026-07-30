@@ -8,22 +8,14 @@ project Tests is
    for Exec_Dir use "bin";
    for Main use ("tests.adb");
 
-   --  -gnatwM: no "useless assignment" warnings, and only in this crate. A
-   --  negative test calls an operation for its status alone and leaves the out
-   --  buffer uninspected on purpose, which is exactly the shape this warning
-   --  reports. It stayed quiet while the suite was one 17k-line procedure and
-   --  appeared the moment that procedure became packages -- the code did not
-   --  change, only the scope GNAT analyses.
-   --
-   --  All 42 sites were read before this was added. 37 are refusals: a tamper
-   --  test, a malformed input, a rejected key width. The other five are
-   --  positive tests that assert on something other than the value the warning
-   --  names -- a decode status left uninspected because the assertion is about
-   --  what was decoded, an empty plaintext with nothing to compare. None was a
-   --  missing assertion. The library's own build never sees this switch and
-   --  still holds the zero-warning bar with the warning on.
+   --  There is no -gnatwM here, and that is the point. GNAT's
+   --  useless-assignment warning fires wherever a test calls an operation for
+   --  its status alone and leaves the out buffer uninspected, which used to be
+   --  40 sites. Suppressing the warning was the first answer; asserting on the
+   --  buffer is the better one, because the crate promises a zeroed output on
+   --  failure and now the suite checks it at every one of those sites.
    package Compiler is
-      for Default_Switches ("Ada") use Tests_Config.Ada_Compiler_Switches & ("-gnat2022", "-gnatyM120", "-gnatX", "-gnatwU", "-gnatwM");
+      for Default_Switches ("Ada") use Tests_Config.Ada_Compiler_Switches & ("-gnat2022", "-gnatyM120", "-gnatX", "-gnatwU");
    end Compiler;
 
 

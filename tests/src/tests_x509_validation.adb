@@ -226,6 +226,8 @@ package body Tests_X509_Validation is
                Check (X509S.Verify_Certificate_Signature (Intact, CA)
                         = X509S.Valid,
                       "fixture: the intact leaf verifies");
+               Check (CryptoLib.ASN1.Errors."=" (D, CryptoLib.ASN1.Errors.Ok),
+                      "fixture: the intact leaf decodes");
 
                Buffer (Target) := Buffer (Target) xor 1;
 
@@ -495,6 +497,8 @@ package body Tests_X509_Validation is
       begin
          Check (not X509C.Is_Present (Absent),
                 "fixture: an empty input decodes to nothing");
+         Check (not CryptoLib.ASN1.Errors."=" (Status, CryptoLib.ASN1.Errors.Ok),
+                "and reports a decode failure for it");
          Check (XS.Verify_Signed_Data
                   (Message, Signed, CryptoLib.X509.Ed25519_Signature, Absent)
                 = XS.Missing_Input,

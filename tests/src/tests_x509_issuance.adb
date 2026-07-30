@@ -121,6 +121,8 @@ package body Tests_X509_Issuance is
                "not a csr", Orphan_Cert)
             = CryptoLib.Certificates.Invalid_Input,
             "signing a CSR without a CA certificate is refused");
+         Check (Ada.Strings.Unbounded.Length (Orphan_Cert) = 0,
+                "and writes no certificate");
       end;
 
       --  Ask OpenSSL whether anybody else would accept what we issued. The CA
@@ -242,6 +244,8 @@ package body Tests_X509_Issuance is
                          Big_CA)
                         = CryptoLib.Certificates.Ok,
                       "and a 4096-bit RSA CA fits the material slot");
+               Check (Ada.Strings.Unbounded.Length (Big_CA) > 0,
+                      "and the slot holds material");
             end;
 
             --  Now sign a leaf with that RSA CA. The leaf is P-256, because

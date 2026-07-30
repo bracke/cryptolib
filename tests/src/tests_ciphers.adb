@@ -590,6 +590,7 @@ package body Tests_Ciphers is
          Check (CP.Open_AEAD (Key, Nonce, Aad, Bad, Back)
                   /= CryptoLib.Errors.Ok,
                 "RFC 8439 refuses tampered ciphertext");
+         Check (Back = [Back'Range => 0], "and zeroes the plaintext");
       end;
       Check (CP.Open_AEAD (Key, Nonce, Empty, Wire, Back)
                /= CryptoLib.Errors.Ok,
@@ -617,6 +618,7 @@ package body Tests_Ciphers is
          Check (CP.Seal_AEAD (SSH_Key, Nonce, Aad, Plain, Wire)
                   /= CryptoLib.Errors.Ok,
                 "RFC 8439 refuses the SSH construction's 64-byte key");
+         Check (Wire = [Wire'Range => 0], "and leaves no sealed bytes behind");
          Check (CP.Seal_AEAD (Key, Short_N, Aad, Plain, Wire)
                   /= CryptoLib.Errors.Ok,
                 "RFC 8439 refuses an 8-byte nonce");
@@ -649,9 +651,11 @@ package body Tests_Ciphers is
          Check (CP.Open_AEAD (AEAD_Key, Zero_N, Empty, SSH_Wire, Out_Buf)
                   /= CryptoLib.Errors.Ok,
                 "RFC 8439 cannot open an OpenSSH packet");
+         Check (Out_Buf = [Out_Buf'Range => 0], "and zeroes the output");
          Check (CP.Open (SSH_Key, 0, AEAD_Wire, Out_Buf)
                   /= CryptoLib.Errors.Ok,
                 "OpenSSH cannot open an RFC 8439 packet");
+         Check (Out_Buf = [Out_Buf'Range => 0], "and zeroes the output");
       end;
    end Check_ChaCha20_Poly1305_RFC8439;
 
@@ -861,6 +865,7 @@ package body Tests_Ciphers is
          Bad := Wire;                                       --  flip a ciphertext byte
          Bad (Bad'First) := Bad (Bad'First) xor 16#01#;
          St := CryptoLib.ChaCha20_Poly1305.Open (Key, 0, Bad, Back);
+         Check (Back = [Back'Range => 0], "and zeroes the plaintext");
          Check
            (St /= CryptoLib.Errors.Ok,
             "chacha20-poly open rejects tampered ciphertext");
@@ -868,6 +873,7 @@ package body Tests_Ciphers is
          Bad := Wire;                                       --  flip a tag byte
          Bad (Bad'Last) := Bad (Bad'Last) xor 16#80#;
          St := CryptoLib.ChaCha20_Poly1305.Open (Key, 0, Bad, Back);
+         Check (Back = [Back'Range => 0], "and zeroes the plaintext");
          Check
            (St /= CryptoLib.Errors.Ok,
             "chacha20-poly open rejects tampered tag");
@@ -919,6 +925,7 @@ package body Tests_Ciphers is
                                         Restored);
          Check (Result = CryptoLib.Errors.Ok,
                 "Open_AEAD accepts an empty sealed plaintext");
+         Check (Restored = Empty, "and recovers an empty plaintext");
 
          Result :=
            CryptoLib.Ciphers.Seal_AEAD (Algorithm, Key, Nonce, Empty, Plain_14,
@@ -948,6 +955,7 @@ package body Tests_Ciphers is
                                         Recovered);
          Check (Result /= CryptoLib.Errors.Ok,
                 "Open_AEAD rejects a changed AAD");
+         Check (Recovered = [Recovered'Range => 0], "and zeroes the plaintext");
 
          --  A flipped ciphertext bit must fail the tag check.
          declare
@@ -959,6 +967,7 @@ package body Tests_Ciphers is
                                            Recovered);
             Check (Result /= CryptoLib.Errors.Ok,
                    "Open_AEAD rejects tampered ciphertext");
+            Check (Recovered = [Recovered'Range => 0], "and zeroes the plaintext");
          end;
       end;
    end Check_AES_GCM_AEAD_Vectors;

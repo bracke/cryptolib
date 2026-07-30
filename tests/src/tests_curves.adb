@@ -714,15 +714,19 @@ package body Tests_Curves is
          Check (E.Shared_Secret (C.Nistp256, CAVP_D256, X_Is_P, Z32)
                   /= CryptoLib.Errors.Ok,
                 "ECDH refuses a coordinate equal to p rather than reducing it");
+         Check (Z32 = [Z32'Range => 0], "and leaves the secret zero");
          Check (E.Shared_Secret (C.Nistp256, CAVP_D256, Infinity, Z32)
                   /= CryptoLib.Errors.Ok,
                 "ECDH refuses the all-zero point");
+         Check (Z32 = [Z32'Range => 0], "and leaves the secret zero");
          Check (E.Shared_Secret (C.Nistp256, CAVP_D256, Wrong_Tag, Z32)
                   /= CryptoLib.Errors.Ok,
                 "ECDH refuses a point that is not uncompressed");
+         Check (Z32 = [Z32'Range => 0], "and leaves the secret zero");
          Check (E.Shared_Secret (C.Nistp256, CAVP_D256, Short_Q, Z32)
                   /= CryptoLib.Errors.Ok,
                 "ECDH refuses a point of the wrong width");
+         Check (Z32 = [Z32'Range => 0], "and leaves the secret zero");
 
          --  A scalar outside [1, n-1] is refused as well.
          declare
@@ -736,9 +740,11 @@ package body Tests_Curves is
             Check (E.Shared_Secret (C.Nistp256, Zero_D, CAVP_Q256, Z32)
                      /= CryptoLib.Errors.Ok,
                    "ECDH refuses a zero private scalar");
+            Check (Z32 = [Z32'Range => 0], "and leaves the secret zero");
             Check (E.Shared_Secret (C.Nistp256, Order, CAVP_Q256, Z32)
                      /= CryptoLib.Errors.Ok,
                    "ECDH refuses a private scalar equal to the order");
+            Check (Z32 = [Z32'Range => 0], "and leaves the secret zero");
          end;
       end;
 
@@ -980,6 +986,8 @@ package body Tests_Curves is
       Check (CryptoLib.ECDSA.Public_Nistp384_Raw (High_Raw, High_Point)
                = CryptoLib.Errors.Ok,
              "a raw scalar whose top bit is set is read too");
+      Check (Low_Point /= High_Point,
+             "and the two scalars give different public keys");
 
       --  And the mpint spelling of that same value still is, which is what
       --  sshlib hands in from an identity file.
@@ -998,6 +1006,7 @@ package body Tests_Curves is
          Check (CryptoLib.ECDSA.Public_Nistp384_Raw (Zero_Raw, Point)
                   /= CryptoLib.Errors.Ok,
                 "a zero scalar is refused");
+         Check (Point = [Point'Range => 0], "and leaves no point behind");
       end;
 
       --  Wider than the curve, with nothing but padding to remove.
@@ -1009,6 +1018,7 @@ package body Tests_Curves is
          Check (CryptoLib.ECDSA.Public_Nistp384_Raw (Too_Wide, Point)
                   /= CryptoLib.Errors.Ok,
                 "a value too wide for the curve is refused");
+         Check (Point = [Point'Range => 0], "and leaves no point behind");
       end;
    end Check_ECDSA_Scalar_Encodings;
 
@@ -1282,6 +1292,8 @@ package body Tests_Curves is
          Check
            (St /= CryptoLib.Errors.Ok,
             "X25519 rejects all-zero (low-order) peer point");
+         Check (CryptoLib.Curve25519."=" (Result, Zero_U),
+                "and leaves no shared value behind");
       end;
    end Check_Low_Order_X25519_Point;
 
