@@ -12,6 +12,9 @@ predecessor.
   implementation whether a certificate this crate issued actually chains.
 * Hashes and MACs: SHA-1, SHA-256, SHA-384, SHA-512, SHA-3, UMAC, and the
   shared `Hashes`, `Macs`, `Checksums` and `Fingerprints` interfaces.
+* Password hashing: Argon2d, Argon2i and Argon2id (RFC 9106) over a new
+  BLAKE2b (RFC 7693). Argon2id is the one to reach for. scrypt (RFC 7914) and
+  `bcrypt_pbkdf` were already here.
 * Key derivation: HKDF (RFC 5869), the TLS 1.3 schedule (`TLS13_KDF`, RFC 8446
   §7.1), PBES2, and `bcrypt_pbkdf`.
 * Ciphers and AEAD: `Ciphers`, and ChaCha20-Poly1305 in both constructions --

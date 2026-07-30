@@ -64,6 +64,7 @@ with CryptoLib.Random;
 with CryptoLib.RSA;
 with Tests_Support; use Tests_Support;
 with Ada.Streams;
+with CryptoLib.Blake2b;
 with CryptoLib.Hashes;
 
 package body Tests_Hashes is
@@ -861,6 +862,100 @@ package body Tests_Hashes is
       end;
    end Check_Streaming_HMAC;
 
+   --  BLAKE2b (RFC 7693) against hashlib, which is an independent
+   --  implementation of the same specification. The cases are chosen for the
+   --  places a transcription goes wrong: the empty message, a one-octet
+   --  digest, a keyed hash, and the 128-octet block boundary in both
+   --  directions -- Update must not compress a full buffer until something
+   --  follows it, because the final block takes a different path.
+   procedure Check_Blake2b is
+      package B2 renames CryptoLib.Blake2b;
+      Empty64 : constant String :=
+        "786a02f742015903c6c6fd852552d272912f4740e15847618a86e217f71f5419d25e1031afee585313896444"
+        & "934eb04b903a685b1448b755d56f701afe9be2ce";
+      Abc64 : constant String :=
+        "ba80a53f981c4d0d6a2797b69f12f6e94c212f14685ac4b74b12bb6fdbffa2d17d87c5392aab792dc252d5de"
+        & "4533cc9518d38aa8dbf1925ab92386edd4009923";
+      Abc32 : constant String :=
+        "bddd813c634239723171ef3fee98579b94964e3bb1cb3e427262c8c068d52319";
+      Abc1 : constant String :=
+        "6b";
+      Long64 : constant String :=
+        "195257374939c051a11c59d4c478b33e2be001f1fdfbea24d6036bf0bc4d0eb77f64d83243446d29103fe9e9"
+        & "46707c9c6daffeb77eafcf0c856234af0527d456";
+      Keyed64 : constant String :=
+        "9f0b58e0218b30f17bd4857cedca136f64237362fdb79478916e54750aa29d87c4906ee41aeee3fec1627e89"
+        & "e059eae4f2d435c16c0e122d6e2f9dd3abf8da1c";
+      Block128 : constant String :=
+        "2319e3789c47e2daa5fe807f61bec2a1a6537fa03f19ff32e87eecbfd64b7e0e8ccff439ac333b040f19b0c4"
+        & "ddd11a61e24ac1fe0f10a039806c5dcc0da3d115";
+      Block129 : constant String :=
+        "9e0be1aaa2bd15ede5b418a67465bb7bb715e84c35181ca43da313d6eef77eff13b947f944bdd362bfd2be63"
+        & "a216945b7bbc0697bb4ae8111328301d5be06770";
+      Empty : constant Ada.Streams.Stream_Element_Array (1 .. 0) :=
+        [others => 0];
+      Abc   : constant Ada.Streams.Stream_Element_Array :=
+        Bytes_From_String ("abc");
+      Key   : constant Ada.Streams.Stream_Element_Array :=
+        [1, 2, 3, 4, 5, 6, 7, 8];
+      Long  : Ada.Streams.Stream_Element_Array (1 .. 300);
+      One_Block : Ada.Streams.Stream_Element_Array (1 .. 128);
+      Over_Block : Ada.Streams.Stream_Element_Array (1 .. 129);
+   begin
+      for I in Long'Range loop
+         Long (I) := Ada.Streams.Stream_Element (Natural (I) mod 251);
+      end loop;
+      for I in One_Block'Range loop
+         One_Block (I) := Ada.Streams.Stream_Element (Natural (I) - 1);
+      end loop;
+      Over_Block (1 .. 128) := One_Block;
+      Over_Block (129) := 0;
+
+      Check (B2.Hash (Empty, 64) = Bytes_From_Hex (Empty64),
+             "BLAKE2b of the empty message");
+      Check (B2.Hash (Abc, 64) = Bytes_From_Hex (Abc64),
+             "BLAKE2b of abc");
+      Check (B2.Hash (Abc, 32) = Bytes_From_Hex (Abc32),
+             "and at a 32-octet digest length, which is a different "
+             & "parameter block and so a different hash");
+      Check (B2.Hash (Abc, 1) = Bytes_From_Hex (Abc1),
+             "and at one octet");
+      Check (B2.Hash (Long, 64) = Bytes_From_Hex (Long64),
+             "BLAKE2b over more than two blocks");
+      Check (B2.Hash (Key, Abc, 64) = Bytes_From_Hex (Keyed64),
+             "keyed BLAKE2b, whose key occupies a padded block of its own");
+      Check (B2.Hash (One_Block, 64) = Bytes_From_Hex (Block128),
+             "exactly one block");
+      Check (B2.Hash (Over_Block, 64) = Bytes_From_Hex (Block129),
+             "and one block plus an octet");
+
+      --  Streaming must reach the same digest however the message is cut.
+      declare
+         Item   : B2.Context;
+         Digest : Ada.Streams.Stream_Element_Array (1 .. 64);
+      begin
+         B2.Initialize (Item, 64);
+         for I in Long'Range loop
+            B2.Update (Item, Long (I .. I));
+         end loop;
+         B2.Finalize (Item, Digest);
+         Check (Digest = Bytes_From_Hex (Long64),
+                "a byte-at-a-time hash matches the one-shot digest");
+      end;
+
+      declare
+         Item   : B2.Context;
+         Digest : Ada.Streams.Stream_Element_Array (1 .. 64);
+      begin
+         B2.Initialize (Item, 64);
+         B2.Update (Item, Long (1 .. 128));
+         B2.Update (Item, Long (129 .. 300));
+         B2.Finalize (Item, Digest);
+         Check (Digest = Bytes_From_Hex (Long64),
+                "and so does a split exactly on the block boundary");
+      end;
+   end Check_Blake2b;
+
    --  AUnit routine wrappers. Each check is a test of its own, so a
    --  failure reports the check that failed and the rest still run.
    procedure Run_Check_OpenSSH_Fingerprints (Item : in out AUnit.Test_Cases.Test_Case'Class);
@@ -869,6 +964,7 @@ package body Tests_Hashes is
    procedure Run_Check_XXH3 (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_Adler32 (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_CRC32 (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Blake2b (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_MD5_Vectors (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_Streaming_MD5 (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_SHA3_And_SHAKE_Vectors (Item : in out AUnit.Test_Cases.Test_Case'Class);
@@ -983,6 +1079,12 @@ package body Tests_Hashes is
       Check_Streaming_HMAC;
    end Run_Check_Streaming_HMAC;
 
+   procedure Run_Check_Blake2b (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Blake2b;
+   end Run_Check_Blake2b;
+
    overriding procedure Register_Tests (Item : in out Test_Case) is
       use AUnit.Test_Cases.Registration;
    begin
@@ -992,6 +1094,7 @@ package body Tests_Hashes is
       Register_Routine (Item, Run_Check_XXH3'Access, "xxh3");
       Register_Routine (Item, Run_Check_Adler32'Access, "adler32");
       Register_Routine (Item, Run_Check_CRC32'Access, "crc32");
+      Register_Routine (Item, Run_Check_Blake2b'Access, "blake2b");
       Register_Routine (Item, Run_Check_MD5_Vectors'Access, "md5 vectors");
       Register_Routine (Item, Run_Check_Streaming_MD5'Access, "streaming md5");
       Register_Routine (Item, Run_Check_SHA3_And_SHAKE_Vectors'Access, "sha3 and shake vectors");

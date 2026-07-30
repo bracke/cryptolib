@@ -43,6 +43,8 @@ Do not run plain system `gnat*`, `gnatmake`, `gnatls`, `gnatprove`,
 | `CryptoLib.Ed448` | Ed448 signatures (RFC 8032 PureEdDSA, empty context) |
 | `CryptoLib.ECDSA` | ECDSA P-256/P-384/P-521 signing (RFC 6979 deterministic) and verification with any of SHA-256/384/512; P-256/P-384 key generation and public-key derivation on all three |
 | `CryptoLib.Diffie_Hellman` | finite-field DH over the SSH MODP groups 1/14/16/18 (RFC 2409, RFC 3526) |
+| `CryptoLib.Argon2` | Argon2d/i/id (RFC 9106), the memory-hard password hash |
+| `CryptoLib.Blake2b` | BLAKE2b (RFC 7693), variable length and keyed, with a streaming interface |
 | `CryptoLib.FFDHE` | finite-field DH over the TLS named groups ffdhe2048/3072/4096/6144/8192 (RFC 7919) |
 | `CryptoLib.MLKEM768`, `CryptoLib.SNTRUP761`, `CryptoLib.Hybrid_PQ_KEX` | post-quantum KEMs + hybrid x25519 |
 | `CryptoLib.Random` | CSPRNG (getrandom/urandom/BCryptGenRandom), fail-closed |

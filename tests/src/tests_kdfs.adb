@@ -22,6 +22,7 @@ with CryptoLib.PKCS8;
 with CryptoLib.PKCS12;
 with CryptoLib.Identities;
 with CryptoLib.X509.Policies;
+with CryptoLib.Argon2;
 with CryptoLib.HKDF;
 with CryptoLib.TLS13_KDF;
 with CryptoLib.ECDH;
@@ -853,6 +854,107 @@ package body Tests_KDFs is
          "PBKDF2-HMAC-SHA1 RFC 6070 c=4096 KAT");
    end Check_PBKDF2_High_Iteration;
 
+   --  Argon2 (RFC 9106) against libargon2, the reference implementation, via
+   --  its argon2_ctx entry point. The first three are the RFC's own section 5
+   --  vectors -- p=4, t=3, m=32, a 32-octet tag, with a secret and associated
+   --  data -- and the tags libargon2 produced for them are the tags the RFC
+   --  publishes, so the reference is confirmed before anything is compared to
+   --  it.
+   procedure Check_Argon2 is
+      package A2 renames CryptoLib.Argon2;
+      RFC_D  : constant String := "512b391b6f1162975371d30919734294f868e3be3984f3c1a13a4db9fabe4acb";
+      RFC_I  : constant String := "c814d9d1dc7f37aa13f0d77f2494bda1c8de6b016dd388d29952a4c4672b6ce8";
+      RFC_ID : constant String := "0d640df58d78766c08c037a34a8b53c9d01ef0452d75b65eb52520e96b01e659";
+      Plain_ID : constant String := "fc33b78139231d34b71626bd6245c1d72efa190ad605c3d8166a72adcedfa2c2";
+      Plain_I  : constant String := "745227f6a45da3f1352f1e0a2282a2dfc8c39faebcc2956a4616c3b9373a7bf6";
+      Plain_D  : constant String := "d184ae924accc6b68a8112404ba79f4dec7dbfaee2312372d783f49f258b02b1";
+      Lanes4   : constant String :=
+        "cedec0395c6e2784ccd5a60afd090c4c2a2cd75c9c7a3497f427dd402e315780343c960600432d79"
+        & "ca2d981f407a7927f09ff02ba43a19174db10fca2f467e91";
+      Long_Tag : constant String :=
+        "10ec937965819d69048db108543fcf9d51391e17f66dedf00f257dddb3f774687edeb0b958c6ab48"
+        & "6b4a41a03a25b98a3e15a11e9348c413d382797785952927223cb4ba4910ab293fd82a43ef4b13f1"
+        & "099fa1f7887278b9fcf0dcf662062d214a6f91f30f66a54e16a7def6c75c92f726b71e5394712de4"
+        & "9d9802cab6a93cd2";
+
+      Password : constant Ada.Streams.Stream_Element_Array (1 .. 32) :=
+        [others => 1];
+      Salt     : constant Ada.Streams.Stream_Element_Array (1 .. 16) :=
+        [others => 2];
+      Secret   : constant Ada.Streams.Stream_Element_Array (1 .. 8) :=
+        [others => 3];
+      Extra    : constant Ada.Streams.Stream_Element_Array (1 .. 12) :=
+        [others => 4];
+      Word     : constant Ada.Streams.Stream_Element_Array :=
+        Bytes_From_String ("password");
+      Salty    : constant Ada.Streams.Stream_Element_Array :=
+        Bytes_From_String ("somesaltsomesalt");
+      Tag32    : Ada.Streams.Stream_Element_Array (1 .. 32);
+      Tag64    : Ada.Streams.Stream_Element_Array (1 .. 64);
+      Tag128   : Ada.Streams.Stream_Element_Array (1 .. 128);
+   begin
+      Check (A2.Derive (A2.Argon2d, Password, Salt, Secret, Extra,
+                        3, 32, 4, Tag32) = CryptoLib.Errors.Ok
+             and then Tag32 = Bytes_From_Hex (RFC_D),
+             "Argon2d matches RFC 9106 section 5.1");
+      Check (A2.Derive (A2.Argon2i, Password, Salt, Secret, Extra,
+                        3, 32, 4, Tag32) = CryptoLib.Errors.Ok
+             and then Tag32 = Bytes_From_Hex (RFC_I),
+             "Argon2i matches RFC 9106 section 5.2");
+      Check (A2.Derive (A2.Argon2id, Password, Salt, Secret, Extra,
+                        3, 32, 4, Tag32) = CryptoLib.Errors.Ok
+             and then Tag32 = Bytes_From_Hex (RFC_ID),
+             "Argon2id matches RFC 9106 section 5.3");
+
+      --  No secret and no associated data, which is what a password store
+      --  actually calls, at a memory cost worth the name.
+      Check (A2.Derive (A2.Argon2id, Word, Salty, 2, 65536, 1, Tag32)
+               = CryptoLib.Errors.Ok
+             and then Tag32 = Bytes_From_Hex (Plain_ID),
+             "Argon2id at 64 MiB agrees with the reference");
+      Check (A2.Derive (A2.Argon2i, Word, Salty, 2, 65536, 1, Tag32)
+               = CryptoLib.Errors.Ok
+             and then Tag32 = Bytes_From_Hex (Plain_I),
+             "and Argon2i");
+      Check (A2.Derive (A2.Argon2d, Word, Salty, 2, 65536, 1, Tag32)
+               = CryptoLib.Errors.Ok
+             and then Tag32 = Bytes_From_Hex (Plain_D),
+             "and Argon2d");
+
+      --  Four lanes exercise the cross-lane reference path, which a
+      --  single-lane run never reaches.
+      Check (A2.Derive (A2.Argon2id, Word, Salty, 3, 4096, 4, Tag64)
+               = CryptoLib.Errors.Ok
+             and then Tag64 = Bytes_From_Hex (Lanes4),
+             "four lanes agree, which single-lane runs cannot show");
+
+      --  A 128-octet tag drives H' past its 64-octet chain boundary.
+      Check (A2.Derive (A2.Argon2id, Word, Salty, 2, 1024, 1, Tag128)
+               = CryptoLib.Errors.Ok
+             and then Tag128 = Bytes_From_Hex (Long_Tag),
+             "and a tag longer than one BLAKE2b digest");
+
+      --  Parameters out of range are refused rather than clamped.
+      declare
+         Short_Salt : constant Ada.Streams.Stream_Element_Array (1 .. 4) :=
+           [others => 9];
+         Tiny       : Ada.Streams.Stream_Element_Array (1 .. 2);
+      begin
+         Check (A2.Derive (A2.Argon2id, Word, Short_Salt, 2, 1024, 1, Tag32)
+                  /= CryptoLib.Errors.Ok,
+                "a salt under 8 octets is refused");
+         Check (Tag32 = [Tag32'Range => 0], "and the tag is left zero");
+         Check (A2.Derive (A2.Argon2id, Word, Salty, 2, 1024, 1, Tiny)
+                  /= CryptoLib.Errors.Ok,
+                "a tag under 4 octets is refused");
+         Check (Tiny = [Tiny'Range => 0], "and that tag is left zero too");
+         Check (A2.Derive (A2.Argon2id, Word, Salty, 2, 4, 1, Tag32)
+                  /= CryptoLib.Errors.Ok,
+                "and memory below 8 blocks per lane");
+         Check (Tag32 = [Tag32'Range => 0], "and the tag is left zero");
+      end;
+   end Check_Argon2;
+
    --  AUnit routine wrappers. Each check is a test of its own, so a
    --  failure reports the check that failed and the rest still run.
    procedure Run_Check_PBKDF2_SHA1 (Item : in out AUnit.Test_Cases.Test_Case'Class);
@@ -863,6 +965,7 @@ package body Tests_KDFs is
    procedure Run_Check_Seven_Zip_AES_SHA256_KDF (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_EVP_Bytes_To_Key_MD5 (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_Bcrypt_PBKDF (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Argon2 (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_HKDF (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_TLS13_KDF (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_PKCS12_Work_Factor (Item : in out AUnit.Test_Cases.Test_Case'Class);
@@ -954,6 +1057,12 @@ package body Tests_KDFs is
       Check_PBKDF2_High_Iteration;
    end Run_Check_PBKDF2_High_Iteration;
 
+   procedure Run_Check_Argon2 (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Argon2;
+   end Run_Check_Argon2;
+
    overriding procedure Register_Tests (Item : in out Test_Case) is
       use AUnit.Test_Cases.Registration;
    begin
@@ -965,6 +1074,7 @@ package body Tests_KDFs is
       Register_Routine (Item, Run_Check_Seven_Zip_AES_SHA256_KDF'Access, "seven zip aes sha256 kdf");
       Register_Routine (Item, Run_Check_EVP_Bytes_To_Key_MD5'Access, "evp bytes to key md5");
       Register_Routine (Item, Run_Check_Bcrypt_PBKDF'Access, "bcrypt pbkdf");
+      Register_Routine (Item, Run_Check_Argon2'Access, "argon2");
       Register_Routine (Item, Run_Check_HKDF'Access, "hkdf");
       Register_Routine (Item, Run_Check_TLS13_KDF'Access, "tls13 kdf");
       Register_Routine (Item, Run_Check_PKCS12_Work_Factor'Access, "pkcs12 work factor");
