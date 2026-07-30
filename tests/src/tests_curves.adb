@@ -1561,6 +1561,86 @@ package body Tests_Curves is
                            = Bytes_From_Hex ("3006020100020100"),
                 "ecdsa der encodes an all-zero component as a single 16#00#");
       end;
+
+      --  The decoder is the inverse, and is checked against the same OpenSSL
+      --  encodings rather than only against this crate's own output.
+      declare
+         procedure Round_Trip
+           (Der, Want_R, Want_S : Ada.Streams.Stream_Element_Array;
+            Label               : String)
+         is
+            R : Ada.Streams.Stream_Element_Array (Want_R'Range);
+            S : Ada.Streams.Stream_Element_Array (Want_S'Range);
+         begin
+            Check (CryptoLib.ECDSA.Decode_DER_Signature (Der, R, S)
+                     = CryptoLib.Errors.Ok,
+                   Label & " decodes");
+            Check (R = Want_R and then S = Want_S, Label);
+         end Round_Trip;
+      begin
+         Round_Trip
+           (Bytes_From_Hex ("304602210087311041f8adef27f6f5f2fb2d58ee0c"
+                            & "30012449174ec780bf50c59c5ed4b995022100ea"
+                            & "a84e84b746350b8af117a61d8adbaca1e4f33cca"
+                            & "dd6f58cedee2eace2ac43a"),
+            Bytes_From_Hex ("87311041f8adef27f6f5f2fb2d58ee0c"
+                            & "30012449174ec780bf50c59c5ed4b995"),
+            Bytes_From_Hex ("eaa84e84b746350b8af117a61d8adbac"
+                            & "a1e4f33ccadd6f58cedee2eace2ac43a"),
+            "ecdsa der decodes a padded P-256 signature");
+         Round_Trip
+           (Bytes_From_Hex ("30818602415866e94dda9acdae8afd66e76d5f4b"
+                            & "9fb1be627fce219f983c94a34b416025936fc41"
+                            & "d51c1afb602d13201108c5b2fcaa83b42dc2cf3"
+                            & "fba0c460dd31220c6ba19a02416014373cb820d"
+                            & "fb68e27956feda75420c0720fe5b78766aba9fd"
+                            & "5489bae92e62673ff96226b4dfc54e1a069f139"
+                            & "a4513eb46cd2eb28d0463b40dd1575de7a739c3"),
+            Bytes_From_Hex ("005866e94dda9acdae8afd66e76d5f4b"
+                            & "9fb1be627fce219f983c94a34b416025"
+                            & "936fc41d51c1afb602d13201108c5b2f"
+                            & "caa83b42dc2cf3fba0c460dd31220c6b"
+                            & "a19a"),
+            Bytes_From_Hex ("006014373cb820dfb68e27956feda754"
+                            & "20c0720fe5b78766aba9fd5489bae92e"
+                            & "62673ff96226b4dfc54e1a069f139a45"
+                            & "13eb46cd2eb28d0463b40dd1575de7a7"
+                            & "39c3"),
+            "and a long-form P-521 one, re-padding the stripped zero octet");
+      end;
+
+      --  What it must refuse. A signature is attacker-supplied, and a decoder
+      --  that accepts more than one encoding of a value hands back something
+      --  that will not re-encode to what arrived.
+      declare
+         R, S : Ada.Streams.Stream_Element_Array (1 .. 32);
+
+         procedure Refuses (Der : Ada.Streams.Stream_Element_Array;
+                            Label : String) is
+         begin
+            Check (CryptoLib.ECDSA.Decode_DER_Signature (Der, R, S)
+                     /= CryptoLib.Errors.Ok,
+                   Label);
+         end Refuses;
+      begin
+         Refuses (Bytes_From_Hex (""), "ecdsa der refuses an empty signature");
+         Refuses (Bytes_From_Hex ("3006020101020101ff"),
+                  "and trailing data after the sequence");
+         Refuses (Bytes_From_Hex ("3009020101020101020101"),
+                  "and a third integer inside it");
+         Refuses (Bytes_From_Hex ("3003020101"),
+                  "and a sequence holding only one integer");
+         Refuses (Bytes_From_Hex ("302602010102217fffffffffffffffffff"
+                                  & "ffffffffffffffffffffffffffffffffff"
+                                  & "ffffffffffffffff"),
+                  "and a component wider than the curve's");
+         Refuses (Bytes_From_Hex ("3006020100020101"),
+                  "and a zero component, which is not a signature value");
+         Refuses (Bytes_From_Hex ("3006020181020101"),
+                  "and a negative component");
+         Refuses (Bytes_From_Hex ("300702020001020101"),
+                  "and an integer with a leading zero DER does not permit");
+      end;
    end Check_ECDSA_DER_Signature;
 
    procedure Run_Check_ECDSA_DER_Signature (Item : in out AUnit.Test_Cases.Test_Case'Class);

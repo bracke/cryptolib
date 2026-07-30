@@ -1128,6 +1128,96 @@ package body Tests_KDFs is
              "and refuses with a different one");
    end Check_Argon2_Verify;
 
+   procedure Check_Argon2_Encoded is
+      Password : constant Ada.Streams.Stream_Element_Array :=
+        Bytes_From_String ("password");
+      Salt     : constant Ada.Streams.Stream_Element_Array :=
+        Bytes_From_String ("somesalt12345678");
+      Text     : String (1 .. CryptoLib.Argon2.Maximum_Encoded_Length);
+      Last     : Natural;
+
+      --  Produced by argon2-cffi, which wraps the reference implementation.
+      Ref_Id : constant String :=
+        "$argon2id$v=19$m=1024,t=2,p=1$c29tZXNhbHQxMjM0NTY3OA"
+        & "$MsXas4v8AHvHhLsRtHaznoPVwqbYHwCMumXLMz613Xc";
+      Ref_I  : constant String :=
+        "$argon2i$v=19$m=1024,t=2,p=1$c29tZXNhbHQxMjM0NTY3OA"
+        & "$mAupac5iSPiziGo6V8Vlazc3LIgRn1Q+0D8ODLD6x34";
+      Ref_D  : constant String :=
+        "$argon2d$v=19$m=1024,t=2,p=1$c29tZXNhbHQxMjM0NTY3OA"
+        & "$yfSsgB07nUMV655WAJUaeZElxfzZjhqc8O9XXRfmgy0";
+
+      procedure Expect (Kind : CryptoLib.Argon2.Variant;
+                        Want : String; Label : String) is
+      begin
+         Check (CryptoLib.Argon2.Hash
+                  (Kind, Password, Salt, 2, 1024, 1, 32, Text, Last)
+                  = CryptoLib.Errors.Ok,
+                Label & " hashes");
+         Check (Text (Text'First .. Last) = Want, Label);
+         Check (CryptoLib.Argon2.Verify_Encoded (Password, Want),
+                Label & " verifies the reference string");
+      end Expect;
+   begin
+      Expect (CryptoLib.Argon2.Argon2id, Ref_Id,
+              "argon2id encodes as the reference does");
+      Expect (CryptoLib.Argon2.Argon2i, Ref_I,
+              "argon2i encodes as the reference does");
+      Expect (CryptoLib.Argon2.Argon2d, Ref_D,
+              "argon2d encodes as the reference does");
+
+      --  A 16-octet tag and four lanes, so the tag length and p are not both
+      --  fixed by the cases above.
+      Check (CryptoLib.Argon2.Hash
+               (CryptoLib.Argon2.Argon2id,
+                Bytes_From_String ("correct horse"),
+                Bytes_From_String ("0123456789abcdef"),
+                3, 65536, 4, 16, Text, Last) = CryptoLib.Errors.Ok
+             and then Text (Text'First .. Last)
+               = "$argon2id$v=19$m=65536,t=3,p=4$MDEyMzQ1Njc4OWFiY2RlZg"
+                 & "$jWWLcBGedFba1TuMaTcx1g",
+             "argon2 encodes a 16-octet tag at m=65536,t=3,p=4");
+
+      Check (not CryptoLib.Argon2.Verify_Encoded
+               (Bytes_From_String ("wrong"), Ref_Id),
+             "argon2 verify_encoded refuses a wrong password");
+
+      --  Malformed stored strings are refused rather than guessed at.
+      declare
+         procedure Refuses (Stored : String; Label : String) is
+         begin
+            Check (not CryptoLib.Argon2.Verify_Encoded (Password, Stored),
+                   Label);
+         end Refuses;
+      begin
+         Refuses ("", "argon2 verify_encoded refuses an empty string");
+         Refuses ("argon2id$v=19$m=1024,t=2,p=1$c29tZXNhbHQxMjM0NTY3OA"
+                  & "$MsXas4v8AHvHhLsRtHaznoPVwqbYHwCMumXLMz613Xc",
+                  "and one with no leading separator");
+         Refuses ("$argon2xx$v=19$m=1024,t=2,p=1$c29tZXNhbHQxMjM0NTY3OA"
+                  & "$MsXas4v8AHvHhLsRtHaznoPVwqbYHwCMumXLMz613Xc",
+                  "and an unknown variant");
+         Refuses ("$argon2id$v=16$m=1024,t=2,p=1$c29tZXNhbHQxMjM0NTY3OA"
+                  & "$MsXas4v8AHvHhLsRtHaznoPVwqbYHwCMumXLMz613Xc",
+                  "and version 16, whose indexing this does not implement");
+         Refuses ("$argon2id$v=19$m=1024,t=2$c29tZXNhbHQxMjM0NTY3OA"
+                  & "$MsXas4v8AHvHhLsRtHaznoPVwqbYHwCMumXLMz613Xc",
+                  "and a missing parallelism");
+         Refuses ("$argon2id$v=19$m=1024,t=2,p=1,p=1"
+                  & "$c29tZXNhbHQxMjM0NTY3OA"
+                  & "$MsXas4v8AHvHhLsRtHaznoPVwqbYHwCMumXLMz613Xc",
+                  "and a repeated parameter");
+         Refuses ("$argon2id$v=19$m=01024,t=2,p=1$c29tZXNhbHQxMjM0NTY3OA"
+                  & "$MsXas4v8AHvHhLsRtHaznoPVwqbYHwCMumXLMz613Xc",
+                  "and a cost written with a leading zero");
+         Refuses ("$argon2id$v=19$m=1024,t=2,p=1$c29tZXNhbHQxMjM0NTY3OA"
+                  & "$MsXas4v8AHvHhLsRtHaznoPVwqbYHwCMumXLMz613X=",
+                  "and base64 padding, which this format does not use");
+         Refuses ("$argon2id$v=19$m=1024,t=2,p=1$c29tZXNhbHQxMjM0NTY3OA",
+                  "and a string with no tag at all");
+      end;
+   end Check_Argon2_Encoded;
+
    --  bcrypt against the Python bcrypt module, which wraps the OpenBSD
    --  implementation. One salt, three costs, and three password lengths
    --  including the empty password and the 72-octet maximum.
@@ -1252,6 +1342,7 @@ package body Tests_KDFs is
    procedure Run_Check_Bcrypt (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_Argon2 (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_Argon2_Verify (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Argon2_Encoded (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_HKDF (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_TLS13_KDF (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_PKCS12_Work_Factor (Item : in out AUnit.Test_Cases.Test_Case'Class);
@@ -1355,6 +1446,12 @@ package body Tests_KDFs is
       Check_Argon2_Verify;
    end Run_Check_Argon2_Verify;
 
+   procedure Run_Check_Argon2_Encoded (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Argon2_Encoded;
+   end Run_Check_Argon2_Encoded;
+
    procedure Run_Check_Bcrypt (Item : in out AUnit.Test_Cases.Test_Case'Class) is
       pragma Unreferenced (Item);
    begin
@@ -1375,6 +1472,7 @@ package body Tests_KDFs is
       Register_Routine (Item, Run_Check_Bcrypt'Access, "bcrypt");
       Register_Routine (Item, Run_Check_Argon2'Access, "argon2");
       Register_Routine (Item, Run_Check_Argon2_Verify'Access, "argon2 verify");
+      Register_Routine (Item, Run_Check_Argon2_Encoded'Access, "argon2 encoded");
       Register_Routine (Item, Run_Check_HKDF'Access, "hkdf");
       Register_Routine (Item, Run_Check_TLS13_KDF'Access, "tls13 kdf");
       Register_Routine (Item, Run_Check_PKCS12_Work_Factor'Access, "pkcs12 work factor");

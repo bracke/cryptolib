@@ -143,4 +143,85 @@ package CryptoLib.Argon2 is
       Lanes      : Positive;
       Tag        : Ada.Streams.Stream_Element_Array) return Boolean;
 
+   --  The longest PHC string these parameters can produce.
+   --
+   --  "$argon2id$v=19$m=4294967295,t=4294967295,p=16777215$" is 51, and the
+   --  salt and tag are unpadded base64 of at most 64 octets each, 86
+   --  characters, with a separator between them.
+   Maximum_Encoded_Length : constant := 225;
+
+   --  Encode a derived tag in the PHC string format:
+   --
+   --     $argon2id$v=19$m=65536,t=3,p=4$<salt>$<tag>
+   --
+   --  which is what every other Argon2 implementation reads and writes, and
+   --  what makes a stored hash self-describing. Verify takes the parameters
+   --  as arguments and so obliges a caller to store them separately;
+   --  Verify_Encoded does not, which is the difference that matters when the
+   --  costs are raised later and old hashes must still verify.
+   --
+   --  Salt and tag are limited to 64 octets each, which is past anything a
+   --  password hash uses and keeps the result inside Maximum_Encoded_Length.
+   --  @param Kind       which variant
+   --  @param Salt       the salt the tag was derived with
+   --  @param Iterations the pass count t
+   --  @param Memory_KiB the memory cost m in kibibytes
+   --  @param Lanes      the parallelism p
+   --  @param Tag        the derived tag
+   --  @param Result     out: the string, from Result'First through Last
+   --  @param Last       out: the last character written, Result'First - 1 on
+   --    failure
+   --  @return Ok, or Handshake_Failed on an empty or over-long salt or tag,
+   --    or a Result too small to hold the string
+   function Encode
+     (Kind       : Variant;
+      Salt       : Ada.Streams.Stream_Element_Array;
+      Iterations : Positive;
+      Memory_KiB : Positive;
+      Lanes      : Positive;
+      Tag        : Ada.Streams.Stream_Element_Array;
+      Result     : out String;
+      Last       : out Natural) return CryptoLib.Errors.Status;
+
+   --  Derive and encode in one step, which is how a password is stored.
+   --  @param Kind       which variant; Argon2id unless you have a reason
+   --  @param Password   the password
+   --  @param Salt       the salt, at least 8 octets, from a random source
+   --  @param Iterations the pass count t
+   --  @param Memory_KiB the memory cost m in kibibytes
+   --  @param Lanes      the parallelism p
+   --  @param Tag_Length the tag length in octets, at least 4
+   --  @param Result     out: the PHC string
+   --  @param Last       out: the last character written
+   --  @return as Derive and Encode
+   function Hash
+     (Kind       : Variant;
+      Password   : Ada.Streams.Stream_Element_Array;
+      Salt       : Ada.Streams.Stream_Element_Array;
+      Iterations : Positive;
+      Memory_KiB : Positive;
+      Lanes      : Positive;
+      Tag_Length : Positive;
+      Result     : out String;
+      Last       : out Natural) return CryptoLib.Errors.Status;
+
+   --  Does this password reproduce this stored PHC string?
+   --
+   --  The parameters come out of the string, so a caller stores one value and
+   --  old hashes keep verifying after the costs are raised. The tag
+   --  comparison is constant-time. Parsing is not, and does not need to be:
+   --  a malformed stored string is a fact about the database, not about the
+   --  password.
+   --
+   --  Refuses what it cannot verify exactly rather than guessing: an unknown
+   --  variant, a version other than 19, a missing or repeated parameter, a
+   --  cost this build will not run, and base64 that is not the exact encoding
+   --  of what it decodes to.
+   --  @param Password the password offered
+   --  @param Stored   the stored PHC string
+   --  @return True only when the password reproduces the tag it carries
+   function Verify_Encoded
+     (Password : Ada.Streams.Stream_Element_Array;
+      Stored   : String) return Boolean;
+
 end CryptoLib.Argon2;

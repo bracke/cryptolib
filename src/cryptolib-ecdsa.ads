@@ -154,6 +154,28 @@ package CryptoLib.ECDSA is
       Last : out Ada.Streams.Stream_Element_Offset)
       return CryptoLib.Errors.Status;
 
+   --  Decode a DER `SEQUENCE { r INTEGER, s INTEGER }` back into raw
+   --  components, right-aligned in R and S and zero-padded to their width.
+   --
+   --  The inverse of Encode_DER_Signature, and strict about it: the encoding
+   --  must be a sequence of exactly two non-negative integers with nothing
+   --  after them, each in DER's minimal form, and neither may be zero or
+   --  wider than the buffer it is asked to fill. A signature is attacker-
+   --  supplied input, and a decoder that accepts several encodings of the
+   --  same value hands one back that will not re-encode to what arrived.
+   --
+   --  R and S set the expected width: pass the curve's component size, 32 for
+   --  P-256, 48 for P-384, 66 for P-521.
+   --  @param Signature the DER encoding
+   --  @param R         out: the component r, zeroed on failure
+   --  @param S         out: the component s, zeroed on failure
+   --  @return Ok, or Handshake_Failed when the encoding is not exactly that
+   function Decode_DER_Signature
+     (Signature : Ada.Streams.Stream_Element_Array;
+      R         : out Ada.Streams.Stream_Element_Array;
+      S         : out Ada.Streams.Stream_Element_Array)
+      return CryptoLib.Errors.Status;
+
    type Curve_Id is (Nistp256, Nistp384, Nistp521);
 
    --  Which digest a signature was made with.

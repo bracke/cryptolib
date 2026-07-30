@@ -2,6 +2,7 @@ with Ada.Streams; use Ada.Streams;
 with Ada.Unchecked_Deallocation;
 with Interfaces;
 
+with CryptoLib.Base64;
 with CryptoLib.Blake2b;
 with CryptoLib.Constant_Time;
 with CryptoLib.Secure_Wipe;
@@ -528,5 +529,316 @@ package body CryptoLib.Argon2 is
       return Verify (Kind, Password, Salt, None, None,
                      Iterations, Memory_KiB, Lanes, Tag);
    end Verify;
+
+   Variant_Name : constant array (Variant) of access constant String :=
+     [Argon2d  => new String'("argon2d"),
+      Argon2i  => new String'("argon2i"),
+      Argon2id => new String'("argon2id")];
+
+   Max_Field : constant := 64;
+
+   function Image (Value : Natural) return String is
+      Text : constant String := Natural'Image (Value);
+   begin
+      return Text (Text'First + 1 .. Text'Last);
+   end Image;
+
+   function Encode
+     (Kind       : Variant;
+      Salt       : Ada.Streams.Stream_Element_Array;
+      Iterations : Positive;
+      Memory_KiB : Positive;
+      Lanes      : Positive;
+      Tag        : Ada.Streams.Stream_Element_Array;
+      Result     : out String;
+      Last       : out Natural) return CryptoLib.Errors.Status
+   is
+      Cursor : Natural;
+
+      procedure Put (Text : String) is
+      begin
+         Result (Cursor .. Cursor + Text'Length - 1) := Text;
+         Cursor := Cursor + Text'Length;
+      end Put;
+   begin
+      Result := [others => ' '];
+      Last := Result'First - 1;
+
+      if Salt'Length = 0 or else Salt'Length > Max_Field
+        or else Tag'Length = 0 or else Tag'Length > Max_Field
+      then
+         return CryptoLib.Errors.Handshake_Failed;
+      end if;
+
+      declare
+         Needed : constant Natural :=
+           1 + Variant_Name (Kind).all'Length + 1 + 5
+           + 2 + Image (Memory_KiB)'Length
+           + 3 + Image (Iterations)'Length
+           + 3 + Image (Lanes)'Length + 1
+           + CryptoLib.Base64.Encoded_Length (Natural (Salt'Length)) + 1
+           + CryptoLib.Base64.Encoded_Length (Natural (Tag'Length));
+      begin
+         if Result'Length < Needed then
+            return CryptoLib.Errors.Handshake_Failed;
+         end if;
+      end;
+
+      Cursor := Result'First;
+      Put ("$");
+      Put (Variant_Name (Kind).all);
+      --  Version 19 (0x13) is the only one FIPS-era Argon2 defines and the
+      --  only one this derives.
+      Put ("$v=19$m=");
+      Put (Image (Memory_KiB));
+      Put (",t=");
+      Put (Image (Iterations));
+      Put (",p=");
+      Put (Image (Lanes));
+      Put ("$");
+
+      declare
+         Stop : Natural;
+      begin
+         CryptoLib.Base64.Encode
+           (Salt, Result (Cursor .. Result'Last), Stop);
+         if Stop < Cursor then
+            Last := Result'First - 1;
+            return CryptoLib.Errors.Handshake_Failed;
+         end if;
+         Cursor := Stop + 1;
+         Put ("$");
+         CryptoLib.Base64.Encode
+           (Tag, Result (Cursor .. Result'Last), Stop);
+         if Stop < Cursor then
+            Last := Result'First - 1;
+            return CryptoLib.Errors.Handshake_Failed;
+         end if;
+         Cursor := Stop + 1;
+      end;
+
+      Last := Cursor - 1;
+      return CryptoLib.Errors.Ok;
+   exception
+      when others =>
+         Last := Result'First - 1;
+         return CryptoLib.Errors.Internal_Error;
+   end Encode;
+
+   function Hash
+     (Kind       : Variant;
+      Password   : Ada.Streams.Stream_Element_Array;
+      Salt       : Ada.Streams.Stream_Element_Array;
+      Iterations : Positive;
+      Memory_KiB : Positive;
+      Lanes      : Positive;
+      Tag_Length : Positive;
+      Result     : out String;
+      Last       : out Natural) return CryptoLib.Errors.Status
+   is
+      Tag : Ada.Streams.Stream_Element_Array
+        (1 .. Ada.Streams.Stream_Element_Offset (Tag_Length));
+      Status : CryptoLib.Errors.Status;
+   begin
+      Result := [others => ' '];
+      Last := Result'First - 1;
+      Status := Derive (Kind, Password, Salt, Iterations, Memory_KiB,
+                        Lanes, Tag);
+      if Status /= CryptoLib.Errors.Ok then
+         return Status;
+      end if;
+      Status := Encode (Kind, Salt, Iterations, Memory_KiB, Lanes, Tag,
+                        Result, Last);
+      CryptoLib.Secure_Wipe.Wipe (Tag'Address, Tag'Length);
+      return Status;
+   end Hash;
+
+   function Verify_Encoded
+     (Password : Ada.Streams.Stream_Element_Array;
+      Stored   : String) return Boolean
+   is
+      Cursor : Natural := Stored'First;
+
+      --  Take the text up to the next Stop character, leaving Cursor past it.
+      function Field (Stop : Character; Found : out Boolean) return String is
+         Start : constant Natural := Cursor;
+      begin
+         while Cursor <= Stored'Last and then Stored (Cursor) /= Stop loop
+            Cursor := Cursor + 1;
+         end loop;
+         Found := Cursor <= Stored'Last;
+         return Text : constant String := Stored (Start .. Cursor - 1) do
+            Cursor := Cursor + 1;
+         end return;
+      end Field;
+
+      function Number (Text : String; Ok : out Boolean) return Natural is
+         Value : Natural := 0;
+      begin
+         Ok := Text'Length > 0 and then Text'Length <= 10;
+         if not Ok then
+            return 0;
+         end if;
+         --  No leading zero, so one cost has one spelling.
+         if Text'Length > 1 and then Text (Text'First) = '0' then
+            Ok := False;
+            return 0;
+         end if;
+         for C of Text loop
+            if C not in '0' .. '9' then
+               Ok := False;
+               return 0;
+            end if;
+            Value := Value * 10 + (Character'Pos (C) - Character'Pos ('0'));
+         end loop;
+         return Value;
+      end Number;
+
+      Kind : Variant := Argon2id;
+      Found : Boolean;
+   begin
+      --  A leading empty field, because the string starts with the separator.
+      if Stored'Length = 0 or else Stored (Stored'First) /= '$' then
+         return False;
+      end if;
+      Cursor := Stored'First + 1;
+
+      declare
+         Name : constant String := Field ('$', Found);
+         Known : Boolean := False;
+      begin
+         if not Found then
+            return False;
+         end if;
+         for V in Variant loop
+            if Variant_Name (V).all = Name then
+               Kind := V;
+               Known := True;
+            end if;
+         end loop;
+         if not Known then
+            return False;
+         end if;
+      end;
+
+      declare
+         Version : constant String := Field ('$', Found);
+      begin
+         --  Only v=19. The original Argon2 had a v=16 whose indexing differs,
+         --  and this does not implement it, so accepting the label would be
+         --  claiming to verify something it cannot.
+         if not Found or else Version /= "v=19" then
+            return False;
+         end if;
+      end;
+
+      declare
+         Costs : constant String := Field ('$', Found);
+         M, T, P : Natural := 0;
+         Have_M, Have_T, Have_P : Boolean := False;
+         At_Index : Natural := Costs'First;
+
+         function Next_Cost (Ok : out Boolean) return String is
+            Start : constant Natural := At_Index;
+         begin
+            while At_Index <= Costs'Last and then Costs (At_Index) /= ',' loop
+               At_Index := At_Index + 1;
+            end loop;
+            Ok := At_Index > Start;
+            return Text : constant String := Costs (Start .. At_Index - 1) do
+               At_Index := At_Index + 1;
+            end return;
+         end Next_Cost;
+      begin
+         if not Found then
+            return False;
+         end if;
+         while At_Index <= Costs'Last loop
+            declare
+               Ok : Boolean;
+               Item : constant String := Next_Cost (Ok);
+               Good : Boolean;
+            begin
+               if not Ok or else Item'Length < 3
+                 or else Item (Item'First + 1) /= '='
+               then
+                  return False;
+               end if;
+               declare
+                  Digits_Text : constant String :=
+                    Item (Item'First + 2 .. Item'Last);
+                  Value : constant Natural := Number (Digits_Text, Good);
+               begin
+                  if not Good then
+                     return False;
+                  end if;
+                  --  Each parameter exactly once, in any order.
+                  case Item (Item'First) is
+                     when 'm' =>
+                        if Have_M then
+                           return False;
+                        end if;
+                        M := Value; Have_M := True;
+                     when 't' =>
+                        if Have_T then
+                           return False;
+                        end if;
+                        T := Value; Have_T := True;
+                     when 'p' =>
+                        if Have_P then
+                           return False;
+                        end if;
+                        P := Value; Have_P := True;
+                     when others =>
+                        return False;
+                  end case;
+               end;
+            end;
+         end loop;
+         if not (Have_M and then Have_T and then Have_P)
+           or else M = 0 or else T = 0 or else P = 0
+         then
+            return False;
+         end if;
+
+         declare
+            Salt_Text : constant String := Field ('$', Found);
+            Tag_Text  : constant String :=
+              (if Found then Stored (Cursor .. Stored'Last) else "");
+            Salt_Size : constant Natural :=
+              CryptoLib.Base64.Decoded_Length (Salt_Text'Length);
+            Tag_Size  : constant Natural :=
+              CryptoLib.Base64.Decoded_Length (Tag_Text'Length);
+         begin
+            if not Found
+              or else Salt_Size = 0 or else Salt_Size > Max_Field
+              or else Tag_Size = 0 or else Tag_Size > Max_Field
+            then
+               return False;
+            end if;
+            declare
+               Salt : Ada.Streams.Stream_Element_Array
+                 (1 .. Ada.Streams.Stream_Element_Offset (Salt_Size));
+               Tag  : Ada.Streams.Stream_Element_Array
+                 (1 .. Ada.Streams.Stream_Element_Offset (Tag_Size));
+               Stop : Ada.Streams.Stream_Element_Offset;
+               Fine : Boolean;
+            begin
+               CryptoLib.Base64.Decode (Salt_Text, Salt, Stop, Fine);
+               if not Fine or else Stop /= Salt'Last then
+                  return False;
+               end if;
+               CryptoLib.Base64.Decode (Tag_Text, Tag, Stop, Fine);
+               if not Fine or else Stop /= Tag'Last then
+                  return False;
+               end if;
+               return Verify (Kind, Password, Salt, T, M, P, Tag);
+            end;
+         end;
+      end;
+   exception
+      when others =>
+         return False;
+   end Verify_Encoded;
 
 end CryptoLib.Argon2;

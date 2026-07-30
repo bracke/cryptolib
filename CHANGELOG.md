@@ -16,6 +16,12 @@ predecessor.
   key schedule extracted from `BCrypt_PBKDF` so the two share one copy. The
   shared package is a private child, so the cipher is reachable from inside
   `CryptoLib` and not from a caller.
+* `Argon2.Hash` and `Argon2.Verify_Encoded`: the PHC string format, so a
+  stored Argon2 hash carries its own parameters as every other
+  implementation writes them. `Bcrypt` already stored a self-describing
+  `$2b$` string; Argon2 obliged the caller to keep the costs beside it.
+* `ECDSA.Decode_DER_Signature`: the inverse of the encoder below, public
+  now rather than private to X.509 verification, which delegates to it.
 * `ECDSA.Encode_DER_Signature`: the DER `SEQUENCE {r,s}` encoding X.509 and
   TLS want, which existed only inline inside certificate issuance and so was
   out of reach of anything signing with a client certificate. Issuance now

@@ -1,4 +1,7 @@
 with Interfaces; use Interfaces;
+with CryptoLib.ASN1;
+with CryptoLib.ASN1.DER;
+with CryptoLib.ASN1.Errors;
 with CryptoLib.Hashes;
 with CryptoLib.Macs;
 with CryptoLib.EC_Arith; use CryptoLib.EC_Arith;
@@ -780,5 +783,95 @@ package body CryptoLib.ECDSA is
          Last := Into'First - 1;
          return CryptoLib.Errors.Internal_Error;
    end Encode_DER_Signature;
+
+   function Decode_DER_Signature
+     (Signature : Ada.Streams.Stream_Element_Array;
+      R         : out Ada.Streams.Stream_Element_Array;
+      S         : out Ada.Streams.Stream_Element_Array)
+      return CryptoLib.Errors.Status
+   is
+      package DER_Reader renames CryptoLib.ASN1.DER;
+      use type CryptoLib.ASN1.Errors.Decode_Status;
+
+      Limits : constant CryptoLib.ASN1.Decode_Limits :=
+        CryptoLib.ASN1.Default_Limits;
+      Cursor : Ada.Streams.Stream_Element_Offset;
+      Outer  : CryptoLib.ASN1.Element;
+      Item   : CryptoLib.ASN1.Element;
+      Status : CryptoLib.ASN1.Errors.Decode_Status;
+      Signed : Boolean;
+
+      --  Right-align a minimal INTEGER body into a fixed-width component,
+      --  refusing a value that is zero or too wide to fit.
+      function Place
+        (Source : Ada.Streams.Stream_Element_Array;
+         Target : out Ada.Streams.Stream_Element_Array) return Boolean
+      is
+         First : Ada.Streams.Stream_Element_Offset := Source'First;
+      begin
+         Target := [others => 0];
+         while First <= Source'Last and then Source (First) = 0 loop
+            First := First + 1;
+         end loop;
+         if First > Source'Last then
+            --  A zero component is not a signature component.
+            return False;
+         end if;
+         if Source'Last - First + 1 > Target'Length then
+            return False;
+         end if;
+         Target (Target'Last - (Source'Last - First) .. Target'Last) :=
+           Source (First .. Source'Last);
+         return True;
+      end Place;
+   begin
+      R := [others => 0];
+      S := [others => 0];
+      if Signature'Length = 0 then
+         return CryptoLib.Errors.Handshake_Failed;
+      end if;
+
+      Cursor := Signature'First;
+      DER_Reader.Read_Sequence
+        (Signature, Cursor, Signature'Last, 0, Limits, Outer, Status);
+      if Status /= CryptoLib.ASN1.Errors.Ok
+        or else not DER_Reader.At_End (Cursor, Signature'Last)
+      then
+         return CryptoLib.Errors.Handshake_Failed;
+      end if;
+
+      Cursor := Outer.First;
+      DER_Reader.Read_Integer
+        (Signature, Cursor, Outer.Last, 1, Limits, Item, Signed, Status);
+      if Status /= CryptoLib.ASN1.Errors.Ok or else Signed
+        or else not Place (Signature (Item.First .. Item.Last), R)
+      then
+         R := [others => 0];
+         return CryptoLib.Errors.Handshake_Failed;
+      end if;
+
+      DER_Reader.Read_Integer
+        (Signature, Cursor, Outer.Last, 1, Limits, Item, Signed, Status);
+      if Status /= CryptoLib.ASN1.Errors.Ok or else Signed
+        or else not Place (Signature (Item.First .. Item.Last), S)
+      then
+         R := [others => 0];
+         S := [others => 0];
+         return CryptoLib.Errors.Handshake_Failed;
+      end if;
+
+      --  Two integers and nothing else.
+      if not DER_Reader.At_End (Cursor, Outer.Last) then
+         R := [others => 0];
+         S := [others => 0];
+         return CryptoLib.Errors.Handshake_Failed;
+      end if;
+      return CryptoLib.Errors.Ok;
+   exception
+      when others =>
+         R := [others => 0];
+         S := [others => 0];
+         return CryptoLib.Errors.Internal_Error;
+   end Decode_DER_Signature;
 
 end CryptoLib.ECDSA;

@@ -1,3 +1,4 @@
+with CryptoLib.Base64;
 with CryptoLib.Hashes;
 
 package body CryptoLib.Fingerprints is
@@ -5,59 +6,21 @@ package body CryptoLib.Fingerprints is
    use Ada.Strings.Unbounded;
    use CryptoLib.Errors;
 
-   Alphabet : constant String :=
-     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
    Hex_Alphabet : constant String := "0123456789abcdef";
 
+   --  Unpadded base64 through the shared CryptoLib.Base64, which is where it
+   --  lives now: the Argon2 PHC string needs the same encoding, and a second
+   --  copy of it is one more than anyone will keep correct.
    function Base64_No_Padding
      (Data : Stream_Element_Array)
       return String
    is
-      Output_Length : constant Natural := (Data'Length * 8 + 5) / 6;
-      Result : String (1 .. Output_Length);
-      Output_Index : Positive := Result'First;
-      Cursor : Stream_Element_Offset := Data'First;
-      First_Byte : Natural;
-      Second_Byte : Natural;
-      Third_Byte : Natural;
-      Combined_Value : Natural;
-      Remaining_Count : Natural;
+      Result : String
+        (1 .. CryptoLib.Base64.Encoded_Length (Natural (Data'Length)));
+      Last   : Natural;
    begin
-      while Cursor <= Data'Last loop
-         Remaining_Count := Natural (Data'Last - Cursor + 1);
-         First_Byte := Natural (Data (Cursor));
-         if Remaining_Count >= 2 then
-            Second_Byte := Natural (Data (Cursor + 1));
-         else
-            Second_Byte := 0;
-         end if;
-         if Remaining_Count >= 3 then
-            Third_Byte := Natural (Data (Cursor + 2));
-         else
-            Third_Byte := 0;
-         end if;
-
-         Combined_Value := First_Byte * 16#10000# + Second_Byte * 16#100# + Third_Byte;
-
-         Result (Output_Index) := Alphabet (Combined_Value / 16#40000# + 1);
-         Output_Index := Output_Index + 1;
-         exit when Output_Index > Result'Last;
-
-         Result (Output_Index) := Alphabet ((Combined_Value / 16#1000#) mod 64 + 1);
-         Output_Index := Output_Index + 1;
-         exit when Output_Index > Result'Last;
-
-         Result (Output_Index) := Alphabet ((Combined_Value / 16#40#) mod 64 + 1);
-         Output_Index := Output_Index + 1;
-         exit when Output_Index > Result'Last;
-
-         Result (Output_Index) := Alphabet (Combined_Value mod 64 + 1);
-         Output_Index := Output_Index + 1;
-
-         Cursor := Cursor + 3;
-      end loop;
-
-      return Result;
+      CryptoLib.Base64.Encode (Data, Result, Last);
+      return Result (Result'First .. Last);
    end Base64_No_Padding;
 
    function Hex_Lower (Data : Stream_Element_Array) return String

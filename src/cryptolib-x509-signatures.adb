@@ -219,98 +219,20 @@ package body CryptoLib.X509.Signatures is
       Ok := DER_Reader.At_End (Cursor, Outer.Last);
    end Split_RSA_Key;
 
-   --  Copy an ECDSA signature component into a fixed-width field.
-   --
-   --  A DER INTEGER is minimal and signed, so r may arrive with a leading
-   --  zero it does not need in a fixed-width field, or shorter than the field
-   --  when its top bytes happen to be zero. Both are ordinary; a component
-   --  genuinely wider than the curve is not.
-   procedure Place_Component
-     (Source : Ada.Streams.Stream_Element_Array;
-      Target : out Ada.Streams.Stream_Element_Array;
-      Ok     : out Boolean)
-   is
-      First : Ada.Streams.Stream_Element_Offset := Source'First;
-   begin
-      Target := [others => 0];
-      Ok := False;
-
-      while First <= Source'Last and then Source (First) = 0 loop
-         First := First + 1;
-      end loop;
-
-      if First > Source'Last then
-         --  A zero component is not a signature component.
-         return;
-      end if;
-
-      if Source'Last - First + 1 > Target'Length then
-         return;
-      end if;
-
-      Target (Target'Last - (Source'Last - First) .. Target'Last) :=
-        Source (First .. Source'Last);
-      Ok := True;
-   end Place_Component;
-
    --  Split a DER ECDSA-Sig-Value into its two components.
+   --  Delegates to CryptoLib.ECDSA, which is where the matching encoder is
+   --  and now where the parse lives. The strictness is unchanged: exactly two
+   --  non-negative minimal integers, nothing after them, neither zero nor
+   --  wider than its component.
    procedure Split_ECDSA_Signature
      (Signature : Ada.Streams.Stream_Element_Array;
       R         : out Ada.Streams.Stream_Element_Array;
       S         : out Ada.Streams.Stream_Element_Array;
       Ok        : out Boolean)
    is
-      Limits : constant CryptoLib.ASN1.Decode_Limits :=
-        CryptoLib.ASN1.Default_Limits;
-      Cursor : Ada.Streams.Stream_Element_Offset;
-      Outer  : CryptoLib.ASN1.Element;
-      Item   : CryptoLib.ASN1.Element;
-      Status : CryptoLib.ASN1.Errors.Decode_Status;
-      Signed : Boolean;
    begin
-      R := [others => 0];
-      S := [others => 0];
-      Ok := False;
-
-      if Signature'Length = 0 then
-         return;
-      end if;
-
-      Cursor := Signature'First;
-      DER_Reader.Read_Sequence
-        (Signature, Cursor, Signature'Last, 0, Limits, Outer, Status);
-      if Status /= CryptoLib.ASN1.Errors.Ok then
-         return;
-      end if;
-
-      if not DER_Reader.At_End (Cursor, Signature'Last) then
-         return;
-      end if;
-
-      Cursor := Outer.First;
-      DER_Reader.Read_Integer
-        (Signature, Cursor, Outer.Last, 1, Limits, Item, Signed, Status);
-      if Status /= CryptoLib.ASN1.Errors.Ok or else Signed then
-         return;
-      end if;
-      Place_Component (Signature (Item.First .. Item.Last), R, Ok);
-      if not Ok then
-         return;
-      end if;
-
-      DER_Reader.Read_Integer
-        (Signature, Cursor, Outer.Last, 1, Limits, Item, Signed, Status);
-      if Status /= CryptoLib.ASN1.Errors.Ok or else Signed then
-         Ok := False;
-         return;
-      end if;
-      Place_Component (Signature (Item.First .. Item.Last), S, Ok);
-      if not Ok then
-         return;
-      end if;
-
-      --  Two integers and nothing else.
-      Ok := DER_Reader.At_End (Cursor, Outer.Last);
+      Ok := CryptoLib.ECDSA.Decode_DER_Signature (Signature, R, S)
+              = CryptoLib.Errors.Ok;
    end Split_ECDSA_Signature;
 
    --  The half of PSS verification that does not care where the parameters
