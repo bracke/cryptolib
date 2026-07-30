@@ -10491,6 +10491,45 @@ procedure Tests is
          end;
       end;
 
+      --  An EC private key whose version is not the one RFC 5915 defines.
+      --
+      --  ECPrivateKey has exactly one version, ecPrivkeyVer1. This parser read
+      --  it to step past it and never looked, which is the same shape as the
+      --  RSA version that let a three-prime key through described as two of
+      --  its primes. The two keys below differ in a single hex digit -- the
+      --  version -- so the good one still parsing is what says the refusal is
+      --  aimed at the version and not at the key.
+      declare
+         package P8 renames CryptoLib.PKCS8;
+         use type CryptoLib.ASN1.Errors.Decode_Status;
+         Good : constant Ada.Streams.Stream_Element_Array := Bytes_From_Hex
+           ("308187020100301306072a8648ce3d020106082a8648ce3d03010704"
+            & "6d306b0201010420bb3914abe365433e40ba86663df5bf9b544d9bcb"
+            & "55e21947a45eaf8ead169c7ba14403420004e88e9bd792561d0ac88b"
+            & "cf58c0f8c91da493da9dbce2c528e87f79f0d3438804ec104757377c"
+            & "900b1ad68f37cf7ae4196cc472d2b6dc2c34d2f8ba115d608bdc");
+         Bad : constant Ada.Streams.Stream_Element_Array := Bytes_From_Hex
+           ("308187020100301306072a8648ce3d020106082a8648ce3d03010704"
+            & "6d306b0201020420bb3914abe365433e40ba86663df5bf9b544d9bcb"
+            & "55e21947a45eaf8ead169c7ba14403420004e88e9bd792561d0ac88b"
+            & "cf58c0f8c91da493da9dbce2c528e87f79f0d3438804ec104757377c"
+            & "900b1ad68f37cf7ae4196cc472d2b6dc2c34d2f8ba115d608bdc");
+         Key : P8.Private_Key;
+         St  : CryptoLib.ASN1.Errors.Decode_Status;
+      begin
+         P8.Decode_DER (Good, CryptoLib.ASN1.Default_Limits, Key, St);
+         Check (St = CryptoLib.ASN1.Errors.Ok and then P8.Is_Present (Key),
+                "an EC private key with version 1 parses");
+         declare
+            Other : P8.Private_Key;
+         begin
+            P8.Decode_DER (Bad, CryptoLib.ASN1.Default_Limits, Other, St);
+            Check (St /= CryptoLib.ASN1.Errors.Ok
+                   and then not P8.Is_Present (Other),
+                   "and one claiming version 2 is refused");
+         end;
+      end;
+
       --  A multi-prime RSA key is refused rather than read as two of its
       --  primes.
       --

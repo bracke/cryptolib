@@ -236,6 +236,16 @@ package body CryptoLib.PKCS8 is
                         Wipe (Item);
                         return;
                      end if;
+                     --  RFC 5915 gives ECPrivateKey exactly one version,
+                     --  ecPrivkeyVer1, and no other is defined. Read past, as
+                     --  the RSA version was until a multi-prime key turned up
+                     --  described as two of its three primes: a value the
+                     --  parser has to step over is a value worth looking at.
+                     if Ver /= 1 then
+                        Wipe (Item);
+                        Status := Unsupported_Encoding;
+                        return;
+                     end if;
 
                      DER_Reader.Read_Octet_String
                        (Work, Part, Key.Last, 3, Limits, Scalar, Status);
