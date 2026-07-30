@@ -16,6 +16,10 @@ predecessor.
   key schedule extracted from `BCrypt_PBKDF` so the two share one copy. The
   shared package is a private child, so the cipher is reachable from inside
   `CryptoLib` and not from a caller.
+* `ECDSA.Encode_DER_Signature`: the DER `SEQUENCE {r,s}` encoding X.509 and
+  TLS want, which existed only inline inside certificate issuance and so was
+  out of reach of anything signing with a client certificate. Issuance now
+  shares it.
 * `Argon2.Verify`: constant-time verification of a password against a tag,
   which `Derive` alone left every caller to implement, usually as an
   early-exiting array comparison. `Bcrypt.Verify` already had it.

@@ -119,6 +119,41 @@ package CryptoLib.ECDSA is
       return CryptoLib.Errors.Status;
 
    --  Which curve a key is on.
+   --  The largest DER signature any of these curves produces, in octets.
+   --
+   --  P-521 is the worst case: r and s are 66 octets each, each INTEGER may
+   --  need a leading 16#00# when its top bit is set, so the content is
+   --  2 * (2 + 1 + 66) = 138 and the SEQUENCE header takes three octets
+   --  because 138 does not fit the short length form.
+   Maximum_DER_Signature_Length : constant := 141;
+
+   --  Encode a raw (r, s) pair as the DER SEQUENCE that X.509 and TLS carry.
+   --
+   --  The signers above return r and s as fixed-width big-endian blocks,
+   --  because that is what SSH puts on the wire. Everything built on X.509 --
+   --  a certificate signature, a CSR, a TLS CertificateVerify from a client
+   --  certificate -- wants `SEQUENCE { r INTEGER, s INTEGER }` instead, with
+   --  each INTEGER in the shortest form DER allows: leading zero octets
+   --  dropped, and a single 16#00# put back when the top bit of the first
+   --  remaining octet is set, so a positive value is never read as negative.
+   --  Getting that wrong produces a signature that verifies nowhere.
+   --
+   --  Into may be longer than the result; Last says where the encoding ends,
+   --  and the octets past it are left alone. Sizing Into at
+   --  Maximum_DER_Signature_Length always suffices.
+   --  @param R    the component r, big-endian, the curve's width
+   --  @param S    the component s, big-endian, the same width as R
+   --  @param Into out: the encoding, from Into'First through Last
+   --  @param Last out: the last octet written, Into'First - 1 on failure
+   --  @return Ok, or Handshake_Failed when R and S differ in length, either
+   --    is empty or wider than a P-521 component, or Into is too small
+   function Encode_DER_Signature
+     (R    : Ada.Streams.Stream_Element_Array;
+      S    : Ada.Streams.Stream_Element_Array;
+      Into : out Ada.Streams.Stream_Element_Array;
+      Last : out Ada.Streams.Stream_Element_Offset)
+      return CryptoLib.Errors.Status;
+
    type Curve_Id is (Nistp256, Nistp384, Nistp521);
 
    --  Which digest a signature was made with.

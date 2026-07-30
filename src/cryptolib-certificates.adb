@@ -1670,35 +1670,41 @@ package body CryptoLib.Certificates is
                St : constant CryptoLib.Errors.Status :=
                  CryptoLib.ECDSA.Sign_Nistp256_Raw
                    (Sign_Seed, To_Bytes (TBS), R, S2);
+               DER  : Ada.Streams.Stream_Element_Array
+                 (1 .. CryptoLib.ECDSA.Maximum_DER_Signature_Length);
+               Stop : Ada.Streams.Stream_Element_Offset;
             begin
-               if St /= CryptoLib.Errors.Ok then
+               if St /= CryptoLib.Errors.Ok
+                 or else CryptoLib.ECDSA.Encode_DER_Signature (R, S2, DER, Stop)
+                           /= CryptoLib.Errors.Ok
+               then
                   return "";
                end if;
                return Seq
                  (TBS & Signature_Algorithm (Algorithm)
-                  & Bits (Seq (Integer_From_Bytes (To_String (R))
-                               & Integer_From_Bytes (To_String (S2)))));
+                  & Bits (To_String (DER (DER'First .. Stop))));
             end;
 
          when P384_Key =>
-            --  ECDSA signs as two integers, not one fixed block, and DER wants
-            --  each of them minimally encoded.
             declare
                R  : Ada.Streams.Stream_Element_Array (1 .. 48);
                S2 : Ada.Streams.Stream_Element_Array (1 .. 48);
                St : constant CryptoLib.Errors.Status :=
                  CryptoLib.ECDSA.Sign_Nistp384_Raw
                    (Sign_Seed, To_Bytes (TBS), R, S2);
+               DER  : Ada.Streams.Stream_Element_Array
+                 (1 .. CryptoLib.ECDSA.Maximum_DER_Signature_Length);
+               Stop : Ada.Streams.Stream_Element_Offset;
             begin
-               if St /= CryptoLib.Errors.Ok then
+               if St /= CryptoLib.Errors.Ok
+                 or else CryptoLib.ECDSA.Encode_DER_Signature (R, S2, DER, Stop)
+                           /= CryptoLib.Errors.Ok
+               then
                   return "";
                end if;
                return Seq
                  (TBS & Signature_Algorithm (Algorithm)
-                  & Bits
-                      (Seq
-                         (Integer_From_Bytes (To_String (R))
-                          & Integer_From_Bytes (To_String (S2)))));
+                  & Bits (To_String (DER (DER'First .. Stop))));
             end;
       end case;
    end Sign_Certificate;

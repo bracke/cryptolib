@@ -696,4 +696,89 @@ package body CryptoLib.ECDSA is
          Public_Point, Message_Bytes, R_Bytes, S_Bytes);
    end Verify_Nistp521_Raw;
 
+   function Encode_DER_Signature
+     (R    : Ada.Streams.Stream_Element_Array;
+      S    : Ada.Streams.Stream_Element_Array;
+      Into : out Ada.Streams.Stream_Element_Array;
+      Last : out Ada.Streams.Stream_Element_Offset)
+      return CryptoLib.Errors.Status
+   is
+      --  The DER INTEGER body for a non-negative big-endian magnitude:
+      --  leading zeros dropped to one octet at most, then a 16#00# prefixed
+      --  when the top bit would otherwise make it negative.
+      function Body_Length (Value : Stream_Element_Array) return Natural is
+         First : Stream_Element_Offset := Value'First;
+      begin
+         while First < Value'Last and then Value (First) = 0 loop
+            First := First + 1;
+         end loop;
+         return Natural (Value'Last - First + 1)
+                + (if Value (First) >= 16#80# then 1 else 0);
+      end Body_Length;
+
+      procedure Put_Integer
+        (Value  : Stream_Element_Array;
+         Cursor : in out Stream_Element_Offset)
+      is
+         First : Stream_Element_Offset := Value'First;
+      begin
+         while First < Value'Last and then Value (First) = 0 loop
+            First := First + 1;
+         end loop;
+         Into (Cursor) := 16#02#;
+         Into (Cursor + 1) := Stream_Element (Body_Length (Value));
+         Cursor := Cursor + 2;
+         if Value (First) >= 16#80# then
+            Into (Cursor) := 0;
+            Cursor := Cursor + 1;
+         end if;
+         Into (Cursor .. Cursor + (Value'Last - First)) :=
+           Value (First .. Value'Last);
+         Cursor := Cursor + (Value'Last - First) + 1;
+      end Put_Integer;
+
+      Content : Natural;
+      Cursor  : Stream_Element_Offset;
+   begin
+      Last := Into'First - 1;
+      if R'Length /= S'Length
+        or else R'Length = 0
+        or else R'Length > 66
+      then
+         return CryptoLib.Errors.Handshake_Failed;
+      end if;
+
+      --  Each component contributes its tag, its length octet and its body.
+      Content := 2 + Body_Length (R) + 2 + Body_Length (S);
+
+      declare
+         --  A SEQUENCE under 128 octets takes a one-octet length; at or above
+         --  it takes 16#81# and then the length. Only P-521 reaches the
+         --  long form, and only sometimes, so both are exercised in practice.
+         Header : constant Natural := (if Content < 128 then 2 else 3);
+      begin
+         if Natural (Into'Length) < Header + Content then
+            return CryptoLib.Errors.Handshake_Failed;
+         end if;
+         Into (Into'First) := 16#30#;
+         if Content < 128 then
+            Into (Into'First + 1) := Stream_Element (Content);
+            Cursor := Into'First + 2;
+         else
+            Into (Into'First + 1) := 16#81#;
+            Into (Into'First + 2) := Stream_Element (Content);
+            Cursor := Into'First + 3;
+         end if;
+      end;
+
+      Put_Integer (R, Cursor);
+      Put_Integer (S, Cursor);
+      Last := Cursor - 1;
+      return CryptoLib.Errors.Ok;
+   exception
+      when others =>
+         Last := Into'First - 1;
+         return CryptoLib.Errors.Internal_Error;
+   end Encode_DER_Signature;
+
 end CryptoLib.ECDSA;

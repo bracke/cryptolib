@@ -43,7 +43,7 @@ Do not run plain system `gnat*`, `gnatmake`, `gnatls`, `gnatprove`,
 | `CryptoLib.X448` | X448 key agreement (RFC 7748), the 448-bit counterpart |
 | `CryptoLib.Ed25519` | Ed25519 signatures |
 | `CryptoLib.Ed448` | Ed448 signatures (RFC 8032 PureEdDSA, empty context) |
-| `CryptoLib.ECDSA` | ECDSA P-256/P-384/P-521 signing (RFC 6979 deterministic) and verification with any of SHA-256/384/512; P-256/P-384 key generation and public-key derivation on all three |
+| `CryptoLib.ECDSA` | ECDSA P-256/P-384/P-521 signing (RFC 6979 deterministic) and verification with any of SHA-256/384/512; P-256/P-384 key generation and public-key derivation on all three; DER `SEQUENCE {r,s}` encoding for X.509 and TLS |
 | `CryptoLib.Diffie_Hellman` | finite-field DH over the SSH MODP groups 1/14/16/18 (RFC 2409, RFC 3526) |
 | `CryptoLib.Bcrypt` | bcrypt, the `$2b$` password hash, with verification |
 | `CryptoLib.Argon2` | Argon2d/i/id (RFC 9106), the memory-hard password hash, with constant-time verification |

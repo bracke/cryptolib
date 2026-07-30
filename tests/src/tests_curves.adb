@@ -1410,6 +1410,160 @@ package body Tests_Curves is
    procedure Run_Check_ECDSA_P384_Verify (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_Ed25519_Sign_Verify (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_X25519_Vectors (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Check_ECDSA_DER_Signature is
+
+      --  Every expected encoding here is a signature OpenSSL produced, taken
+      --  apart into r and s: the encoder has to put back exactly what a real
+      --  implementation emitted, not merely something self-consistent.
+      procedure Expect
+        (R, S, Want : Ada.Streams.Stream_Element_Array;
+         Label      : String)
+      is
+         Into : Ada.Streams.Stream_Element_Array
+           (1 .. CryptoLib.ECDSA.Maximum_DER_Signature_Length);
+         Last : Ada.Streams.Stream_Element_Offset;
+      begin
+         Check (CryptoLib.ECDSA.Encode_DER_Signature (R, S, Into, Last)
+                  = CryptoLib.Errors.Ok,
+                Label & " encodes");
+         Check (Into (Into'First .. Last) = Want, Label);
+      end Expect;
+   begin
+      --  P-256, both components with the top bit set, so each INTEGER gains a 16#00#.
+      Expect (Bytes_From_Hex ("87311041f8adef27f6f5f2fb2d58ee0c"
+                     & "30012449174ec780bf50c59c5ed4b995"),
+              Bytes_From_Hex ("eaa84e84b746350b8af117a61d8adbac"
+                     & "a1e4f33ccadd6f58cedee2eace2ac43a"),
+              Bytes_From_Hex ("304602210087311041f8adef27f6f5f2"
+                     & "fb2d58ee0c30012449174ec780bf50c5"
+                     & "9c5ed4b995022100eaa84e84b746350b"
+                     & "8af117a61d8adbaca1e4f33ccadd6f58"
+                     & "cedee2eace2ac43a"),
+              "P-256, both components with the top bit set, so each INTEGER gains a 16#00#");
+      --  P-256, neither top bit set on r, so only s is padded.
+      Expect (Bytes_From_Hex ("59bf1dd5a4f1c93134d3c035ca796d9e"
+                     & "dae2c6f410f3cd294c78b2c0ded803ae"),
+              Bytes_From_Hex ("8f965c5032ab0c1a6ec14f96f641b204"
+                     & "a43d3e20c31e7afbafe032ed1cd3998b"),
+              Bytes_From_Hex ("3045022059bf1dd5a4f1c93134d3c035"
+                     & "ca796d9edae2c6f410f3cd294c78b2c0"
+                     & "ded803ae0221008f965c5032ab0c1a6e"
+                     & "c14f96f641b204a43d3e20c31e7afbaf"
+                     & "e032ed1cd3998b"),
+              "P-256, neither top bit set on r, so only s is padded");
+      --  P-384, both padded.
+      Expect (Bytes_From_Hex ("fecbb46d3169333aa027fb592709cf89"
+                     & "072398cadf108927d3b2b4f15bfbf419"
+                     & "70bb435dabaafd43f5b839d2eb9db47c"),
+              Bytes_From_Hex ("e37537dbf62fe518c726be8ceeec8d63"
+                     & "d9769cdfc8fc648a47de77eac5aab67e"
+                     & "af99ad432f6982bd7f0a92e11cca9e3a"),
+              Bytes_From_Hex ("3066023100fecbb46d3169333aa027fb"
+                     & "592709cf89072398cadf108927d3b2b4"
+                     & "f15bfbf41970bb435dabaafd43f5b839"
+                     & "d2eb9db47c023100e37537dbf62fe518"
+                     & "c726be8ceeec8d63d9769cdfc8fc648a"
+                     & "47de77eac5aab67eaf99ad432f6982bd"
+                     & "7f0a92e11cca9e3a"),
+              "P-384, both padded");
+      --  P-521, long-form SEQUENCE length (16#81#), no padding needed.
+      Expect (Bytes_From_Hex ("01606f0eab1ddc5bb72fb0f4065bc361"
+                     & "4564b3366b8aaf8ee056cdf9ace7b5d0"
+                     & "9f439d7339026eec7718bad6a6a4a9f2"
+                     & "0f358a24d67a5240f4ba057d3ee9dfba"
+                     & "095c"),
+              Bytes_From_Hex ("01c56d6f3a0575dc2535794a064a7403"
+                     & "730a9fa9b4b82cb654b48ce210d63450"
+                     & "0718d6584366bdffe2f5a3b61b5feec7"
+                     & "8740b46fde14b24ede014f449514f394"
+                     & "38b6"),
+              Bytes_From_Hex ("308188024201606f0eab1ddc5bb72fb0"
+                     & "f4065bc3614564b3366b8aaf8ee056cd"
+                     & "f9ace7b5d09f439d7339026eec7718ba"
+                     & "d6a6a4a9f20f358a24d67a5240f4ba05"
+                     & "7d3ee9dfba095c024201c56d6f3a0575"
+                     & "dc2535794a064a7403730a9fa9b4b82c"
+                     & "b654b48ce210d634500718d6584366bd"
+                     & "ffe2f5a3b61b5feec78740b46fde14b2"
+                     & "4ede014f449514f39438b6"),
+              "P-521, long-form SEQUENCE length (16#81#), no padding needed");
+      --  P-521, a leading zero octet on each component, which DER drops.
+      Expect (Bytes_From_Hex ("005866e94dda9acdae8afd66e76d5f4b"
+                     & "9fb1be627fce219f983c94a34b416025"
+                     & "936fc41d51c1afb602d13201108c5b2f"
+                     & "caa83b42dc2cf3fba0c460dd31220c6b"
+                     & "a19a"),
+              Bytes_From_Hex ("006014373cb820dfb68e27956feda754"
+                     & "20c0720fe5b78766aba9fd5489bae92e"
+                     & "62673ff96226b4dfc54e1a069f139a45"
+                     & "13eb46cd2eb28d0463b40dd1575de7a7"
+                     & "39c3"),
+              Bytes_From_Hex ("30818602415866e94dda9acdae8afd66"
+                     & "e76d5f4b9fb1be627fce219f983c94a3"
+                     & "4b416025936fc41d51c1afb602d13201"
+                     & "108c5b2fcaa83b42dc2cf3fba0c460dd"
+                     & "31220c6ba19a02416014373cb820dfb6"
+                     & "8e27956feda75420c0720fe5b78766ab"
+                     & "a9fd5489bae92e62673ff96226b4dfc5"
+                     & "4e1a069f139a4513eb46cd2eb28d0463"
+                     & "b40dd1575de7a739c3"),
+              "P-521, a leading zero octet on each component, which DER drops");
+
+      --  Refusals. Each must say so rather than emit a partial encoding, and
+      --  must leave Last before the start so a caller slicing on it gets an
+      --  empty result instead of stale octets.
+      declare
+         R32 : constant Ada.Streams.Stream_Element_Array (1 .. 32) :=
+           [others => 16#11#];
+         R48 : constant Ada.Streams.Stream_Element_Array (1 .. 48) :=
+           [others => 16#11#];
+         Empty : constant Ada.Streams.Stream_Element_Array (1 .. 0) :=
+           [others => 0];
+         Wide : constant Ada.Streams.Stream_Element_Array (1 .. 67) :=
+           [others => 16#11#];
+         Into : Ada.Streams.Stream_Element_Array
+           (1 .. CryptoLib.ECDSA.Maximum_DER_Signature_Length);
+         Tiny : Ada.Streams.Stream_Element_Array (1 .. 8);
+         Last : Ada.Streams.Stream_Element_Offset;
+      begin
+         Check (CryptoLib.ECDSA.Encode_DER_Signature (R32, R48, Into, Last)
+                  = CryptoLib.Errors.Handshake_Failed
+                and then Last < Into'First,
+                "ecdsa der refuses components of different widths");
+         Check (CryptoLib.ECDSA.Encode_DER_Signature (Empty, Empty, Into, Last)
+                  = CryptoLib.Errors.Handshake_Failed
+                and then Last < Into'First,
+                "and empty components");
+         Check (CryptoLib.ECDSA.Encode_DER_Signature (Wide, Wide, Into, Last)
+                  = CryptoLib.Errors.Handshake_Failed
+                and then Last < Into'First,
+                "and components wider than a P-521 one");
+         Check (CryptoLib.ECDSA.Encode_DER_Signature (R32, R32, Tiny, Last)
+                  = CryptoLib.Errors.Handshake_Failed
+                and then Last < Tiny'First,
+                "and an output buffer too small to hold the result");
+      end;
+
+      --  A component that is all zero still has to encode as a well-formed
+      --  INTEGER of one octet rather than none. r = 0 is not a valid ECDSA
+      --  signature, but the encoder is not the place that decides that, and
+      --  emitting a zero-length INTEGER would be malformed DER.
+      declare
+         Zero : constant Ada.Streams.Stream_Element_Array (1 .. 32) :=
+           [others => 0];
+         Into : Ada.Streams.Stream_Element_Array
+           (1 .. CryptoLib.ECDSA.Maximum_DER_Signature_Length);
+         Last : Ada.Streams.Stream_Element_Offset;
+      begin
+         Check (CryptoLib.ECDSA.Encode_DER_Signature (Zero, Zero, Into, Last)
+                  = CryptoLib.Errors.Ok
+                and then Into (Into'First .. Last)
+                           = Bytes_From_Hex ("3006020100020100"),
+                "ecdsa der encodes an all-zero component as a single 16#00#");
+      end;
+   end Check_ECDSA_DER_Signature;
+
+   procedure Run_Check_ECDSA_DER_Signature (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_ECDSA_P384_Deterministic (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_ECDSA_P256_Deterministic (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_ECDSA_P256_Keygen (Item : in out AUnit.Test_Cases.Test_Case'Class);
@@ -1499,6 +1653,12 @@ package body Tests_Curves is
       Check_ECDSA_P384_Deterministic;
    end Run_Check_ECDSA_P384_Deterministic;
 
+   procedure Run_Check_ECDSA_DER_Signature (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_ECDSA_DER_Signature;
+   end Run_Check_ECDSA_DER_Signature;
+
    procedure Run_Check_ECDSA_P256_Deterministic (Item : in out AUnit.Test_Cases.Test_Case'Class) is
       pragma Unreferenced (Item);
    begin
@@ -1540,6 +1700,7 @@ package body Tests_Curves is
       Register_Routine (Item, Run_Check_ECDSA_P384_Verify'Access, "ecdsa p384 verify");
       Register_Routine (Item, Run_Check_Ed25519_Sign_Verify'Access, "ed25519 sign verify");
       Register_Routine (Item, Run_Check_X25519_Vectors'Access, "x25519 vectors");
+      Register_Routine (Item, Run_Check_ECDSA_DER_Signature'Access, "ecdsa der signature");
       Register_Routine (Item, Run_Check_ECDSA_P384_Deterministic'Access, "ecdsa p384 deterministic");
       Register_Routine (Item, Run_Check_ECDSA_P256_Deterministic'Access, "ecdsa p256 deterministic");
       Register_Routine (Item, Run_Check_ECDSA_P256_Keygen'Access, "ecdsa p256 keygen");
