@@ -76,7 +76,6 @@ package body Tests_Encodings is
    use type CryptoLib.Certificates.Certificate_Status;
    use type Interfaces.Unsigned_32;
 
-
    procedure Check_Identity_Predicates is
       Cert, Key, Other_Cert, Other_Key : Ada.Strings.Unbounded.Unbounded_String;
       Status : CryptoLib.Certificates.Certificate_Status;
@@ -188,7 +187,6 @@ package body Tests_Encodings is
             "a private key is recognised by its armour");
       end;
    end Check_Identity_Predicates;
-
 
    --  The DER reader is the floor everything X.509 stands on, so these check
    --  the refusals as closely as the acceptances. Each malformed case is a
@@ -557,7 +555,6 @@ package body Tests_Encodings is
       end;
    end Check_ASN1_DER;
 
-
    --  Malformed input must come back as a status, never as an exception.
    --
    --  A library that parses what an attacker sends and lets an exception out
@@ -812,7 +809,6 @@ package body Tests_Encodings is
       end;
    end Check_Decoder_Robustness;
 
-
    --  Signing a request somebody else wrote.
    --
    --  Only the refusal of a malformed request was pinned before, so the
@@ -992,7 +988,6 @@ package body Tests_Encodings is
       end;
    end Check_CSR_Signing;
 
-
    --  A real OpenSSH private key, opened with nothing but this crate.
    --
    --  SECURITY.md used to claim bcrypt was "proven by decrypting a real
@@ -1104,7 +1099,6 @@ package body Tests_Encodings is
              "the wrong passphrase does not open it");
    end Check_OpenSSH_Key_Unlock;
 
-
    --  A signature OpenSSH made, checked here.
    --
    --  The Ed25519 vectors prove this computes what RFC 8032 says. They do
@@ -1167,8 +1161,6 @@ package body Tests_Encodings is
              /= CryptoLib.Errors.Ok,
              "as is one bit of what was signed");
    end Check_OpenSSH_Signature;
-
-
 
    --  Certification requests, against ones OpenSSL made and calls
    --  "self-signature verify OK".
@@ -1317,8 +1309,6 @@ package body Tests_Encodings is
       end;
    end Check_PKCS10;
 
-
-
    --  PKCS#8 private keys, decoded from the structure rather than found by
    --  looking for bytes that resemble a key.
    procedure Check_PKCS8 is
@@ -1435,8 +1425,6 @@ package body Tests_Encodings is
       end;
    end Check_PKCS8;
 
-
-
    --  A configured identity: a chain and the key that goes with it, checked
    --  before anything tries to use them.
    --
@@ -1548,84 +1536,84 @@ package body Tests_Encodings is
       --  modulus and exponent, so the question is a comparison against the
       --  two integers in the certificate.
       declare
-      RSA_Leaf_PEM : constant String :=
-        "-----BEGIN CERTIFICATE-----" & ASCII.LF &
-        "MIICuDCCAaACFAppZCkVsFVYh/Q8rXNvWMAD5p3rMA0GCSqGSIb3DQEBDAUAMBYx" & ASCII.LF &
-        "FDASBgNVBAMMC3JzYS10ZXN0LWNhMB4XDTI2MDcyODE5MDMyNFoXDTI3MDcyODE5" & ASCII.LF &
-        "MDMyNFowGzEZMBcGA1UEAwwQbGVhZi5yc2EuZXhhbXBsZTCCASIwDQYJKoZIhvcN" & ASCII.LF &
-        "AQEBBQADggEPADCCAQoCggEBAL0PmgpIoMyy+119Tl2IuJmaZBQosmMiazvJqC+A" & ASCII.LF &
-        "w1Q/35AsX4a+lnnloFwXtCFvvfRhFXxOLSgHuXLfQFa1cu4UWCpQQL+NLcp7ymXu" & ASCII.LF &
-        "6XR89USlUNtR1sz2NXaM+g4ufTZ6fN7HBaCrCMv9dUrD6LtXUhL37zDecH//mkrA" & ASCII.LF &
-        "PWtpm6FwRJv/KJgHODwv/kSLRG6UEtFik1Phro/L/9+HF3EULATMzrJUqdovR8HT" & ASCII.LF &
-        "1KYDgU4CldGjOjZkw6ZoxmV+3L2d+pNT1F7kP4I98UPdALnr8qfWnLZBh76DoDWc" & ASCII.LF &
-        "Czdvm4NfrunInxLrVqNB81lcYJIgpzs1AqpyPz83GUxlWLsCAwEAATANBgkqhkiG" & ASCII.LF &
-        "9w0BAQwFAAOCAQEARn/i3pR71kW0nZ1kCb46LS1WiELjUdofM2XcU6/31LHTDsh7" & ASCII.LF &
-        "Lc2QuuZuFLk03b5OFEUvawoaMKybtJpPQOJvSuJGvKyfFRNIgnRneWJmpPfM09za" & ASCII.LF &
-        "Ubf/AnjZmyZMxJHthFm+4ap3/BEFoPRpVC38c7TwUS3LYl+P3Yp2Ihh5DXpPUiCU" & ASCII.LF &
-        "A4yX4mbW3k8iRgcETeyLHtORF2x0fzrulKjD8zdxFFFwsehba9JbMU8w6DhpXLX0" & ASCII.LF &
-        "QYt6k0zCkr0tqwxnSjA97/uXvtptXb/K5V/WRK+mbbfUxbz8PKwan6zkWBjwT9Hu" & ASCII.LF &
-        "/RjLDgPBgAA6BeNlZY3XkYFFz3w4MSz1sdeVew==" & ASCII.LF &
-        "-----END CERTIFICATE-----";
+         RSA_Leaf_PEM : constant String :=
+           "-----BEGIN CERTIFICATE-----" & ASCII.LF &
+           "MIICuDCCAaACFAppZCkVsFVYh/Q8rXNvWMAD5p3rMA0GCSqGSIb3DQEBDAUAMBYx" & ASCII.LF &
+           "FDASBgNVBAMMC3JzYS10ZXN0LWNhMB4XDTI2MDcyODE5MDMyNFoXDTI3MDcyODE5" & ASCII.LF &
+           "MDMyNFowGzEZMBcGA1UEAwwQbGVhZi5yc2EuZXhhbXBsZTCCASIwDQYJKoZIhvcN" & ASCII.LF &
+           "AQEBBQADggEPADCCAQoCggEBAL0PmgpIoMyy+119Tl2IuJmaZBQosmMiazvJqC+A" & ASCII.LF &
+           "w1Q/35AsX4a+lnnloFwXtCFvvfRhFXxOLSgHuXLfQFa1cu4UWCpQQL+NLcp7ymXu" & ASCII.LF &
+           "6XR89USlUNtR1sz2NXaM+g4ufTZ6fN7HBaCrCMv9dUrD6LtXUhL37zDecH//mkrA" & ASCII.LF &
+           "PWtpm6FwRJv/KJgHODwv/kSLRG6UEtFik1Phro/L/9+HF3EULATMzrJUqdovR8HT" & ASCII.LF &
+           "1KYDgU4CldGjOjZkw6ZoxmV+3L2d+pNT1F7kP4I98UPdALnr8qfWnLZBh76DoDWc" & ASCII.LF &
+           "Czdvm4NfrunInxLrVqNB81lcYJIgpzs1AqpyPz83GUxlWLsCAwEAATANBgkqhkiG" & ASCII.LF &
+           "9w0BAQwFAAOCAQEARn/i3pR71kW0nZ1kCb46LS1WiELjUdofM2XcU6/31LHTDsh7" & ASCII.LF &
+           "Lc2QuuZuFLk03b5OFEUvawoaMKybtJpPQOJvSuJGvKyfFRNIgnRneWJmpPfM09za" & ASCII.LF &
+           "Ubf/AnjZmyZMxJHthFm+4ap3/BEFoPRpVC38c7TwUS3LYl+P3Yp2Ihh5DXpPUiCU" & ASCII.LF &
+           "A4yX4mbW3k8iRgcETeyLHtORF2x0fzrulKjD8zdxFFFwsehba9JbMU8w6DhpXLX0" & ASCII.LF &
+           "QYt6k0zCkr0tqwxnSjA97/uXvtptXb/K5V/WRK+mbbfUxbz8PKwan6zkWBjwT9Hu" & ASCII.LF &
+           "/RjLDgPBgAA6BeNlZY3XkYFFz3w4MSz1sdeVew==" & ASCII.LF &
+           "-----END CERTIFICATE-----";
 
-      RSA_Leaf_Key : constant String :=
-        "-----BEGIN PRIVATE KEY-----" & ASCII.LF &
-        "MIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQC9D5oKSKDMsvtd" & ASCII.LF &
-        "fU5diLiZmmQUKLJjIms7yagvgMNUP9+QLF+GvpZ55aBcF7Qhb730YRV8Ti0oB7ly" & ASCII.LF &
-        "30BWtXLuFFgqUEC/jS3Ke8pl7ul0fPVEpVDbUdbM9jV2jPoOLn02enzexwWgqwjL" & ASCII.LF &
-        "/XVKw+i7V1IS9+8w3nB//5pKwD1raZuhcESb/yiYBzg8L/5Ei0RulBLRYpNT4a6P" & ASCII.LF &
-        "y//fhxdxFCwEzM6yVKnaL0fB09SmA4FOApXRozo2ZMOmaMZlfty9nfqTU9Re5D+C" & ASCII.LF &
-        "PfFD3QC56/Kn1py2QYe+g6A1nAs3b5uDX67pyJ8S61ajQfNZXGCSIKc7NQKqcj8/" & ASCII.LF &
-        "NxlMZVi7AgMBAAECggEASWRiFvXkvjII1F0Na8/kYXSGvzChN0yoNhhtWqtwqCb3" & ASCII.LF &
-        "gX9IQgWAYqeaXcWx3n0DT3fUoGG0s+Jzwj0aO87KY9Ov+hUXXYTPrtfpVTKum9La" & ASCII.LF &
-        "X6CRR+J4MS6uyGunspOndduM1+qIq7tZed7VhoWQthEKwmRPDTh8kaPG4JfKAATe" & ASCII.LF &
-        "yXaIJYxuwc1UvAyL23hlw2yLRtAzbpGC6W4MlK82JPMYRMhm8vauFktU3gigKBjc" & ASCII.LF &
-        "9n10vwsMd5H8qU8jFS6knhiboQS2tnsrp0vyNDmILWxywtkm3nDK1xYDfzfP2Efb" & ASCII.LF &
-        "QuM5SPXz0p0Nr7f487gdv63nF84oB82/EejrmQlGeQKBgQDvBtpMjhOSMhoIvtQJ" & ASCII.LF &
-        "/QHcyEJUif2ybR/A1oAu0//qWGlYoY6liLBHsphffcfw0dXS71I/bAOxehtqjSN6" & ASCII.LF &
-        "rbtfYw4Mg/GCDkiyHfM54Rn2nS3JKFgAvG6LQDBw/WbucKocGhlLA7Z20+ORCkgA" & ASCII.LF &
-        "JMGPn2Kr/6IQ+vZSEhBBpCT3RQKBgQDKfHIHlw5j/iQZ6XAKNywsad7sUj8m2R+Y" & ASCII.LF &
-        "dwE7tc7FxeQJ9TPhLpOUGuqlUPta+Lmo8VC4pGUleQjGUGe3M8Q8fleaUuE+FljR" & ASCII.LF &
-        "BGFSXd01QCqk3w8Zerz8orPMdsC6mxVHHTe8zIzPqQzR+grrMFPXOB3RoyUQMgRd" & ASCII.LF &
-        "ejC3+x4P/wKBgDYVmd2KpFkHJyblbvsXmY1IbuHMG3B9CptKrdRqudRfzu50F9/S" & ASCII.LF &
-        "zvhaK+onfs8526UP689X9Hn7BCsW5nlCyEvsEOi6DjJ8YuySpE9rZMGNjSegDlGU" & ASCII.LF &
-        "UXsGui9G1zyKl6MmMKTtoSLADRTre6E0r+t8iAodHKG093lYhv8jUg31AoGAMcCo" & ASCII.LF &
-        "KBNGtu0QI8nG/MuXsAYHf1uqJrp81/KNvAUtHE1Gfefg6niOTHrcougmCrFItSku" & ASCII.LF &
-        "I2BJdg6qSEgjY9F1a0PD9KherenBwwHng9yKaPYuRDqGtEUDQLQdp6SaMH/Al6un" & ASCII.LF &
-        "MV21T6UDAGkG28kRILWqJgOHLNaNWgaXB+3M8jMCgYAleeSjeMEtygS6DnysgsDy" & ASCII.LF &
-        "oXP1zYgSmCnpSiK/DkiL+yaoTQf+KxFdxxAZPEmeWD+VW4p2vzOvhWhJq6f87EoF" & ASCII.LF &
-        "ArUwd/weVJXE9H+qGuqoIpJ/CnvIPRkzPGm9DxsY95w7DkLgn6tvz8OWfNU1+Sg4" & ASCII.LF &
-        "K7QNFJW77PZJbezJ2ZRh6g==" & ASCII.LF &
-        "-----END PRIVATE KEY-----";
+         RSA_Leaf_Key : constant String :=
+           "-----BEGIN PRIVATE KEY-----" & ASCII.LF &
+           "MIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQC9D5oKSKDMsvtd" & ASCII.LF &
+           "fU5diLiZmmQUKLJjIms7yagvgMNUP9+QLF+GvpZ55aBcF7Qhb730YRV8Ti0oB7ly" & ASCII.LF &
+           "30BWtXLuFFgqUEC/jS3Ke8pl7ul0fPVEpVDbUdbM9jV2jPoOLn02enzexwWgqwjL" & ASCII.LF &
+           "/XVKw+i7V1IS9+8w3nB//5pKwD1raZuhcESb/yiYBzg8L/5Ei0RulBLRYpNT4a6P" & ASCII.LF &
+           "y//fhxdxFCwEzM6yVKnaL0fB09SmA4FOApXRozo2ZMOmaMZlfty9nfqTU9Re5D+C" & ASCII.LF &
+           "PfFD3QC56/Kn1py2QYe+g6A1nAs3b5uDX67pyJ8S61ajQfNZXGCSIKc7NQKqcj8/" & ASCII.LF &
+           "NxlMZVi7AgMBAAECggEASWRiFvXkvjII1F0Na8/kYXSGvzChN0yoNhhtWqtwqCb3" & ASCII.LF &
+           "gX9IQgWAYqeaXcWx3n0DT3fUoGG0s+Jzwj0aO87KY9Ov+hUXXYTPrtfpVTKum9La" & ASCII.LF &
+           "X6CRR+J4MS6uyGunspOndduM1+qIq7tZed7VhoWQthEKwmRPDTh8kaPG4JfKAATe" & ASCII.LF &
+           "yXaIJYxuwc1UvAyL23hlw2yLRtAzbpGC6W4MlK82JPMYRMhm8vauFktU3gigKBjc" & ASCII.LF &
+           "9n10vwsMd5H8qU8jFS6knhiboQS2tnsrp0vyNDmILWxywtkm3nDK1xYDfzfP2Efb" & ASCII.LF &
+           "QuM5SPXz0p0Nr7f487gdv63nF84oB82/EejrmQlGeQKBgQDvBtpMjhOSMhoIvtQJ" & ASCII.LF &
+           "/QHcyEJUif2ybR/A1oAu0//qWGlYoY6liLBHsphffcfw0dXS71I/bAOxehtqjSN6" & ASCII.LF &
+           "rbtfYw4Mg/GCDkiyHfM54Rn2nS3JKFgAvG6LQDBw/WbucKocGhlLA7Z20+ORCkgA" & ASCII.LF &
+           "JMGPn2Kr/6IQ+vZSEhBBpCT3RQKBgQDKfHIHlw5j/iQZ6XAKNywsad7sUj8m2R+Y" & ASCII.LF &
+           "dwE7tc7FxeQJ9TPhLpOUGuqlUPta+Lmo8VC4pGUleQjGUGe3M8Q8fleaUuE+FljR" & ASCII.LF &
+           "BGFSXd01QCqk3w8Zerz8orPMdsC6mxVHHTe8zIzPqQzR+grrMFPXOB3RoyUQMgRd" & ASCII.LF &
+           "ejC3+x4P/wKBgDYVmd2KpFkHJyblbvsXmY1IbuHMG3B9CptKrdRqudRfzu50F9/S" & ASCII.LF &
+           "zvhaK+onfs8526UP689X9Hn7BCsW5nlCyEvsEOi6DjJ8YuySpE9rZMGNjSegDlGU" & ASCII.LF &
+           "UXsGui9G1zyKl6MmMKTtoSLADRTre6E0r+t8iAodHKG093lYhv8jUg31AoGAMcCo" & ASCII.LF &
+           "KBNGtu0QI8nG/MuXsAYHf1uqJrp81/KNvAUtHE1Gfefg6niOTHrcougmCrFItSku" & ASCII.LF &
+           "I2BJdg6qSEgjY9F1a0PD9KherenBwwHng9yKaPYuRDqGtEUDQLQdp6SaMH/Al6un" & ASCII.LF &
+           "MV21T6UDAGkG28kRILWqJgOHLNaNWgaXB+3M8jMCgYAleeSjeMEtygS6DnysgsDy" & ASCII.LF &
+           "oXP1zYgSmCnpSiK/DkiL+yaoTQf+KxFdxxAZPEmeWD+VW4p2vzOvhWhJq6f87EoF" & ASCII.LF &
+           "ArUwd/weVJXE9H+qGuqoIpJ/CnvIPRkzPGm9DxsY95w7DkLgn6tvz8OWfNU1+Sg4" & ASCII.LF &
+           "K7QNFJW77PZJbezJ2ZRh6g==" & ASCII.LF &
+           "-----END PRIVATE KEY-----";
 
-      RSA_Other_Key : constant String :=
-        "-----BEGIN PRIVATE KEY-----" & ASCII.LF &
-        "MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQCnqIxwFIbJAdX0" & ASCII.LF &
-        "kudx7n6KPClXjH89E0vsXbw0EhUksfU9B2UNOk75v1omI3FgfTk8pKLvS9LxkZPR" & ASCII.LF &
-        "gIDJctkHfRNhJvvqD9psM8It9JIWtBW8fCgh072IFEQIjlA8+Af99PG5O4OEHlzm" & ASCII.LF &
-        "dJT1dkP7Do838wt36s/TWLGOiBxm2J98omFWCOiWPhvpxVHpXXSxKXgVX2edtpa1" & ASCII.LF &
-        "OHpoTLrBcgNYYDUMeldkgEIKqEQ9s4G5jgkyoPpP/7GWDx+WsGuRFD/zN+Q9aCbC" & ASCII.LF &
-        "KIYVdqLHpUkbDS/EyMMEUiguhDzQ/EpahN9/XhMmTe66bC1sS3kux6CgD2N3DV4a" & ASCII.LF &
-        "xjnR2hKfAgMBAAECggEABe1JCa1JsB46GHgZA0erF+siJJyS4u9yGUKdcWz/BY0R" & ASCII.LF &
-        "xLzxYl/tUTOyiPNrAdfR1JL9YsULb/7CR8wcwWjBKcKbxmBA1F8H5n6HhTH5xO1M" & ASCII.LF &
-        "Cp2/ZwxVM7pQejAnWTOerk7UCZHqoRqk4U2KkCLeKsHlzjrvuacgMbIXYZjuNOex" & ASCII.LF &
-        "nkAz0OFf4ogHiplsSBsA7oeL34ZDlg/QFHlss531Mo5WESJEwVhe1kW4vhW9NyOI" & ASCII.LF &
-        "lFpBAfs8Xr7PEL8XEoIagTNi3h3SR8QtReSfflWrSuUPCHQ4GpFs2EnUb/7OGrAH" & ASCII.LF &
-        "RynjnZ0yNEtcYwrei0wPjdizlGpTvIAHIlsOuzaaAQKBgQDj+p1vdDML8v1o8SyF" & ASCII.LF &
-        "+0P7d4cTwNaWoZQD95oaaO4Rj2GTvxJLoVF0/LnyEtuyFLQsKccP+4/mfYuV6n4E" & ASCII.LF &
-        "Q9qkQdgXnHRhr1tArLQ9b7s9UCsE2ShxbQlgestNM06oW+keE3nvGCUX6xEP1KhI" & ASCII.LF &
-        "yrHIWzRau4UN32LgGAxxue26wwKBgQC8Q/CP0VmqtA7KXwgf6nc8xLg50zzN2uAg" & ASCII.LF &
-        "aR7zxZ4KYFkHs5wcpMJSpMu5n+w0zbApMtLBw4D+kILY4/3bJZ9NTx1Ml7+TnfSm" & ASCII.LF &
-        "vTNVwc1tLvPdoyAV0FR9C0OuZ2dK7BZ93pq4afYsN0ODfmwG9JVPM4wLKV5LpQpE" & ASCII.LF &
-        "dysqDW7y9QKBgETiQpOcjpf7san1xTgudZoTwZKsX6pf4/NW6w8zyUsxAZC82PBV" & ASCII.LF &
-        "K+GnQx/rpsomC1KUxPsFTbOdF4ISukTbo8KhyoNH2LpzW6UtCcDOc8rQ4E60ts2e" & ASCII.LF &
-        "3ohyUd9fs1KXgtZ9mAgwSXTyp9MatEZaSGF7fVQ0+Lz6VEvVuFzciwI1AoGBAJLu" & ASCII.LF &
-        "QzU7IkwDsvdmK6UdDGo07cLThcTzabBh2nJObQWUJGfKWbBRNgfh7c21blfXoADH" & ASCII.LF &
-        "VY0709TZXAWCCoGaXzWq5Sb919qRkHsBdqsbUgRAfLshsMzVhtsAi5X1xbvHfdZG" & ASCII.LF &
-        "gWIj8KiZiOt7Izxabp0dkdK0Oo+3AshkaR+s1EZxAoGBAKqCwAIH+HU0YF7MmjK0" & ASCII.LF &
-        "lJKGNKoy7WhxA4RESQkWv5Zet9i0sqPlz5ajKDZRcJBWBaxLIZo9oolXUlJltdfN" & ASCII.LF &
-        "5kgKVRcPV00ThGuuZKUHpSURmZS+iP0i6Rrx51ZKdb/T+Jf0CU2vPauaxcZ17ekc" & ASCII.LF &
-        "k3VQLvwKPdHckJ89GRA83oLh" & ASCII.LF &
-        "-----END PRIVATE KEY-----";
+         RSA_Other_Key : constant String :=
+           "-----BEGIN PRIVATE KEY-----" & ASCII.LF &
+           "MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQCnqIxwFIbJAdX0" & ASCII.LF &
+           "kudx7n6KPClXjH89E0vsXbw0EhUksfU9B2UNOk75v1omI3FgfTk8pKLvS9LxkZPR" & ASCII.LF &
+           "gIDJctkHfRNhJvvqD9psM8It9JIWtBW8fCgh072IFEQIjlA8+Af99PG5O4OEHlzm" & ASCII.LF &
+           "dJT1dkP7Do838wt36s/TWLGOiBxm2J98omFWCOiWPhvpxVHpXXSxKXgVX2edtpa1" & ASCII.LF &
+           "OHpoTLrBcgNYYDUMeldkgEIKqEQ9s4G5jgkyoPpP/7GWDx+WsGuRFD/zN+Q9aCbC" & ASCII.LF &
+           "KIYVdqLHpUkbDS/EyMMEUiguhDzQ/EpahN9/XhMmTe66bC1sS3kux6CgD2N3DV4a" & ASCII.LF &
+           "xjnR2hKfAgMBAAECggEABe1JCa1JsB46GHgZA0erF+siJJyS4u9yGUKdcWz/BY0R" & ASCII.LF &
+           "xLzxYl/tUTOyiPNrAdfR1JL9YsULb/7CR8wcwWjBKcKbxmBA1F8H5n6HhTH5xO1M" & ASCII.LF &
+           "Cp2/ZwxVM7pQejAnWTOerk7UCZHqoRqk4U2KkCLeKsHlzjrvuacgMbIXYZjuNOex" & ASCII.LF &
+           "nkAz0OFf4ogHiplsSBsA7oeL34ZDlg/QFHlss531Mo5WESJEwVhe1kW4vhW9NyOI" & ASCII.LF &
+           "lFpBAfs8Xr7PEL8XEoIagTNi3h3SR8QtReSfflWrSuUPCHQ4GpFs2EnUb/7OGrAH" & ASCII.LF &
+           "RynjnZ0yNEtcYwrei0wPjdizlGpTvIAHIlsOuzaaAQKBgQDj+p1vdDML8v1o8SyF" & ASCII.LF &
+           "+0P7d4cTwNaWoZQD95oaaO4Rj2GTvxJLoVF0/LnyEtuyFLQsKccP+4/mfYuV6n4E" & ASCII.LF &
+           "Q9qkQdgXnHRhr1tArLQ9b7s9UCsE2ShxbQlgestNM06oW+keE3nvGCUX6xEP1KhI" & ASCII.LF &
+           "yrHIWzRau4UN32LgGAxxue26wwKBgQC8Q/CP0VmqtA7KXwgf6nc8xLg50zzN2uAg" & ASCII.LF &
+           "aR7zxZ4KYFkHs5wcpMJSpMu5n+w0zbApMtLBw4D+kILY4/3bJZ9NTx1Ml7+TnfSm" & ASCII.LF &
+           "vTNVwc1tLvPdoyAV0FR9C0OuZ2dK7BZ93pq4afYsN0ODfmwG9JVPM4wLKV5LpQpE" & ASCII.LF &
+           "dysqDW7y9QKBgETiQpOcjpf7san1xTgudZoTwZKsX6pf4/NW6w8zyUsxAZC82PBV" & ASCII.LF &
+           "K+GnQx/rpsomC1KUxPsFTbOdF4ISukTbo8KhyoNH2LpzW6UtCcDOc8rQ4E60ts2e" & ASCII.LF &
+           "3ohyUd9fs1KXgtZ9mAgwSXTyp9MatEZaSGF7fVQ0+Lz6VEvVuFzciwI1AoGBAJLu" & ASCII.LF &
+           "QzU7IkwDsvdmK6UdDGo07cLThcTzabBh2nJObQWUJGfKWbBRNgfh7c21blfXoADH" & ASCII.LF &
+           "VY0709TZXAWCCoGaXzWq5Sb919qRkHsBdqsbUgRAfLshsMzVhtsAi5X1xbvHfdZG" & ASCII.LF &
+           "gWIj8KiZiOt7Izxabp0dkdK0Oo+3AshkaR+s1EZxAoGBAKqCwAIH+HU0YF7MmjK0" & ASCII.LF &
+           "lJKGNKoy7WhxA4RESQkWv5Zet9i0sqPlz5ajKDZRcJBWBaxLIZo9oolXUlJltdfN" & ASCII.LF &
+           "5kgKVRcPV00ThGuuZKUHpSURmZS+iP0i6Rrx51ZKdb/T+Jf0CU2vPauaxcZ17ekc" & ASCII.LF &
+           "k3VQLvwKPdHckJ89GRA83oLh" & ASCII.LF &
+           "-----END PRIVATE KEY-----";
          Item : ID.Local_Identity;
          St   : ID.Identity_Status;
       begin
@@ -1742,8 +1730,6 @@ package body Tests_Encodings is
                 "a certificate offered as a key is refused");
       end;
    end Check_Identities;
-
-
 
    --  Encrypted PKCS#8, which is how a private key is usually stored when it
    --  is stored at all.
@@ -1899,8 +1885,6 @@ package body Tests_Encodings is
                 & "than read as though it were plain");
       end;
    end Check_PKCS8_Encrypted;
-
-
 
    --  Reading a PKCS#12 bundle, which this crate could write and not read --
    --  the kind of asymmetry that leaves a caller unable to check what it just

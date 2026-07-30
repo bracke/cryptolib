@@ -48,9 +48,11 @@ predecessor.
   after it; now each check is a test of its own, a failure names itself, and
   the rest of the suite still runs.
 * The style and warning bar is enforced rather than printed: the preflight
-  builds `--validation` first, where `-gnatwe` makes every warning and style
-  breach an error. Alire's `release` profile carries no warning or style
-  switches at all, so a release build had never had an opinion about either.
+  builds the library and then the suite with `--validation`, where `-gnatwe`
+  makes every warning and style breach an error. Alire's `release` profile
+  carries no warning or style switches at all, so a release build had never had
+  an opinion about either; switching the gate on found three breaches in the
+  library and 129 in the suite.
 * Release preflight (`tools/bin/check_release_ready`): a forced build, the
   constant-time check, every per-OS backend, the test suite, the Alire manifest,
   the test suite's own shape, the README examples, and GNATdoc tags. CI runs it.

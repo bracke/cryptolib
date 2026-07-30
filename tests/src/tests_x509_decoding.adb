@@ -76,8 +76,6 @@ package body Tests_X509_Decoding is
    use type CryptoLib.Certificates.Certificate_Status;
    use type Interfaces.Unsigned_32;
 
-
-
    --  Decoding a certificate this crate has just issued, end to end: PEM
    --  armour off, DER in, fields out. The CA is P-384 because that exercises
    --  the EC parameter path -- the curve is named beside the algorithm rather
@@ -342,8 +340,6 @@ package body Tests_X509_Decoding is
       end;
    end Check_X509_Decode;
 
-
-
    --  The extensions that decide what a certificate is for. Every expected
    --  value here was read off "openssl x509 -text" for the same certificate
    --  before being written down.
@@ -488,7 +484,6 @@ package body Tests_X509_Decoding is
                 "and names no responder");
       end;
    end Check_X509_Access_Locations;
-
 
    --  An extension that appears twice, and extensions on a certificate whose
    --  version does not admit them. Both are ways of writing a certificate
@@ -635,7 +630,6 @@ package body Tests_X509_Decoding is
       end;
    end Check_Certificate_Ambiguity;
 
-
    --  A serial number names a certificate. A revocation names a certificate
    --  by issuer and serial and by nothing else, so two certificates from one
    --  CA sharing a serial cannot be revoked apart: revoking either revokes
@@ -724,7 +718,6 @@ package body Tests_X509_Decoding is
                 "and minimally encoded, with no padding octet");
       end;
    end Check_Serial_Numbers;
-
 
    --  A certificate is valid from when it was issued, for as long as the
    --  caller asked. The window used to be two literals in the source, so
@@ -818,7 +811,6 @@ package body Tests_X509_Decoding is
       end;
    end Check_Validity_Window;
 
-
    --  A certificate says which key it belongs to and which key signed it.
    --
    --  RFC 5280 requires both -- subjectKeyIdentifier in every CA
@@ -895,7 +887,6 @@ package body Tests_X509_Decoding is
                 "and a self-signed CA points at its own key");
       end;
    end Check_Key_Identifiers;
-
 
    --  A certificate longer than 65_535 octets.
    --
@@ -998,7 +989,6 @@ package body Tests_X509_Decoding is
          end;
       end;
    end Check_Large_Certificate;
-
 
    --  A certificate whose serial number is absurd.
    --
@@ -1175,7 +1165,6 @@ package body Tests_X509_Decoding is
       end;
    end Check_Oversized_Serial;
 
-
    --  One comparison for a serial number, shared by both revocation paths.
    --
    --  A serial reaches a revocation check from two directions -- the
@@ -1221,7 +1210,6 @@ package body Tests_X509_Decoding is
       Check (not CryptoLib.X509.Same_Serial (Nothing, S ([16#01#])),
              "and an empty one is not a number at all");
    end Check_Serial_Comparison;
-
 
    --  A certificate must not outlive the one that signed it.
    --
@@ -1347,7 +1335,6 @@ package body Tests_X509_Decoding is
              & "not one cut back to the moment of issue");
    end Check_Validity_Not_Past_Issuer;
 
-
    --  A date that does not exist is not a time.
    --
    --  The day was checked against 31 and no further, so the 31st of
@@ -1407,7 +1394,6 @@ package body Tests_X509_Decoding is
       Check (Reads ("20260430000000Z"), "so is the 30th of April");
       Check (Reads ("20261231235959Z"), "and the last second of a year");
    end Check_Impossible_Dates;
-
 
    --  A statement that never says when it expires does not last for ever.
    --
@@ -1594,7 +1580,6 @@ package body Tests_X509_Decoding is
       end;
    end Check_Undated_Statement_Ages;
 
-
    procedure Check_X509_Extensions is
       use type CryptoLib.ASN1.Errors.Decode_Status;
       use type CryptoLib.PEM.Decode_Status;
@@ -1726,8 +1711,6 @@ package body Tests_X509_Decoding is
                 "a name past the end has no octets");
       end;
    end Check_X509_Extensions;
-
-
 
    --  Distinguished names taken apart rather than flattened.
    --
@@ -1876,8 +1859,6 @@ package body Tests_X509_Decoding is
              "the encoded subject and issuer differ, which is the comparison "
              & "that counts");
    end Check_X509_Names;
-
-
 
    --  The armour handling behind the issuance API, now that it goes through
    --  the strict decoder.

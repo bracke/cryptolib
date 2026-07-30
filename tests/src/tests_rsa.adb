@@ -76,7 +76,6 @@ package body Tests_RSA is
    use type CryptoLib.Certificates.Certificate_Status;
    use type Interfaces.Unsigned_32;
 
-
    --  A key too small to be worth checking the signature of.
    --
    --  RSA is the one key algorithm here whose strength does not come with
@@ -201,7 +200,6 @@ package body Tests_RSA is
                 & XV.Failure_Image (Verdict.Failure));
       end;
    end Check_Weak_RSA_Key;
-
 
    --  RSA signing: the private-key half of a package that was verification
    --  only. The key is one OpenSSL generated; the two deterministic vectors
@@ -1346,43 +1344,41 @@ package body Tests_RSA is
       end;
    end Check_RSA_Signing;
 
-
-
    --  RSA PKCS#1 v1.5 verification, against signatures OpenSSL produced and
    --  against a forgery it would take a careless verifier to accept.
    procedure Check_RSA_Verify is
 
-   RSA_KAT_Modulus : constant String :=
-     "eda66e8e74fd6e04e99282f52f13153b856a59cf6be7b5bddd5473b54eacac4c43e60b2d5bd98e0aa8559439fe" &
-     "a7d24389e4cb59a782909127d5661b4ceca2b51ee802688ad9bbaf77871706c55ec8b09343768f6eb6240db647" &
-     "4e6dcf4f639559455b94010ed58244a5eccc9066ef4daaac62cbcf3af938a20e8da458a18e8d78edf75ff4d65f" &
-     "3eb3bade68f4a0e80848ac60edec51199ecb3490b662e04e692dac129919af92e83bd88f658bd7e48c610845ae" &
-     "d7c86b68827de33e31be15cc13ccdda683c64d015919d47da0e552860295101086c547e2a6aaeaba65d844ddaf" &
-     "5658dc61b0a97187fb0fa2b1a7176d1028f70739d67a5ae9ae410c4b60befb";
+      RSA_KAT_Modulus : constant String :=
+        "eda66e8e74fd6e04e99282f52f13153b856a59cf6be7b5bddd5473b54eacac4c43e60b2d5bd98e0aa8559439fe" &
+        "a7d24389e4cb59a782909127d5661b4ceca2b51ee802688ad9bbaf77871706c55ec8b09343768f6eb6240db647" &
+        "4e6dcf4f639559455b94010ed58244a5eccc9066ef4daaac62cbcf3af938a20e8da458a18e8d78edf75ff4d65f" &
+        "3eb3bade68f4a0e80848ac60edec51199ecb3490b662e04e692dac129919af92e83bd88f658bd7e48c610845ae" &
+        "d7c86b68827de33e31be15cc13ccdda683c64d015919d47da0e552860295101086c547e2a6aaeaba65d844ddaf" &
+        "5658dc61b0a97187fb0fa2b1a7176d1028f70739d67a5ae9ae410c4b60befb";
 
-   RSA_KAT_Signature : constant String :=
-     "530c2f01750f7144cebf71adc28e85fd4a260df4ae04010cd02a6564ed6fe91ba0b079ecb8d71338d74de969a3" &
-     "2a8e24a8d5136f091aef96928e1c1e1305b0bee914287828841735c370700a634dbab47a879b3c83e8006e699d" &
-     "66d392739dd74d2bad567215dfae6b3ba4b9abd1590b3be5f55de3296e52a1895beffa7f98a8a06f2164ca2d0c" &
-     "35a85635c5c01636431a8207815f1389bf99980f55c3941c26af9bd3a8bf50c7cd0612bdd897f7fefd4ad97db9" &
-     "a1209301672004aad1533160cb4ce7c16af6bf721b6d3defe03d874a872a3da330eec797786b3f156565391bd6" &
-     "f3ed70db44b77a171527c94ef57ce79a3ec518e9c78e4bcfe69293dfe30225";
+      RSA_KAT_Signature : constant String :=
+        "530c2f01750f7144cebf71adc28e85fd4a260df4ae04010cd02a6564ed6fe91ba0b079ecb8d71338d74de969a3" &
+        "2a8e24a8d5136f091aef96928e1c1e1305b0bee914287828841735c370700a634dbab47a879b3c83e8006e699d" &
+        "66d392739dd74d2bad567215dfae6b3ba4b9abd1590b3be5f55de3296e52a1895beffa7f98a8a06f2164ca2d0c" &
+        "35a85635c5c01636431a8207815f1389bf99980f55c3941c26af9bd3a8bf50c7cd0612bdd897f7fefd4ad97db9" &
+        "a1209301672004aad1533160cb4ce7c16af6bf721b6d3defe03d874a872a3da330eec797786b3f156565391bd6" &
+        "f3ed70db44b77a171527c94ef57ce79a3ec518e9c78e4bcfe69293dfe30225";
 
-   RSA_E3_Modulus : constant String :=
-     "c7622357e8a021f789d17baaf52775a78c959252e3692adce05c4461c90892b7f59b95d2a074ce2d3d89c6dbe4" &
-     "9abe665cb0349b2f6d44b51366cf770902e5638c254b9425ebd5d6b4d8683274f7f883a77f271084ae75fe9c5c" &
-     "bbe4564df5eca7fc6b4bd3920eeaef9c42d4fe8169856df20532a98a0040638c4a9915e7f23cf75f69c6b061df" &
-     "679b707b7610db8000ebf84dd94efe2e1ebc5b199cf7a6d900bb5c858bb68c93be728b76477c1108de6d252a65" &
-     "ed71e99294bbe6f5b8feb423b2b8a80abad46a71ae8eddfa51ade3335fac5dedecb551928750dd77c2e10be73e" &
-     "1fea9e8683eab0a5c67fb02826dc4cd10f6ff507fc4320ecbedf835b0f6937";
+      RSA_E3_Modulus : constant String :=
+        "c7622357e8a021f789d17baaf52775a78c959252e3692adce05c4461c90892b7f59b95d2a074ce2d3d89c6dbe4" &
+        "9abe665cb0349b2f6d44b51366cf770902e5638c254b9425ebd5d6b4d8683274f7f883a77f271084ae75fe9c5c" &
+        "bbe4564df5eca7fc6b4bd3920eeaef9c42d4fe8169856df20532a98a0040638c4a9915e7f23cf75f69c6b061df" &
+        "679b707b7610db8000ebf84dd94efe2e1ebc5b199cf7a6d900bb5c858bb68c93be728b76477c1108de6d252a65" &
+        "ed71e99294bbe6f5b8feb423b2b8a80abad46a71ae8eddfa51ade3335fac5dedecb551928750dd77c2e10be73e" &
+        "1fea9e8683eab0a5c67fb02826dc4cd10f6ff507fc4320ecbedf835b0f6937";
 
-   RSA_E3_Forged_Signature : constant String :=
-     "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" &
-     "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" &
-     "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" &
-     "00000000000000000000000000000000000000000000000000000000000000000000000032cbfd4a7adc790558" &
-     "3d767520f51640759176d37826f2ef63ae3dc7ac54f8f7785a2f2b27eb80ed15f3e4067a188e0274f45efeecbd" &
-     "de6b69cddc76507c062d672d288ee2769c329c82aa34096594dd9184bdf260";
+      RSA_E3_Forged_Signature : constant String :=
+        "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" &
+        "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" &
+        "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" &
+        "00000000000000000000000000000000000000000000000000000000000000000000000032cbfd4a7adc790558" &
+        "3d767520f51640759176d37826f2ef63ae3dc7ac54f8f7785a2f2b27eb80ed15f3e4067a188e0274f45efeecbd" &
+        "de6b69cddc76507c062d672d288ee2769c329c82aa34096594dd9184bdf260";
 
       Message : constant Ada.Streams.Stream_Element_Array :=
         Bytes_From_String ("cryptolib rsa pkcs1 v1.5 known answer");
@@ -1487,8 +1483,6 @@ package body Tests_RSA is
                 "a cube-root forgery with a well-formed prefix is refused");
       end;
    end Check_RSA_Verify;
-
-
 
    --  RSASSA-PSS, which states its hash and salt length in its parameters
    --  rather than in its name -- so a verifier that cannot read the

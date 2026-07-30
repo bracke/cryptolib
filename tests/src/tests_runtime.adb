@@ -76,7 +76,6 @@ package body Tests_Runtime is
    use type CryptoLib.Certificates.Certificate_Status;
    use type Interfaces.Unsigned_32;
 
-
    --  What happens when there is no randomness.
    --
    --  The RNG is documented to fail closed: no OS source means
@@ -156,7 +155,6 @@ package body Tests_Runtime is
       end;
    end Check_Random_Fails_Closed;
 
-
    --  The comparison every tag check goes through.
    --
    --  Its shape is held to a jump budget by check_constant_time, so it
@@ -195,7 +193,6 @@ package body Tests_Runtime is
       Check (CryptoLib.Constant_Time.Equal (Empty, Empty),
              "two empty values are equal, which is what the contract says");
    end Check_Constant_Time_Equal;
-
 
    --  The packet buffer's ceiling, one byte at a time.
    --
@@ -249,7 +246,6 @@ package body Tests_Runtime is
              "and Set replaces the contents rather than adding to them, got"
              & Natural'Image (CryptoLib.Buffers.Length (Item)));
    end Check_Buffer_Ceiling;
-
 
    --  HKDF (RFC 5869).
    --
@@ -430,7 +426,6 @@ package body Tests_Runtime is
       end;
    end Check_Consumer_Entry_Points;
 
-
    --  The manifests this crate publishes about itself, and a handful of small
    --  public helpers that nothing else in the suite reached.
    procedure Check_Manifests_And_Helpers is
@@ -608,7 +603,6 @@ package body Tests_Runtime is
       end;
    end Check_Manifests_And_Helpers;
 
-
    procedure Check_Zero_On_Failure is
       Pattern : constant Ada.Streams.Stream_Element := 16#A5#;
 
@@ -758,7 +752,6 @@ package body Tests_Runtime is
          Check (All_Zero (Out_Buf), "HKDF zeroes its output past the ceiling");
       end;
    end Check_Zero_On_Failure;
-
 
    --  CryptoLib.Secure_Wipe zeroizes a buffer through volatile stores that the
    --  optimizer cannot elide (used to scrub key material before it leaves scope).

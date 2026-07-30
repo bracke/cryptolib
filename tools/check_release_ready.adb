@@ -112,7 +112,13 @@ begin
    --
    --  This runs first because a style breach should be the cheapest failure to
    --  get, not one found after a full test run.
+   --
+   --  The suite gets the same treatment. Gating the library alone would have
+   --  been half a gate: the suite is the larger body of source, and when this
+   --  was first switched on it had 129 breaches to the library's three.
    Step ("build cryptolib with warnings as errors", "alr build --validation -- -f");
+   Step_In ("build the suite with warnings as errors", "tests",
+            "alr build --validation -- -f");
 
    --  Forced, both of them. Everything after this inspects what the build
    --  produced -- the test binary's behaviour, and the library's generated

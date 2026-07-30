@@ -56,9 +56,10 @@ claims are meant to be checkable against the code.
 - Release/verification tooling lives in the `cryptolib_tools` crate: `(cd tools && alr build)`
   (depends on the shared `project_tools` at `../../project_tools`). Run
   `tools/bin/check_release_ready` from the crate root for the full preflight:
-  a forced release build, the constant-time check, a semantic compile of all
-  three per-OS backends, a forced library build, the test suite, the Alire
-  manifest, the test suite's own shape, the README examples, and GNATdoc tags.
+  the two warnings-as-errors builds below, a forced release build, the
+  constant-time check, a semantic compile of all three per-OS backends, a
+  forced library build, the test suite, the Alire manifest, the test suite's
+  own shape, the README examples, and GNATdoc tags.
 - **CI runs that preflight**, not a subset — `.github/workflows/ci.yml` checks
   out `project_tools` beside this repo, builds the tools crate, and runs it. So
   the checks above are enforced on every push, and a change that only passes
@@ -95,11 +96,16 @@ claims are meant to be checkable against the code.
     `-gnaty` set. Reports style breaches, but only reports them.
   - `validation` — adds `-gnatwe` on top, which makes every warning and style
     breach an error.
-- The preflight's first step is `alr build --validation -- -f`, so that is where
-  the bar bites. Until that step existed the library had accumulated three
-  unnoticed breaches — two double blank lines and a 122-column line against a
-  120 limit — because nothing ever built in a profile that failed on them.
-  Run it yourself before proposing a change: `alr build --validation -- -f`.
+- The preflight's first two steps build the library and then the suite with
+  `alr build --validation -- -f`, so that is where the bar bites. Until they
+  existed the library had accumulated three unnoticed breaches and the suite
+  129, because nothing ever built in a profile that failed on them. Run both
+  yourself before proposing a change:
+
+  ```sh
+  alr build --validation -- -f
+  (cd tests && alr build --validation -- -f)
+  ```
 - What the zero-warning bar does *not* cover, because `cryptolib.gpr` and
   `tests/tests.gpr` both end their switch list with `-gnatwU` (the tools and
   examples projects do not): unused entities, including unused subprograms and

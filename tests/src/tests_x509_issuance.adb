@@ -76,7 +76,6 @@ package body Tests_X509_Issuance is
    use type CryptoLib.Certificates.Certificate_Status;
    use type Interfaces.Unsigned_32;
 
-
    procedure Check_Certificates is
       CA_Cert   : Ada.Strings.Unbounded.Unbounded_String;
       CA_Key    : Ada.Strings.Unbounded.Unbounded_String;
@@ -707,7 +706,6 @@ package body Tests_X509_Issuance is
          "PKCS#12 bundle is DER sequence");
    end Check_Certificates;
 
-
    procedure Check_P384_Local_CA is
       Cert, Key : Ada.Strings.Unbounded.Unbounded_String;
       Status    : CryptoLib.Certificates.Certificate_Status;
@@ -751,7 +749,6 @@ package body Tests_X509_Issuance is
             "P-384 private key names secp384r1");
       end;
    end Check_P384_Local_CA;
-
 
    --  An Ed448 certificate, which is the point of having the primitive.
    --

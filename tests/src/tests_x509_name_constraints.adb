@@ -76,7 +76,6 @@ package body Tests_X509_Name_Constraints is
    use type CryptoLib.Certificates.Certificate_Status;
    use type Interfaces.Unsigned_32;
 
-
    --  A depth restriction on a subtree, silently skipped.
    --
    --  GeneralSubtree is SEQUENCE { base, minimum [0] DEFAULT 0,
@@ -224,7 +223,6 @@ package body Tests_X509_Name_Constraints is
                 & "name, got " & XV.Failure_Image (Verdict.Failure));
       end;
    end Check_Name_Constraint_Depth_Fields;
-
 
    --  A constraint that could never have reached this certificate.
    --
@@ -377,8 +375,6 @@ package body Tests_X509_Name_Constraints is
                 & XV.Failure_Image (Verdict.Failure));
       end;
    end Check_Unapplicable_Name_Constraint;
-
-
 
    --  A constrained CA, and the certificates it may and may not certify.
    --
@@ -1043,7 +1039,9 @@ package body Tests_X509_Name_Constraints is
 
       type Which is (Inside, Outside, Lookalike, CN_Outside, CN_Inside,
                      CN_Org, DN_Inside, DN_Outside, URI_Inside,
-                     URI_Outside, URI_Userinfo, M_HOST_OK, M_HOST_NO, M_DOM_OK, M_DOM_NO, M_BOX_OK, M_BOX_NO, M_Legacy, Email);
+                     URI_Outside, URI_Userinfo, M_HOST_OK, M_HOST_NO,
+                     M_DOM_OK, M_DOM_NO, M_BOX_OK, M_BOX_NO, M_Legacy,
+                     Email);
 
       type Constrained_Path (Kind : Which) is limited new XV.Path_Source
         with null record;

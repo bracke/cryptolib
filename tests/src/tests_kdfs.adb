@@ -76,7 +76,6 @@ package body Tests_KDFs is
    use type CryptoLib.Certificates.Certificate_Status;
    use type Interfaces.Unsigned_32;
 
-
    procedure Check_PBKDF2_SHA1 is
       Actual : constant Ada.Streams.Stream_Element_Array :=
         CryptoLib.Macs.PBKDF2_HMAC_SHA1
@@ -88,7 +87,6 @@ package body Tests_KDFs is
    begin
       Check (Actual = Expected, "PBKDF2-HMAC-SHA1 RFC vector");
    end Check_PBKDF2_SHA1;
-
 
    procedure Check_PBKDF2_SHA2 is
       Actual_256 : constant Ada.Streams.Stream_Element_Array :=
@@ -123,7 +121,6 @@ package body Tests_KDFs is
          "PBKDF2-HMAC-SHA384 derives output");
    end Check_PBKDF2_SHA2;
 
-
    procedure Check_PBKDF1 is
       Salt : constant Ada.Streams.Stream_Element_Array :=
         Bytes_From_String ("12345678");
@@ -150,7 +147,6 @@ package body Tests_KDFs is
         (Prefix_MD5 = Expected_MD5 (1 .. 8),
          "PBKDF1-MD5 bounded prefix output");
    end Check_PBKDF1;
-
 
    procedure Check_PKCS12_KDF_SHA1 is
       Salt : constant Ada.Streams.Stream_Element_Array :=
@@ -183,7 +179,6 @@ package body Tests_KDFs is
          "PKCS12KDF-SHA1 iteration vector");
    end Check_PKCS12_KDF_SHA1;
 
-
    procedure Check_Scrypt_SHA256 is
       Actual : constant Ada.Streams.Stream_Element_Array :=
         CryptoLib.Macs.Scrypt_SHA256
@@ -206,7 +201,6 @@ package body Tests_KDFs is
       Check (Actual = Expected, "scrypt-SHA256 vector");
    end Check_Scrypt_SHA256;
 
-
    procedure Check_Seven_Zip_AES_SHA256_KDF is
       Password : constant Ada.Streams.Stream_Element_Array (1 .. 2) :=
         [16#70#, 16#00#];
@@ -223,7 +217,6 @@ package body Tests_KDFs is
       Check (Actual = Expected, "7zAES SHA-256 KDF vector");
    end Check_Seven_Zip_AES_SHA256_KDF;
 
-
    procedure Check_EVP_Bytes_To_Key_MD5 is
       Actual : constant Ada.Streams.Stream_Element_Array :=
         CryptoLib.Macs.EVP_Bytes_To_Key_MD5
@@ -237,7 +230,6 @@ package body Tests_KDFs is
         (Actual'Length = 32 and then Actual /= [Actual'Range => 0],
          "EVP_BytesToKey-MD5 derives output");
    end Check_EVP_Bytes_To_Key_MD5;
-
 
    --  These decide what a certificate may contain, and they moved here from a
    --  caller that had its own copy of the rules. Both copies could not have
@@ -266,7 +258,6 @@ package body Tests_KDFs is
             Output_Length => 20) = Expected,
          "PKCS#12 MAC key matches OpenSSL for a password as typed");
    end Check_PKCS12_Mac_Key;
-
 
    --  How much work a password has to be put through to open a bundle.
    --
@@ -348,7 +339,6 @@ package body Tests_KDFs is
       end;
    end Check_PKCS12_Work_Factor;
 
-
    --  What a bundle costs to open is a number the bundle chooses.
    --
    --  A PKCS#12 file states its own iteration counts, twice -- once for the
@@ -416,7 +406,6 @@ package body Tests_KDFs is
          end;
       end;
    end Check_PKCS12_Work_Ceiling;
-
 
    --  bcrypt_pbkdf, which nothing here was checking.
    --
@@ -498,7 +487,6 @@ package body Tests_KDFs is
                 "an empty passphrase is refused");
       end;
    end Check_Bcrypt_PBKDF;
-
 
    --  RFC 8446 7.1 key-schedule derivations, against RFC 8448's published
    --  handshake values.
@@ -655,7 +643,6 @@ package body Tests_KDFs is
                 "Derive-Secret refuses an output that is not the hash's width");
       end;
    end Check_TLS13_KDF;
-
 
    procedure Check_HKDF is
       package HK renames CryptoLib.HKDF;
@@ -846,7 +833,6 @@ package body Tests_KDFs is
                 "two contexts over one secret give unrelated keys");
       end;
    end Check_HKDF;
-
 
    --  PBKDF2-HMAC-SHA1 with a high iteration count (RFC 6070, c = 4096) to
    --  exercise the iteration/XOR-accumulation loop (previously only c = 1).

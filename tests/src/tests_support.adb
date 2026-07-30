@@ -76,7 +76,6 @@ package body Tests_Support is
    use type CryptoLib.Certificates.Certificate_Status;
    use type Interfaces.Unsigned_32;
 
-
    --  The whole suite asserts through here, so this one delegation is what
    --  makes every check an AUnit assertion: a failure is reported against the
    --  routine that raised it and the rest of the suite still runs.
@@ -84,7 +83,6 @@ package body Tests_Support is
    begin
       AUnit.Assertions.Assert (Condition, Message);
    end Check;
-
 
    function Bytes_From_String
      (Value : String) return Ada.Streams.Stream_Element_Array
@@ -100,7 +98,6 @@ package body Tests_Support is
       return Result;
    end Bytes_From_String;
 
-
    function Nibble_From_Hex (C : Character) return Ada.Streams.Stream_Element is
      (case C is
          when '0' .. '9' =>
@@ -112,7 +109,6 @@ package body Tests_Support is
            Ada.Streams.Stream_Element
              (Character'Pos (C) - Character'Pos ('A') + 10),
          when others => 0);
-
 
    function Bytes_From_Hex
      (Value : String)
@@ -133,7 +129,6 @@ package body Tests_Support is
       return Result;
    end Bytes_From_Hex;
 
-
    function Sequence_Data
      (Length : Natural)
       return Ada.Streams.Stream_Element_Array
@@ -148,7 +143,6 @@ package body Tests_Support is
       end loop;
       return Result;
    end Sequence_Data;
-
 
    --  The certificate NSS refused was refused for its key: certutil would not
    --  import an Ed25519 certificate at all, so a CA built that way is trusted
@@ -207,7 +201,6 @@ package body Tests_Support is
       end loop;
       return Ada.Strings.Unbounded.To_String (Result);
    end Decode_PEM_Body;
-
 
    function Index_Of (Haystack : String; Needle : String) return Natural is
    begin

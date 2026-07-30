@@ -76,7 +76,6 @@ package body Tests_Curves is
    use type CryptoLib.Certificates.Certificate_Status;
    use type Interfaces.Unsigned_32;
 
-
    --  d = 1 multiplies the base point by one, so the public point is the
    --  generator itself -- a value published in FIPS 186-4, not one this code
    --  produced. Signing was interoperable long before the public point could
@@ -126,7 +125,6 @@ package body Tests_Curves is
         (Derived = Point,
          "ECDSA P-384 keypair public point matches its own scalar");
    end Check_ECDSA_P384_Public_Key;
-
 
    --  Verification closes the loop the signer left open: signing was
    --  interoperable, but nothing here could check a signature, so an ECDSA CSR
@@ -182,7 +180,6 @@ package body Tests_Curves is
       end;
    end Check_ECDSA_P384_Verify;
 
-
    procedure Check_ECDSA_P384_P521_Signing is
       Message : constant Ada.Streams.Stream_Element_Array :=
         Bytes_From_String ("cryptolib ecdsa signing");
@@ -206,7 +203,6 @@ package body Tests_Curves is
       Check (R521 /= [R521'Range => 0], "ECDSA P-521 raw signing emits r");
       Check (S521 /= [S521'Range => 0], "ECDSA P-521 raw signing emits s");
    end Check_ECDSA_P384_P521_Signing;
-
 
    --  A public point that is not on the curve.
    --
@@ -301,7 +297,6 @@ package body Tests_Curves is
       end;
    end Check_Off_Curve_Key;
 
-
    --  One key, one encoding.
    --
    --  RFC 8032 5.1.3 fails decoding when x = 0 and the sign bit is set:
@@ -337,7 +332,6 @@ package body Tests_Curves is
              /= CryptoLib.Errors.Ok,
              "the same key with the sign bit set is refused");
    end Check_Ed25519_Encoding;
-
 
    --  Ed448 (RFC 8032 PureEdDSA over edwards448).
    --
@@ -514,7 +508,6 @@ package body Tests_Curves is
       end;
    end Check_Ed448;
 
-
    --  The X25519 entry point callers actually use.
    --
    --  The suite reached the primitive through Compute_Raw, which takes a raw
@@ -563,7 +556,6 @@ package body Tests_Curves is
       CryptoLib.Curve25519.Clear (A_Private);
       CryptoLib.Curve25519.Clear (B_Private);
    end Check_X25519_Shared_Secret;
-
 
    --  The ECDSA entry points that pick their own digest.
    --
@@ -637,7 +629,6 @@ package body Tests_Curves is
              /= CryptoLib.Errors.Ok,
              "and neither verifies over something else");
    end Check_ECDSA_Raw_Entry_Points;
-
 
    --  ECDH on the NIST prime curves. The agreement itself is checked against
    --  NIST CAVP and against secrets OpenSSL derived; the refusals are checked
@@ -840,8 +831,6 @@ package body Tests_Curves is
       end loop;
    end Check_ECDH;
 
-
-
    --  ECDSA verification across curves and digests.
    --
    --  Two of these three vectors deliberately pair a curve with a digest that
@@ -880,7 +869,6 @@ package body Tests_Curves is
       EC_P384_S : constant String :=
         "99f0af5ad1ad517278c89ec6be67b850d1a349e88e47d794394ec49f898c92f1a9398040f1c220d8256cfe5df0" &
         "de83e3";
-
 
       Message : constant Ada.Streams.Stream_Element_Array :=
         Bytes_From_String ("cryptolib ecdsa known answer");
@@ -962,8 +950,6 @@ package body Tests_Curves is
       end;
    end Check_ECDSA_Curves;
 
-
-
    --  A private scalar is read by its width, not by its first byte.
    --
    --  An SSH mpint pads a value whose top bit is set with a leading zero, so
@@ -1026,7 +1012,6 @@ package body Tests_Curves is
       end;
    end Check_ECDSA_Scalar_Encodings;
 
-
    --  Ed25519 sign/verify (RFC 8032-style deterministic vector).
    procedure Check_Ed25519_Sign_Verify is
    begin
@@ -1087,7 +1072,6 @@ package body Tests_Curves is
       end;
    end Check_Ed25519_Sign_Verify;
 
-
    --  X25519 RFC 7748 section 5.2 known-answer vectors.
    procedure Check_X25519_Vectors is
    begin
@@ -1119,7 +1103,6 @@ package body Tests_Curves is
             "X25519 RFC 7748 KAT vector 2");
       end;
    end Check_X25519_Vectors;
-
 
    --  ECDSA deterministic (RFC 6979) signing.  P-384 is the authoritative
    --  RFC 6979 A.2.5 vector; P-521 is cross-verified with an external library.
@@ -1171,7 +1154,6 @@ package body Tests_Curves is
                 "ECDSA P-521 RFC 6979 deterministic KAT");
       end;
    end Check_ECDSA_P384_Deterministic;
-
 
    --  P-256 signing, against RFC 6979 A.2.5's own published r and s.
    --
@@ -1249,7 +1231,6 @@ package body Tests_Curves is
       end;
    end Check_ECDSA_P256_Deterministic;
 
-
    --  P-256 key generation: the pair it returns must actually be a pair, and
    --  must be usable by the signer.
    procedure Check_ECDSA_P256_Keygen is
@@ -1283,7 +1264,6 @@ package body Tests_Curves is
                 "ECDSA P-256 fresh keypair round-trips");
       end;
    end Check_ECDSA_P256_Keygen;
-
 
    --  Negative / fail-closed tests: low-order X25519 point and AEAD tamper.
    procedure Check_Low_Order_X25519_Point is

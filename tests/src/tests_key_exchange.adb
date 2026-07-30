@@ -76,7 +76,6 @@ package body Tests_Key_Exchange is
    use type CryptoLib.Certificates.Certificate_Status;
    use type Interfaces.Unsigned_32;
 
-
    --  A peer value that would make the shared secret worthless.
    --
    --  Group 16 rejects a public value outside (1, p-1): zero and one give a
@@ -122,7 +121,6 @@ package body Tests_Key_Exchange is
       Check (not Refuses (CryptoLib.Buffers.To_Array (Pub)),
              "as is a public value this crate generated itself");
    end Check_DH_Peer_Validation;
-
 
    --  Group 14, which nothing was checking, against arithmetic done
    --  elsewhere.
@@ -191,7 +189,6 @@ package body Tests_Key_Exchange is
              "and a peer value of one");
    end Check_DH_Group14;
 
-
    --  Group 1, the last of the four the table lists.
    --
    --  Pinned the same way as group 14 and for the same reason: a round trip
@@ -251,7 +248,6 @@ package body Tests_Key_Exchange is
                (Fixed_Private, [1 => 1], Shared) /= CryptoLib.Errors.Ok,
              "and a peer value of one");
    end Check_DH_Group1;
-
 
    --  Each DH keypair generator, against the function that consumes what it
    --  produces.
@@ -325,7 +321,6 @@ package body Tests_Key_Exchange is
       One_Group ("group16", 16);
       One_Group ("group18", 18);
    end Check_DH_Generators;
-
 
    --  Which group a server may talk this client into.
    --
@@ -457,7 +452,6 @@ package body Tests_Key_Exchange is
              "and a proposal with no generator at all");
    end Check_Gex_Group_Selection;
 
-
    --  Which post-quantum method a name asks for.
    --
    --  ssh_lib does not carry a list of these names. It asks Is_Implemented
@@ -523,7 +517,6 @@ package body Tests_Key_Exchange is
              "the suffixed and bare sntrup names agree about everything that "
              & "decides the exchange");
    end Check_Hybrid_PQ_Names;
-
 
    --  ML-KEM's algebraic core. These are the pieces MLKEM768 is built from;
    --  none was reachable from the suite, so a fault in one would have shown
@@ -715,7 +708,6 @@ package body Tests_Key_Exchange is
       end;
    end Check_MLKEM_Core_Algebra;
 
-
    --  FIPS 203 ML-KEM-768 known-answer test.  Deterministic keygen from d || z
    --  and encaps from m, checked against the pq-crystals final ML-KEM reference
    --  (byte-identical to OpenSSH).  The 1184/2400/1088-byte ek/dk/ct are
@@ -794,7 +786,6 @@ package body Tests_Key_Exchange is
                 "mlkem-768 decaps shared secret FIPS 203 KAT");
       end;
    end Check_MLKEM768_Vectors;
-
 
    procedure Check_SNTRUP761_Vectors is
    begin
@@ -891,7 +882,6 @@ package body Tests_Key_Exchange is
                 "sntrup761 keygen/encaps/decaps roundtrip");
       end;
    end Check_SNTRUP761_Vectors;
-
 
    procedure Check_Modexp_And_DH_Group18 is
    begin

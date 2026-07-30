@@ -76,8 +76,6 @@ package body Tests_X509_Revocation is
    use type CryptoLib.Certificates.Certificate_Status;
    use type Interfaces.Unsigned_32;
 
-
-
    --  A revocation list made by OpenSSL, with a certificate genuinely
    --  revoked through "openssl ca -revoke".
    --  When a certificate was revoked, and why -- from a CRL and from an OCSP
@@ -414,7 +412,6 @@ package body Tests_X509_Revocation is
       end;
    end Check_Revocation_Details;
 
-
    procedure Check_X509_CRL is
       use type CryptoLib.ASN1.Errors.Decode_Status;
       use type CryptoLib.X509.Signatures.Verification_Result;
@@ -635,8 +632,6 @@ package body Tests_X509_Revocation is
                 & XV.Failure_Image (Verdict.Failure));
       end;
    end Check_X509_CRL;
-
-
 
    --  OCSP, against requests and responses OpenSSL produced.
    --
@@ -1216,8 +1211,6 @@ package body Tests_X509_Revocation is
                 "and is still accepted");
       end;
    end Check_OCSP;
-
-
 
    --  Revocation answered from material the caller already has, and judged
    --  for freshness -- which nothing was doing before. A statement made years

@@ -76,7 +76,6 @@ package body Tests_X509_Policies is
    use type CryptoLib.Certificates.Certificate_Status;
    use type Interfaces.Unsigned_32;
 
-
    --  RFC 5280 section 6.1 policy processing.
    --
    --  A policy identifier on its own asserts something and restricts nothing.
@@ -448,7 +447,6 @@ package body Tests_X509_Policies is
       end;
    end Check_Policy_Processing;
 
-
    --  What a policy says to a person reading it.
    --
    --  RFC 5280 4.2.1.4 defines two qualifiers: a pointer to the issuer's
@@ -584,7 +582,6 @@ package body Tests_X509_Policies is
                 & Natural'Image (Long_Set.Entries (1).Qualifiers (1).Length));
       end;
    end Check_Policy_Qualifiers;
-
 
    --  The search skips a path that cannot carry the policies.
    --
@@ -768,7 +765,6 @@ package body Tests_X509_Policies is
                 & XV.Failure_Image (Verdict.Failure));
       end;
    end Check_Policy_Aware_Path_Building;
-
 
    --  A self-issued certificate does not spend the policy allowances.
    --
@@ -1051,7 +1047,6 @@ package body Tests_X509_Policies is
              & XV.Failure_Image (Verdict (Wildcard, Other).Failure));
    end Check_Self_Issued_Policy_Allowance;
 
-
    --  A policy tree wider than this crate will hold.
    --
    --  The bound exists because the tree is built from certificates somebody
@@ -1208,7 +1203,6 @@ package body Tests_X509_Policies is
              "reported as a policy failure, got "
              & XV.Failure_Image (Verdict.Failure));
    end Check_Policy_Tree_Bound;
-
 
    --  A policy set is a set, at both ends.
    --
@@ -1367,7 +1361,6 @@ package body Tests_X509_Policies is
                 "and nothing about this reached a bound");
       end;
    end Check_Policy_Set_Is_A_Set;
-
 
    --  SkipCerts, read by hand and so read wrongly.
    --

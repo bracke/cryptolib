@@ -76,8 +76,6 @@ package body Tests_X509_Validation is
    use type CryptoLib.Certificates.Certificate_Status;
    use type Interfaces.Unsigned_32;
 
-
-
    --  Certificate signature verification, against the one implementation in
    --  the room that is not ours: the suite already links libcrypto so it can
    --  ask OpenSSL whether a chain we issued actually chains. Here the two are
@@ -272,7 +270,6 @@ package body Tests_X509_Validation is
              "Ed25519 is supported");
    end Check_X509_Verify;
 
-
    --  An algorithm this crate cannot verify says so.
    --
    --  "Could not check" and "the signature is bad" are different answers and
@@ -398,7 +395,6 @@ package body Tests_X509_Validation is
       end;
    end Check_Unsupported_Algorithm;
 
-
    --  Not verified is not the same as verified and wrong.
    --
    --  X509.Signatures answers with four different failures where a lesser
@@ -509,7 +505,6 @@ package body Tests_X509_Validation is
                         Absent)));
       end;
    end Check_Verification_Failure_Kinds;
-
 
    --  The chain checks nothing was asserting.
    --
@@ -751,7 +746,6 @@ package body Tests_X509_Validation is
              & XV.Failure_Image (Verdict (Rogue_Name).Failure));
    end Check_Chain_Constraint_Bypasses;
 
-
    --  A certificate that names one algorithm twice and disagrees with
    --  itself.
    --
@@ -838,8 +832,6 @@ package body Tests_X509_Validation is
              "while the same algorithm named consistently decodes, got "
              & CryptoLib.ASN1.Errors.Status_Image (Agreed_Status));
    end Check_Signature_Algorithm_Agreement;
-
-
 
    --  Path validation over chains this crate issues.
    --
@@ -1073,8 +1065,6 @@ package body Tests_X509_Validation is
       end;
    end Check_X509_Validation;
 
-
-
    --  Service identity matching. The interesting cases are all the ones that
    --  must NOT match: a wildcard reaching too far is how a certificate for
    --  one name gets used for another.
@@ -1296,8 +1286,6 @@ package body Tests_X509_Validation is
       end;
    end Check_X509_Identity;
 
-
-
    --  Purpose checks over the three profiles this crate issues, plus a CA
    --  and a certificate carrying no extensions at all.
    --
@@ -1504,8 +1492,6 @@ package body Tests_X509_Validation is
          end;
       end;
    end Check_X509_Purposes;
-
-
 
    --  Path building, and specifically the case that separates a builder that
    --  works from one that appears to.

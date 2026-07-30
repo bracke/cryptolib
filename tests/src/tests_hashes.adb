@@ -76,7 +76,6 @@ package body Tests_Hashes is
    use type CryptoLib.Certificates.Certificate_Status;
    use type Interfaces.Unsigned_32;
 
-
    procedure Expect_MD5
      (Data     : Ada.Streams.Stream_Element_Array;
       Expected : CryptoLib.Hashes.MD5_Digest;
@@ -88,7 +87,6 @@ package body Tests_Hashes is
          Check (Actual (Index) = Expected (Index), Label);
       end loop;
    end Expect_MD5;
-
 
    procedure Check_XXH3 is
       procedure Check_64
@@ -154,7 +152,6 @@ package body Tests_Hashes is
       Check_128 (1024, "02e7aa13471474567df7f049c0c1ad73");
    end Check_XXH3;
 
-
    procedure Check_Adler32 is
       Empty : constant Ada.Streams.Stream_Element_Array (1 .. 0) := [others => 0];
       Hello : constant Ada.Streams.Stream_Element_Array := Bytes_From_String ("hello");
@@ -184,7 +181,6 @@ package body Tests_Hashes is
          "chunked Adler-32 matches one-shot Adler-32");
    end Check_Adler32;
 
-
    procedure Check_CRC32 is
       Empty : constant Ada.Streams.Stream_Element_Array (1 .. 0) := [others => 0];
       Hello : constant Ada.Streams.Stream_Element_Array := Bytes_From_String ("hello");
@@ -213,7 +209,6 @@ package body Tests_Hashes is
         (CryptoLib.Checksums.CRC32_Value (State) = CryptoLib.Checksums.CRC32 (Binary),
          "chunked CRC-32 matches one-shot CRC-32");
    end Check_CRC32;
-
 
    --  OpenSSH key fingerprints, which nothing here was checking.
    --
@@ -292,7 +287,6 @@ package body Tests_Hashes is
                 "and carries no base64 padding");
       end;
    end Check_OpenSSH_Fingerprints;
-
 
    --  Hashing a message in pieces, for the two digests where nothing did.
    --
@@ -374,7 +368,6 @@ package body Tests_Hashes is
       end loop;
    end Check_Streaming_SHA256_SHA512;
 
-
    --  The SHA-1 fingerprint, which is the one a Windows store answers to.
    --
    --  The SHA-256 fingerprint is tested. This one was not, and it is the
@@ -436,7 +429,6 @@ package body Tests_Hashes is
              & "than the hash of nothing");
    end Check_SHA1_Fingerprint;
 
-
    procedure Check_MD5_Vectors is
    begin
       Expect_MD5
@@ -466,7 +458,6 @@ package body Tests_Hashes is
           16#AC#, 16#49#, 16#DA#, 16#2E#, 16#21#, 16#07#, 16#B6#, 16#7A#],
          "MD5 eighty-digit vector");
    end Check_MD5_Vectors;
-
 
    --  Streaming MD5: chunked updates reproduce the KAT, and byte-at-a-time
    --  updates match the one-shot digest across every padding boundary.
@@ -515,7 +506,6 @@ package body Tests_Hashes is
       end;
    end Check_Streaming_MD5;
 
-
    --  SHA-3 / SHAKE NIST known-answer vectors (previously only validated
    --  transitively via ML-KEM / sntrup761).
    procedure Check_SHA3_And_SHAKE_Vectors is
@@ -553,7 +543,6 @@ package body Tests_Hashes is
               & "d5a15bef186a5386c75744c0527e1faa9f8726e462a12a4feb06bd8801e751e4"),
          "SHAKE256 NIST KAT (abc, 64)");
    end Check_SHA3_And_SHAKE_Vectors;
-
 
    --  Direct SHA-1/2 known-answer vectors ("abc"), previously only exercised
    --  transitively through PBKDF2 / ML-KEM.
@@ -683,7 +672,6 @@ package body Tests_Hashes is
          "SHA-512 KAT (abc)");
    end Check_SHA512_Vector;
 
-
    --  HMAC known-answer vectors (RFC 2202 / RFC 4231 test case 1:
    --  key = 0x0b x20, message = "Hi There").
    procedure Check_HMAC_Vectors is
@@ -712,7 +700,6 @@ package body Tests_Hashes is
             "HMAC-SHA512 RFC 4231 KAT");
       end;
    end Check_HMAC_Vectors;
-
 
    --  HMAC-SHA384 (RFC 4231 test case 1) plus the long-key path of all four
    --  variants (RFC 2202 / RFC 4231 test case 6): a key longer than the hash
@@ -766,7 +753,6 @@ package body Tests_Hashes is
             "HMAC-SHA512 RFC 4231 long-key KAT");
       end;
    end Check_HMAC_SHA384_Long_Keys;
-
 
    --  Streaming HMAC: split and byte-at-a-time updates reproduce the one-shot
    --  tag, with a short key and with a key longer than the hash block, and an
