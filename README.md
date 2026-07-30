@@ -176,6 +176,82 @@ begin
    St := Ed25519.Verify (Pub, Sig, Message);
 ```
 
+### ECDH over the NIST curves
+
+Prefer X25519 above where the choice is yours; these are for protocols that
+require them. The peer's point is validated before your scalar touches it — an
+off-curve point would leak the scalar.
+
+```ada
+with CryptoLib.ECDH;   use CryptoLib;
+with CryptoLib.EC_Curves;
+Curve  : constant ECDH.Curve_Id := EC_Curves.Nistp256;
+--  Private, Secret : Secret_Length (Curve) bytes; Public : Public_Key_Length
+St     : Errors.Status;
+begin
+   St := ECDH.Generate_Keypair (Curve, Rng, Private_Scalar, Public_Point);
+   --  receive Peer_Point, the peer's uncompressed point
+   St := ECDH.Shared_Secret (Curve, Private_Scalar, Peer_Point, Secret);
+   --  St = Authentication_Failed if the point is off the curve or malformed
+```
+
+### RSA signatures
+
+Signing is blinded and every signature is checked against the public exponent
+before it is returned, so a fault yields an error rather than a signature.
+Passing the CRT parameters is optional and roughly doubles signing speed.
+
+```ada
+with CryptoLib.RSA;   use CryptoLib;
+--  Modulus, Private_Exponent, Signature : Modulus_Octets (RSA_2048) bytes
+St : Errors.Status;
+begin
+   St := RSA.Generate_Keypair_With_Primes
+     (RSA.RSA_2048, Rng, Modulus, Public_Exponent, Private_Exponent,
+      P, Q, DP, DQ, QI);
+   St := RSA.Sign_PSS
+     (Modulus, Public_Exponent, Private_Exponent, RSA.SHA256,
+      Salt_Length => 32, Message => Message, Rng => Rng,
+      Signature => Signature,
+      Prime_P => P, Prime_Q => Q, Exponent_P => DP, Exponent_Q => DQ,
+      Coefficient => QI);
+   St := RSA.Verify_PSS
+     (Modulus, Public_Exponent, RSA.SHA256, 32, Message, Signature);
+```
+
+### TLS 1.3 key schedule
+
+The two derivations RFC 8446 §7.1 defines. Composing them into the
+early/handshake/master chain is the protocol's job and needs its state; the
+package comment spells the chain out.
+
+```ada
+with CryptoLib.TLS13_KDF;   use CryptoLib;
+with CryptoLib.HKDF;
+Hash : constant TLS13_KDF.Hash_Algorithm := HKDF.SHA256;
+St   : Errors.Status;
+begin
+   St := HKDF.Extract (Hash, No_Salt, Zeros, Early);          --  early secret
+   St := TLS13_KDF.Derive_Secret (Hash, Early, "derived", No_Messages, Derived);
+   --  the "tls13 " prefix is added for you; pass the label as the RFC writes it
+   St := TLS13_KDF.Expand_Label (Hash, Derived, "key", No_Context, Traffic_Key);
+```
+
+### Issue a certificate
+
+```ada
+with CryptoLib.Certificates;   use CryptoLib;
+--  CA_Cert, CA_Key, Leaf_Cert, Leaf_Key : Unbounded_String
+St : Certificates.Certificate_Status;
+begin
+   St := Certificates.Create_Local_CA
+     ("example-local-ca", CA_Cert, CA_Key, Certificates.P256_Key);
+   St := Certificates.Issue_Server_Certificate
+     (To_String (CA_Cert), To_String (CA_Key), "service.example",
+      [1 => To_Unbounded_String ("service.example")], Leaf_Cert, Leaf_Key);
+   --  a leaf is cut short at the CA's own expiry rather than outliving it
+```
+
 ### Random bytes
 
 ```ada

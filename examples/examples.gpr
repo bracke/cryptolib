@@ -8,9 +8,13 @@ project Examples is
    for Create_Missing_Dirs use "True";
    for Exec_Dir use "bin";
    for Main use
-     ("example_chacha20_poly1305.adb",
+     ("example_certificates.adb",
+      "example_chacha20_poly1305.adb",
       "example_curve25519.adb",
+      "example_ecdh.adb",
       "example_ed25519.adb",
+      "example_rsa.adb",
+      "example_tls13_kdf.adb",
       "example_hashes.adb",
       "example_macs.adb",
       "example_random.adb",
