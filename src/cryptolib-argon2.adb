@@ -3,6 +3,7 @@ with Ada.Unchecked_Deallocation;
 with Interfaces;
 
 with CryptoLib.Blake2b;
+with CryptoLib.Constant_Time;
 with CryptoLib.Secure_Wipe;
 
 package body CryptoLib.Argon2 is
@@ -478,5 +479,54 @@ package body CryptoLib.Argon2 is
       return Derive (Kind, Password, Salt, None, None,
                      Iterations, Memory_KiB, Lanes, Tag);
    end Derive;
+
+   function Verify
+     (Kind       : Variant;
+      Password   : Ada.Streams.Stream_Element_Array;
+      Salt       : Ada.Streams.Stream_Element_Array;
+      Secret     : Ada.Streams.Stream_Element_Array;
+      Associated : Ada.Streams.Stream_Element_Array;
+      Iterations : Positive;
+      Memory_KiB : Positive;
+      Lanes      : Positive;
+      Tag        : Ada.Streams.Stream_Element_Array) return Boolean
+   is
+      Computed : Ada.Streams.Stream_Element_Array (Tag'Range);
+      Status   : CryptoLib.Errors.Status;
+   begin
+      if Tag'Length = 0 then
+         return False;
+      end if;
+      Status := Derive (Kind, Password, Salt, Secret, Associated,
+                        Iterations, Memory_KiB, Lanes, Computed);
+      if Status /= CryptoLib.Errors.Ok then
+         --  Derive zeroes Computed on failure; say no without comparing, so
+         --  a refused parameter cannot be mistaken for a matching all-zero
+         --  tag.
+         return False;
+      end if;
+      return Result : constant Boolean :=
+        CryptoLib.Constant_Time.Equal (Computed, Tag)
+      do
+         CryptoLib.Secure_Wipe.Wipe
+           (Computed'Address, Computed'Length);
+      end return;
+   end Verify;
+
+   function Verify
+     (Kind       : Variant;
+      Password   : Ada.Streams.Stream_Element_Array;
+      Salt       : Ada.Streams.Stream_Element_Array;
+      Iterations : Positive;
+      Memory_KiB : Positive;
+      Lanes      : Positive;
+      Tag        : Ada.Streams.Stream_Element_Array) return Boolean
+   is
+      None : constant Ada.Streams.Stream_Element_Array (1 .. 0) :=
+        [others => 0];
+   begin
+      return Verify (Kind, Password, Salt, None, None,
+                     Iterations, Memory_KiB, Lanes, Tag);
+   end Verify;
 
 end CryptoLib.Argon2;

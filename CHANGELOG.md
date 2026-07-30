@@ -16,6 +16,9 @@ predecessor.
   key schedule extracted from `BCrypt_PBKDF` so the two share one copy. The
   shared package is a private child, so the cipher is reachable from inside
   `CryptoLib` and not from a caller.
+* `Argon2.Verify`: constant-time verification of a password against a tag,
+  which `Derive` alone left every caller to implement, usually as an
+  early-exiting array comparison. `Bcrypt.Verify` already had it.
 * Password hashing: Argon2d, Argon2i and Argon2id (RFC 9106) over a new
   BLAKE2b (RFC 7693). Argon2id is the one to reach for. scrypt (RFC 7914) and
   `bcrypt_pbkdf` were already here.

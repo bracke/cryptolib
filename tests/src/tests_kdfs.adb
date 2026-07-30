@@ -1051,6 +1051,83 @@ package body Tests_KDFs is
       end;
    end Check_Argon2;
 
+   procedure Check_Argon2_Verify is
+      Password : constant Ada.Streams.Stream_Element_Array :=
+        Bytes_From_String ("correct horse battery staple");
+      Salt     : constant Ada.Streams.Stream_Element_Array :=
+        Bytes_From_String ("0123456789abcdef");
+      Pepper   : constant Ada.Streams.Stream_Element_Array :=
+        Bytes_From_String ("pepper");
+      Extra    : constant Ada.Streams.Stream_Element_Array :=
+        Bytes_From_String ("associated");
+      Tag      : Ada.Streams.Stream_Element_Array (1 .. 32);
+   begin
+      Check (CryptoLib.Argon2.Derive
+               (CryptoLib.Argon2.Argon2id, Password, Salt, 2, 1024, 1, Tag)
+               = CryptoLib.Errors.Ok,
+             "argon2 derives a tag to verify against");
+      Check (CryptoLib.Argon2.Verify
+               (CryptoLib.Argon2.Argon2id, Password, Salt, 2, 1024, 1, Tag),
+             "argon2 verify accepts the password that produced the tag");
+      Check (not CryptoLib.Argon2.Verify
+               (CryptoLib.Argon2.Argon2id,
+                Bytes_From_String ("correct horse battery stapl"),
+                Salt, 2, 1024, 1, Tag),
+             "and refuses a different password");
+      Check (not CryptoLib.Argon2.Verify
+               (CryptoLib.Argon2.Argon2i, Password, Salt, 2, 1024, 1, Tag),
+             "and refuses the right password under a different variant");
+      Check (not CryptoLib.Argon2.Verify
+               (CryptoLib.Argon2.Argon2id, Password, Salt, 3, 1024, 1, Tag),
+             "and refuses it under a different cost");
+
+      --  A single flipped bit anywhere in the tag must fail, including the
+      --  last octet: a comparison that stops early gets the first right and
+      --  the last wrong.
+      declare
+         Bad : Ada.Streams.Stream_Element_Array := Tag;
+      begin
+         Bad (Bad'First) := Bad (Bad'First) xor 1;
+         Check (not CryptoLib.Argon2.Verify
+                  (CryptoLib.Argon2.Argon2id, Password, Salt, 2, 1024, 1, Bad),
+                "argon2 verify refuses a tag differing in its first octet");
+         Bad := Tag;
+         Bad (Bad'Last) := Bad (Bad'Last) xor 1;
+         Check (not CryptoLib.Argon2.Verify
+                  (CryptoLib.Argon2.Argon2id, Password, Salt, 2, 1024, 1, Bad),
+                "and one differing only in its last");
+      end;
+
+      --  A refused parameter must not read as a match against an all-zero
+      --  tag, which is what Derive leaves behind when it declines.
+      declare
+         Zero_Tag : constant Ada.Streams.Stream_Element_Array (1 .. 32) :=
+           [others => 0];
+         Empty : constant Ada.Streams.Stream_Element_Array (1 .. 0) :=
+           [others => 0];
+      begin
+         Check (not CryptoLib.Argon2.Verify
+                  (CryptoLib.Argon2.Argon2id, Password, Empty,
+                   2, 1024, 1, Zero_Tag),
+                "argon2 verify refuses when derivation itself declines");
+      end;
+
+      --  The secret/associated-data form round-trips too, and a wrong pepper
+      --  is as good as a wrong password.
+      Check (CryptoLib.Argon2.Derive
+               (CryptoLib.Argon2.Argon2id, Password, Salt, Pepper, Extra,
+                2, 1024, 1, Tag) = CryptoLib.Errors.Ok,
+             "argon2 derives with a secret and associated data");
+      Check (CryptoLib.Argon2.Verify
+               (CryptoLib.Argon2.Argon2id, Password, Salt, Pepper, Extra,
+                2, 1024, 1, Tag),
+             "argon2 verify accepts with the same secret");
+      Check (not CryptoLib.Argon2.Verify
+               (CryptoLib.Argon2.Argon2id, Password, Salt,
+                Bytes_From_String ("Pepper"), Extra, 2, 1024, 1, Tag),
+             "and refuses with a different one");
+   end Check_Argon2_Verify;
+
    --  bcrypt against the Python bcrypt module, which wraps the OpenBSD
    --  implementation. One salt, three costs, and three password lengths
    --  including the empty password and the 72-octet maximum.
@@ -1174,6 +1251,7 @@ package body Tests_KDFs is
    procedure Run_Check_Bcrypt_PBKDF (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_Bcrypt (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_Argon2 (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Argon2_Verify (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_HKDF (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_TLS13_KDF (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_PKCS12_Work_Factor (Item : in out AUnit.Test_Cases.Test_Case'Class);
@@ -1271,6 +1349,12 @@ package body Tests_KDFs is
       Check_Argon2;
    end Run_Check_Argon2;
 
+   procedure Run_Check_Argon2_Verify (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Argon2_Verify;
+   end Run_Check_Argon2_Verify;
+
    procedure Run_Check_Bcrypt (Item : in out AUnit.Test_Cases.Test_Case'Class) is
       pragma Unreferenced (Item);
    begin
@@ -1290,6 +1374,7 @@ package body Tests_KDFs is
       Register_Routine (Item, Run_Check_Bcrypt_PBKDF'Access, "bcrypt pbkdf");
       Register_Routine (Item, Run_Check_Bcrypt'Access, "bcrypt");
       Register_Routine (Item, Run_Check_Argon2'Access, "argon2");
+      Register_Routine (Item, Run_Check_Argon2_Verify'Access, "argon2 verify");
       Register_Routine (Item, Run_Check_HKDF'Access, "hkdf");
       Register_Routine (Item, Run_Check_TLS13_KDF'Access, "tls13 kdf");
       Register_Routine (Item, Run_Check_PKCS12_Work_Factor'Access, "pkcs12 work factor");

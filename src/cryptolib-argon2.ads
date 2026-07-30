@@ -91,4 +91,56 @@ package CryptoLib.Argon2 is
       Tag        : out Ada.Streams.Stream_Element_Array)
       return CryptoLib.Errors.Status;
 
+   --  Does this password reproduce this tag?
+   --
+   --  Derive gives a caller no safe way to check a password: the obvious
+   --  `Tag = Stored` stops at the first differing octet, which is a timing
+   --  oracle on the very value the hash exists to protect. This compares
+   --  through CryptoLib.Constant_Time.Equal instead, which is the same
+   --  guarantee CryptoLib.Bcrypt.Verify already gave -- and Argon2 is the one
+   --  this crate tells you to reach for, so it was the wrong way round.
+   --
+   --  The parameters must be the ones the tag was produced with. Argon2 has a
+   --  standard encoding that carries them ($argon2id$v=19$m=...), which this
+   --  crate does not implement, so a caller storing a tag must store the
+   --  variant, salt, and the three costs beside it.
+   --  @param Kind       which variant
+   --  @param Password   the password offered
+   --  @param Salt       the salt the tag was derived with
+   --  @param Iterations the pass count t
+   --  @param Memory_KiB the memory cost m in kibibytes
+   --  @param Lanes      the parallelism p
+   --  @param Tag        the stored tag to check against
+   --  @return True only when derivation succeeds and reproduces Tag exactly
+   function Verify
+     (Kind       : Variant;
+      Password   : Ada.Streams.Stream_Element_Array;
+      Salt       : Ada.Streams.Stream_Element_Array;
+      Iterations : Positive;
+      Memory_KiB : Positive;
+      Lanes      : Positive;
+      Tag        : Ada.Streams.Stream_Element_Array) return Boolean;
+
+   --  As above, with a secret (a pepper) and associated data.
+   --  @param Kind       which variant
+   --  @param Password   the password offered
+   --  @param Salt       the salt the tag was derived with
+   --  @param Secret     the secret the tag was derived with
+   --  @param Associated the associated data the tag was derived with
+   --  @param Iterations the pass count t
+   --  @param Memory_KiB the memory cost m in kibibytes
+   --  @param Lanes      the parallelism p
+   --  @param Tag        the stored tag to check against
+   --  @return True only when derivation succeeds and reproduces Tag exactly
+   function Verify
+     (Kind       : Variant;
+      Password   : Ada.Streams.Stream_Element_Array;
+      Salt       : Ada.Streams.Stream_Element_Array;
+      Secret     : Ada.Streams.Stream_Element_Array;
+      Associated : Ada.Streams.Stream_Element_Array;
+      Iterations : Positive;
+      Memory_KiB : Positive;
+      Lanes      : Positive;
+      Tag        : Ada.Streams.Stream_Element_Array) return Boolean;
+
 end CryptoLib.Argon2;
