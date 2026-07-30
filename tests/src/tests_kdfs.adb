@@ -182,25 +182,34 @@ package body Tests_KDFs is
    end Check_PKCS12_KDF_SHA1;
 
    procedure Check_Scrypt_SHA256 is
-      Actual : constant Ada.Streams.Stream_Element_Array :=
-        CryptoLib.Macs.Scrypt_SHA256
-          (Bytes_From_String ("password"),
-           Bytes_From_String ("12345678"),
-           16,
-           1,
-           1,
-           64);
-      Expected : constant Ada.Streams.Stream_Element_Array (1 .. 64) :=
-        [16#61#, 16#D0#, 16#75#, 16#CB#, 16#C3#, 16#C1#, 16#4B#, 16#BC#,
-         16#CD#, 16#22#, 16#68#, 16#27#, 16#72#, 16#6A#, 16#40#, 16#4C#,
-         16#95#, 16#C5#, 16#DE#, 16#B5#, 16#41#, 16#0B#, 16#3B#, 16#7E#,
-         16#B5#, 16#5D#, 16#70#, 16#51#, 16#1D#, 16#56#, 16#8C#, 16#6A#,
-         16#59#, 16#09#, 16#7D#, 16#32#, 16#1F#, 16#7B#, 16#28#, 16#DA#,
-         16#D0#, 16#D7#, 16#AB#, 16#84#, 16#15#, 16#D4#, 16#81#, 16#3C#,
-         16#8E#, 16#08#, 16#EA#, 16#82#, 16#27#, 16#92#, 16#66#, 16#84#,
-         16#B4#, 16#6A#, 16#AF#, 16#32#, 16#16#, 16#63#, 16#6E#, 16#01#];
+      --  One place to say "derive, and it must have succeeded", so a check
+      --  cannot accidentally compare against a key the function declined to
+      --  produce -- which is the failure mode this signature replaced.
+      function Derived
+        (Password : Ada.Streams.Stream_Element_Array;
+         Salt     : Ada.Streams.Stream_Element_Array;
+         N, R, P  : Positive;
+         Length   : Positive;
+         Label    : String) return Ada.Streams.Stream_Element_Array
+      is
+         Key : Ada.Streams.Stream_Element_Array
+           (1 .. Ada.Streams.Stream_Element_Offset (Length));
+      begin
+         Check (CryptoLib.Macs.Scrypt_SHA256 (Password, Salt, N, R, P, Key)
+                  = CryptoLib.Errors.Ok,
+                Label & " derives");
+         return Key;
+      end Derived;
    begin
-      Check (Actual = Expected, "scrypt-SHA256 vector");
+      Check (Derived (Bytes_From_String ("password"),
+                      Bytes_From_String ("12345678"),
+                      16, 1, 1, 64, "scrypt-SHA256 vector")
+               = Bytes_From_Hex
+                   ("61d075cbc3c14bbccd226827726a404c"
+                    & "95c5deb5410b3b7eb55d70511d568c6a"
+                    & "59097d321f7b28dad0d7ab8415d4813c"
+                    & "8e08ea8227926684b46aaf3216636e01"),
+             "scrypt-SHA256 vector");
 
       --  RFC 7914 section 11's own vectors. The one above is N=16, r=1, p=1,
       --  which is the weakest set the function accepts and does not reach two
@@ -208,43 +217,33 @@ package body Tests_KDFs is
       --  interleave and the interleave is the identity, and at p=1 the
       --  parallelism loop runs once. A transposition in either would have
       --  passed. These two have r=8, and one has p=16.
-      declare
-         Vector_Two : constant Ada.Streams.Stream_Element_Array :=
-           CryptoLib.Macs.Scrypt_SHA256
-             (Bytes_From_String ("password"),
-              Bytes_From_String ("NaCl"),
-              1024, 8, 16, 64);
-      begin
-         Check (Vector_Two = Bytes_From_Hex
-                  ("fdbabe1c9d3472007856e7190d01e9fe"
-                   & "7c6ad7cbc8237830e77376634b373162"
-                   & "2eaf30d92e22a3886ff109279d9830da"
-                   & "c727afb94a83ee6d8360cbdfa2cc0640"),
-                "scrypt RFC 7914 N=1024 r=8 p=16");
-      end;
+      Check (Derived (Bytes_From_String ("password"),
+                      Bytes_From_String ("NaCl"),
+                      1024, 8, 16, 64, "RFC 7914 N=1024")
+               = Bytes_From_Hex
+                   ("fdbabe1c9d3472007856e7190d01e9fe"
+                    & "7c6ad7cbc8237830e77376634b373162"
+                    & "2eaf30d92e22a3886ff109279d9830da"
+                    & "c727afb94a83ee6d8360cbdfa2cc0640"),
+             "scrypt RFC 7914 N=1024 r=8 p=16");
 
-      declare
-         Vector_Three : constant Ada.Streams.Stream_Element_Array :=
-           CryptoLib.Macs.Scrypt_SHA256
-             (Bytes_From_String ("pleaseletmein"),
-              Bytes_From_String ("SodiumChloride"),
-              16384, 8, 1, 64);
-      begin
-         Check (Vector_Three = Bytes_From_Hex
-                  ("7023bdcb3afd7348461c06cd81fd38eb"
-                   & "fda8fbba904f8e3ea9b543f6545da1f2"
-                   & "d5432955613f0fcf62d49705242a9af9"
-                   & "e61e85dc0d651e40dfcf017b45575887"),
-                "scrypt RFC 7914 N=16384 r=8 p=1");
-      end;
+      Check (Derived (Bytes_From_String ("pleaseletmein"),
+                      Bytes_From_String ("SodiumChloride"),
+                      16384, 8, 1, 64, "RFC 7914 N=16384")
+               = Bytes_From_Hex
+                   ("7023bdcb3afd7348461c06cd81fd38eb"
+                    & "fda8fbba904f8e3ea9b543f6545da1f2"
+                    & "d5432955613f0fcf62d49705242a9af9"
+                    & "e61e85dc0d651e40dfcf017b45575887"),
+             "scrypt RFC 7914 N=16384 r=8 p=1");
 
-      --  The empty password and empty salt, which is the RFC's first vector
-      --  and the one an off-by-one in the PBKDF2 wrapping shows up in.
+      --  The empty password and empty salt, the RFC's first vector and the
+      --  one an off-by-one in the PBKDF2 wrapping shows up in.
       declare
          Empty : constant Ada.Streams.Stream_Element_Array (1 .. 0) :=
            [others => 0];
       begin
-         Check (CryptoLib.Macs.Scrypt_SHA256 (Empty, Empty, 16, 1, 1, 64)
+         Check (Derived (Empty, Empty, 16, 1, 1, 64, "RFC 7914 empty")
                   = Bytes_From_Hex
                       ("77d6576238657b203b19ca42c18a0497"
                        & "f16b4844e3074ae8dfdffa3fede21442"
@@ -255,35 +254,48 @@ package body Tests_KDFs is
 
       --  N = 32768 is what a good many scrypt-encrypted PKCS#8 keys carry,
       --  and it used to be refused for being above a flat N <= 16384 limit.
-      --  Refusal here is not visible as an error -- it returns a zeroed key
-      --  -- so this asks for the real answer rather than for "not zero".
-      declare
-         Big_N : constant Ada.Streams.Stream_Element_Array :=
-           CryptoLib.Macs.Scrypt_SHA256
-             (Bytes_From_String ("passphrase"),
-              Bytes_From_String ("0123456789abcdef"),
-              32768, 8, 1, 32);
-      begin
-         Check (Big_N = Bytes_From_Hex
-                  ("28b9004db320ccf5a03eb0765f995315"
-                   & "07a1f019d8e28ad5ef8eae0377a23a47"),
-                "scrypt at N=32768, the cost a real key file carries");
-      end;
+      Check (Derived (Bytes_From_String ("passphrase"),
+                      Bytes_From_String ("0123456789abcdef"),
+                      32768, 8, 1, 32, "N=32768")
+               = Bytes_From_Hex
+                   ("28b9004db320ccf5a03eb0765f995315"
+                    & "07a1f019d8e28ad5ef8eae0377a23a47"),
+             "scrypt at N=32768, the cost a real key file carries");
 
-      --  And the refusals still refuse, zeroed rather than wrong: a
-      --  non-power-of-two N, and a working set past the memory bound.
+      --  Refusals say so, and zero the key rather than leaving it readable.
+      --  This is what the old signature could not express: it returned those
+      --  same zeros with no way to tell them from a derivation. Each refusal
+      --  asserts the zeroing as well as the status -- the useless-assignment
+      --  warning is what catches a check that forgot to.
       declare
          Zeroes : constant Ada.Streams.Stream_Element_Array (1 .. 32) :=
            [others => 0];
+
+         procedure Refuses (N, R, P : Positive; Label : String) is
+            Key : Ada.Streams.Stream_Element_Array (1 .. 32);
+         begin
+            Check (CryptoLib.Macs.Scrypt_SHA256
+                     (Bytes_From_String ("p"), Bytes_From_String ("s"),
+                      N, R, P, Key) = CryptoLib.Errors.Handshake_Failed,
+                   Label);
+            Check (Key = Zeroes, Label & ", with the key zeroed");
+         end Refuses;
+      begin
+         Refuses (1000, 8, 1, "scrypt refuses an N that is not a power of two");
+         Refuses (2 ** 30, 8, 1, "and a working set past the memory bound");
+         Refuses (16, 33, 1, "and an R above 32");
+         Refuses (16, 1, 33, "and a P above 32");
+      end;
+
+      declare
+         Empty_Key : Ada.Streams.Stream_Element_Array (1 .. 0);
       begin
          Check (CryptoLib.Macs.Scrypt_SHA256
                   (Bytes_From_String ("p"), Bytes_From_String ("s"),
-                   1000, 8, 1, 32) = Zeroes,
-                "scrypt refuses an N that is not a power of two");
-         Check (CryptoLib.Macs.Scrypt_SHA256
-                  (Bytes_From_String ("p"), Bytes_From_String ("s"),
-                   2 ** 30, 8, 1, 32) = Zeroes,
-                "and one whose working set would exceed the memory bound");
+                   16, 1, 1, Empty_Key) = CryptoLib.Errors.Handshake_Failed
+                and then Empty_Key
+                           = Ada.Streams.Stream_Element_Array'(1 .. 0 => 0),
+                "and an empty key buffer");
       end;
    end Check_Scrypt_SHA256;
 

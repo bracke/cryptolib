@@ -1043,31 +1043,28 @@ package body CryptoLib.Macs is
       N             : Positive;
       R             : Positive;
       P             : Positive;
-      Output_Length : Natural)
-      return Ada.Streams.Stream_Element_Array
+      Key           : out Ada.Streams.Stream_Element_Array)
+      return CryptoLib.Errors.Status
    is
       Block_Size : constant Natural := 128 * R;
       B_Length   : constant Natural := P * Block_Size;
    begin
-      if Output_Length = 0 then
-         return Stream_Element_Array'(1 .. 0 => 0);
-      end if;
+      Key := [others => 0];
+
       --  Bound the working set rather than N alone. N > 16_384 used to be
       --  refused outright, which rejected parameters that turn up in ordinary
       --  files -- OpenSSL writes N = 16384 for a scrypt-encrypted PKCS#8 key
-      --  and 32768 and 65536 are both common -- and refusing returns a zeroed
-      --  key that a caller then decrypts with, so the failure surfaced as a
-      --  wrong passphrase rather than as an unsupported cost. What actually
-      --  needs limiting is 128 * r * N, the memory ROMix allocates, because
-      --  these numbers arrive from the file being opened and not from the
-      --  program.
-      if not Is_Power_Of_Two (N)
+      --  and 32768 and 65536 are both common. What actually needs limiting is
+      --  128 * r * N, the memory ROMix allocates, because these numbers
+      --  arrive from the file being opened and not from the program.
+      if Key'Length = 0
+        or else not Is_Power_Of_Two (N)
         or else R > 32
         or else P > 32
         or else N > Scrypt_Memory_Cap / Block_Size
         or else P > Scrypt_Memory_Cap / Block_Size
       then
-         return [1 .. Stream_Element_Offset (Output_Length) => 0];
+         return CryptoLib.Errors.Handshake_Failed;
       end if;
 
       declare
@@ -1089,18 +1086,18 @@ package body CryptoLib.Macs is
             end;
          end loop;
 
-         declare
-            Result : constant Stream_Element_Array :=
-              PBKDF2_HMAC_SHA256
-                (Password_Data, B_Data, 1, Output_Length);
-         begin
-            Clear_Stream_Array (B_Data);
-            return Result;
-         end;
+         Key := PBKDF2_HMAC_SHA256
+           (Password_Data, B_Data, 1, Key'Length);
+         Clear_Stream_Array (B_Data);
       end;
+
+      return CryptoLib.Errors.Ok;
    exception
       when others =>
-         return [1 .. Stream_Element_Offset (Output_Length) => 0];
+         --  The working set is the likely one: ROMix asks for 128 * r * N
+         --  octets and the host may not have them.
+         Key := [others => 0];
+         return CryptoLib.Errors.Internal_Error;
    end Scrypt_SHA256;
 
    function EVP_Bytes_To_Key_MD5

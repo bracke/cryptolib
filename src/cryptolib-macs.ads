@@ -1,4 +1,5 @@
 with Ada.Streams;
+with CryptoLib.Errors;
 with CryptoLib.Hashes;
 
 --  @summary HMAC message-authentication codes and password-based key-derivation
@@ -255,13 +256,17 @@ package CryptoLib.Macs is
    --  Derive a key with the scrypt memory-hard KDF using PBKDF2-HMAC-SHA256 as
    --  its inner PRF (RFC 7914).
    --
-   --  Refused parameters return a **zeroed key of the requested length**
-   --  rather than an error, which is the convention this function has always
-   --  had and which callers depend on. It is worth knowing: a caller that
-   --  does not distinguish "derived" from "declined" will decrypt with zeros
-   --  and report a wrong passphrase. Refused are a non-power-of-two N, an R
-   --  or P above 32, and any N or P whose working set would exceed 256 MiB
-   --  (128 * R * N octets, the memory ROMix needs -- the parameters usually
+   --  Unlike the PBKDF2 functions above, this one can decline: scrypt has
+   --  parameters that are out of range and a working set that may not be
+   --  allocatable, and neither is a derivation. It used to answer both by
+   --  returning a zeroed key of the requested length, which is
+   --  indistinguishable from a real one to a caller that does not look --
+   --  so a key file with an unsupported cost decrypted with zeros and
+   --  reported a wrong passphrase. It returns a status instead.
+   --
+   --  Refused: an N that is not a power of two, an R or P above 32, an empty
+   --  Key, and any N or P whose working set would exceed 256 MiB
+   --  (128 * R * N octets, what ROMix must hold -- these parameters usually
    --  come from the file being opened, so they are bounded rather than
    --  trusted).
    --  @param Password_Data the password/passphrase bytes
@@ -269,17 +274,17 @@ package CryptoLib.Macs is
    --  @param N             the CPU/memory cost parameter (a power of two)
    --  @param R             the block-size parameter
    --  @param P             the parallelization parameter
-   --  @param Output_Length the number of derived key bytes to produce
-   --  @return the derived key of Output_Length bytes, or that many zero
-   --    octets when a parameter is refused
+   --  @param Key           out: the derived key, zeroed on any failure
+   --  @return Ok, Handshake_Failed when a parameter is refused, or
+   --    Internal_Error when the working set cannot be allocated
    function Scrypt_SHA256
      (Password_Data : Ada.Streams.Stream_Element_Array;
       Salt_Data     : Ada.Streams.Stream_Element_Array;
       N             : Positive;
       R             : Positive;
       P             : Positive;
-      Output_Length : Natural)
-      return Ada.Streams.Stream_Element_Array;
+      Key           : out Ada.Streams.Stream_Element_Array)
+      return CryptoLib.Errors.Status;
 
    --  Derive a key with OpenSSL's legacy EVP_BytesToKey using one MD5 hash
    --  iteration, chaining digests until Output_Length bytes are produced.

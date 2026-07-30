@@ -6,7 +6,7 @@
 --  connection/handshake/authentication failures to remote and I/O errors; use
 --  Is_Success to test the outcome rather than comparing against Ok directly.
 package CryptoLib.Errors
-  with SPARK_Mode => On
+  with Preelaborate, SPARK_Mode => On
 is
    type Status is
      (Ok,
