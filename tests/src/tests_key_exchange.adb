@@ -53,6 +53,7 @@ with CryptoLib.Errors;
 with CryptoLib.Macs;
 with CryptoLib.UMAC;
 with CryptoLib.MLDSA;
+with CryptoLib.MLKEM;
 with CryptoLib.MLKEM768;
 with CryptoLib.SNTRUP761;
 with CryptoLib.Curve25519;
@@ -722,6 +723,223 @@ package body Tests_Key_Exchange is
    --  and encaps from m, checked against the pq-crystals final ML-KEM reference
    --  (byte-identical to OpenSSH).  The 1184/2400/1088-byte ek/dk/ct are
    --  compared via SHA-256; the 32-byte shared secret K is compared directly.
+   procedure Check_MLKEM_All_Parameter_Sets is
+      package M renames CryptoLib.MLKEM;
+
+      function Digest_Hex
+        (Data : Ada.Streams.Stream_Element_Array) return String
+      is
+         Digits_Set : constant String := "0123456789abcdef";
+         Digest : constant CryptoLib.Hashes.SHA256_Digest :=
+           CryptoLib.Hashes.SHA256 (Data);
+         Result : String (1 .. 64);
+         K      : Natural := 1;
+      begin
+         for B of Digest loop
+            Result (K) := Digits_Set (Natural (B) / 16 + 1);
+            Result (K + 1) := Digits_Set (Natural (B) mod 16 + 1);
+            K := K + 2;
+         end loop;
+         return Result;
+      end Digest_Hex;
+   begin
+      --  ML-KEM-512: seeds d and z are ACVP's own keyGen inputs,
+      --  and m is an ACVP encapsulation input. The expected values come from
+      --  a reference validated against all 180 ACVP vectors first.
+      declare
+         PK : Ada.Streams.Stream_Element_Array (1 .. 800);
+         SK : Ada.Streams.Stream_Element_Array (1 .. 1632);
+         CT : Ada.Streams.Stream_Element_Array (1 .. 768);
+         K1, K2 : Ada.Streams.Stream_Element_Array (1 .. 32);
+      begin
+         Check (M.Public_Key_Length (M.ML_KEM_512) = 800
+                and then M.Secret_Key_Length (M.ML_KEM_512) = 1632
+                and then M.Ciphertext_Length (M.ML_KEM_512) = 768,
+                "ML-KEM-512 lengths");
+         Check (M.Key_From_Seeds
+                  (M.ML_KEM_512,
+                   Bytes_From_Hex ("47b893474672ba92e4b12ee44fb32953"
+                   & "af8e8503b5fb471d1614fb8a021a660a"),
+                   Bytes_From_Hex ("1f8cb39e9e30bc458a0dc5408884b118"
+                   & "7fb217018df760fa57317703b844a0a9"),
+                   PK, SK) = CryptoLib.Errors.Ok,
+                "ML-KEM-512 keygen from the ACVP seeds");
+         Check (Digest_Hex (PK) = "7e4a2b716a684c1ad33c43c808782da9"
+                   & "e1a72f14ccda82723f712d49f53a9f28",
+                "ML-KEM-512 encapsulation key matches");
+         Check (Digest_Hex (SK) = "c725c25ca8636d75653a07e7a9ccf0b3"
+                   & "c2b927617e8f99f0f05ab1f9cb7e046d",
+                "ML-KEM-512 decapsulation key matches");
+         Check (M.Encapsulate_With_Message
+                  (M.ML_KEM_512, PK,
+                   Bytes_From_Hex ("dcacfe4de1c115da106acd1eefeafdc7"
+                   & "f0f4e5707453ee2d6b0d69d34cc0ef4a"),
+                   CT, K1) = CryptoLib.Errors.Ok,
+                "ML-KEM-512 encapsulates");
+         Check (Digest_Hex (CT) = "eb7d98e05f937bbc0146537264424b4d"
+                   & "edd8e08afb374f56f6d4b9a61c7c51ca",
+                "ML-KEM-512 ciphertext matches");
+         Check (K1 = Bytes_From_Hex ("9693863e3c2fd8ddd49dbee67d93860c"
+                   & "da866a3495f9876eaf39e78b209818b7"),
+                "ML-KEM-512 shared secret matches");
+         Check (M.Decapsulate (M.ML_KEM_512, SK, CT, K2) = CryptoLib.Errors.Ok,
+                "ML-KEM-512 decapsulates");
+         Check (K2 = K1, "ML-KEM-512 decapsulates to the same secret");
+
+         --  Implicit rejection: a tampered ciphertext yields the pseudorandom
+         --  J(z || c) rather than an error, and that value is pinned so the
+         --  branch is checked to be right and not merely "different".
+         declare
+            Bad : Ada.Streams.Stream_Element_Array := CT;
+         begin
+            Bad (Bad'Last) := Bad (Bad'Last) xor 1;
+            Check (M.Decapsulate (M.ML_KEM_512, SK, Bad, K2)
+                     = CryptoLib.Errors.Ok,
+                   "ML-KEM-512 decapsulates a tampered ciphertext");
+            Check (K2 = Bytes_From_Hex ("0b0a4fd744e6f3915fbb221fba3b6851"
+                   & "4e98900fea6f392c72a17a95f147788e"),
+                   "ML-KEM-512 rejects implicitly to J(z || c)");
+         end;
+      end;
+      --  ML-KEM-768: seeds d and z are ACVP's own keyGen inputs,
+      --  and m is an ACVP encapsulation input. The expected values come from
+      --  a reference validated against all 180 ACVP vectors first.
+      declare
+         PK : Ada.Streams.Stream_Element_Array (1 .. 1184);
+         SK : Ada.Streams.Stream_Element_Array (1 .. 2400);
+         CT : Ada.Streams.Stream_Element_Array (1 .. 1088);
+         K1, K2 : Ada.Streams.Stream_Element_Array (1 .. 32);
+      begin
+         Check (M.Public_Key_Length (M.ML_KEM_768) = 1184
+                and then M.Secret_Key_Length (M.ML_KEM_768) = 2400
+                and then M.Ciphertext_Length (M.ML_KEM_768) = 1088,
+                "ML-KEM-768 lengths");
+         Check (M.Key_From_Seeds
+                  (M.ML_KEM_768,
+                   Bytes_From_Hex ("e582b7d75e6c80b05ae392a1fc9f7153"
+                   & "b12390fd99930368cc67a768baebc8a0"),
+                   Bytes_From_Hex ("1cdacb8740c0b87c4a379575f187b367"
+                   & "cbfa3b300bf591b109f79816e9cbe8f0"),
+                   PK, SK) = CryptoLib.Errors.Ok,
+                "ML-KEM-768 keygen from the ACVP seeds");
+         Check (Digest_Hex (PK) = "4158f6afb5e516c99f1da07da8c65134"
+                   & "8422b17c1f4e9a08ad73fb1f91249b3e",
+                "ML-KEM-768 encapsulation key matches");
+         Check (Digest_Hex (SK) = "7aab35839207f72b310abe36e2daa1cc"
+                   & "7ff6f7fa8941e439967cd47d9b437079",
+                "ML-KEM-768 decapsulation key matches");
+         Check (M.Encapsulate_With_Message
+                  (M.ML_KEM_768, PK,
+                   Bytes_From_Hex ("4e77596168711e913965d8175ac3bd76"
+                   & "aab08b7f9385a02ae883cf6c6e17dd81"),
+                   CT, K1) = CryptoLib.Errors.Ok,
+                "ML-KEM-768 encapsulates");
+         Check (Digest_Hex (CT) = "e2d8fa17695cd9179d8bd301ec65913e"
+                   & "508a806526637fedad60035872d8fb0e",
+                "ML-KEM-768 ciphertext matches");
+         Check (K1 = Bytes_From_Hex ("b3847ad7d335b45d334820baea819041"
+                   & "8e60abe99e7ac38deadc003a71fdce7a"),
+                "ML-KEM-768 shared secret matches");
+         Check (M.Decapsulate (M.ML_KEM_768, SK, CT, K2) = CryptoLib.Errors.Ok,
+                "ML-KEM-768 decapsulates");
+         Check (K2 = K1, "ML-KEM-768 decapsulates to the same secret");
+
+         --  Implicit rejection: a tampered ciphertext yields the pseudorandom
+         --  J(z || c) rather than an error, and that value is pinned so the
+         --  branch is checked to be right and not merely "different".
+         declare
+            Bad : Ada.Streams.Stream_Element_Array := CT;
+         begin
+            Bad (Bad'Last) := Bad (Bad'Last) xor 1;
+            Check (M.Decapsulate (M.ML_KEM_768, SK, Bad, K2)
+                     = CryptoLib.Errors.Ok,
+                   "ML-KEM-768 decapsulates a tampered ciphertext");
+            Check (K2 = Bytes_From_Hex ("f5a72501c3bb2e87a06d56e6f015cadd"
+                   & "a75c943065b7811cf6b7c43c4c7e0947"),
+                   "ML-KEM-768 rejects implicitly to J(z || c)");
+         end;
+      end;
+      --  ML-KEM-1024: seeds d and z are ACVP's own keyGen inputs,
+      --  and m is an ACVP encapsulation input. The expected values come from
+      --  a reference validated against all 180 ACVP vectors first.
+      declare
+         PK : Ada.Streams.Stream_Element_Array (1 .. 1568);
+         SK : Ada.Streams.Stream_Element_Array (1 .. 3168);
+         CT : Ada.Streams.Stream_Element_Array (1 .. 1568);
+         K1, K2 : Ada.Streams.Stream_Element_Array (1 .. 32);
+      begin
+         Check (M.Public_Key_Length (M.ML_KEM_1024) = 1568
+                and then M.Secret_Key_Length (M.ML_KEM_1024) = 3168
+                and then M.Ciphertext_Length (M.ML_KEM_1024) = 1568,
+                "ML-KEM-1024 lengths");
+         Check (M.Key_From_Seeds
+                  (M.ML_KEM_1024,
+                   Bytes_From_Hex ("f3a706faf090c03db506863ab0b20bd8"
+                   & "a1627956318e88c67eb875e8e7266009"),
+                   Bytes_From_Hex ("35d2bc43dd1cc879f765bf2a0c5e2978"
+                   & "89dde910e57e2bb0eae417b90ab7a275"),
+                   PK, SK) = CryptoLib.Errors.Ok,
+                "ML-KEM-1024 keygen from the ACVP seeds");
+         Check (Digest_Hex (PK) = "b78619e4fceeeb86dee3fedb945eca6d"
+                   & "a61dae312771ef8fa871951d391bd7b6",
+                "ML-KEM-1024 encapsulation key matches");
+         Check (Digest_Hex (SK) = "925ed6f1cf0379ede29d8209432d6e08"
+                   & "c73ed0423883febf85416343f4fa1f86",
+                "ML-KEM-1024 decapsulation key matches");
+         Check (M.Encapsulate_With_Message
+                  (M.ML_KEM_1024, PK,
+                   Bytes_From_Hex ("2f1e2ca7bd72af847cac38cdefc4d345"
+                   & "909d7517543edf32e2fc491ba05eb5c3"),
+                   CT, K1) = CryptoLib.Errors.Ok,
+                "ML-KEM-1024 encapsulates");
+         Check (Digest_Hex (CT) = "2077d785d9430ab8ec17bbb7d2577739"
+                   & "58f3861641ac67d9520bf4e122327a34",
+                "ML-KEM-1024 ciphertext matches");
+         Check (K1 = Bytes_From_Hex ("58081d06c86b45df55c44be1a153cf34"
+                   & "80a38f65e186f9c5edba79df753b7483"),
+                "ML-KEM-1024 shared secret matches");
+         Check (M.Decapsulate (M.ML_KEM_1024, SK, CT, K2) = CryptoLib.Errors.Ok,
+                "ML-KEM-1024 decapsulates");
+         Check (K2 = K1, "ML-KEM-1024 decapsulates to the same secret");
+
+         --  Implicit rejection: a tampered ciphertext yields the pseudorandom
+         --  J(z || c) rather than an error, and that value is pinned so the
+         --  branch is checked to be right and not merely "different".
+         declare
+            Bad : Ada.Streams.Stream_Element_Array := CT;
+         begin
+            Bad (Bad'Last) := Bad (Bad'Last) xor 1;
+            Check (M.Decapsulate (M.ML_KEM_1024, SK, Bad, K2)
+                     = CryptoLib.Errors.Ok,
+                   "ML-KEM-1024 decapsulates a tampered ciphertext");
+            Check (K2 = Bytes_From_Hex ("5666168a478f69560096e3c7fb2ae803"
+                   & "550af6f6f3ab9010d3cf66ba113891d8"),
+                   "ML-KEM-1024 rejects implicitly to J(z || c)");
+         end;
+      end;
+
+      --  A wrong-length buffer is refused rather than silently mis-parsed.
+      declare
+         PK : Ada.Streams.Stream_Element_Array (1 .. 1184);
+         SK : Ada.Streams.Stream_Element_Array (1 .. 2400);
+         Short_CT : constant Ada.Streams.Stream_Element_Array (1 .. 10) :=
+           [others => 0];
+         Key : Ada.Streams.Stream_Element_Array (1 .. 32);
+         Zeroes : constant Ada.Streams.Stream_Element_Array (1 .. 32) :=
+           [others => 0];
+      begin
+         Check (M.Key_From_Seeds
+                  (M.ML_KEM_768,
+                   Bytes_From_Hex ("00"), Bytes_From_Hex ("00"), PK, SK)
+                  = CryptoLib.Errors.Handshake_Failed,
+                "ML-KEM refuses a short seed");
+         Check (M.Decapsulate (M.ML_KEM_768, SK, Short_CT, Key)
+                  = CryptoLib.Errors.Handshake_Failed,
+                "and a short ciphertext");
+         Check (Key = Zeroes, "zeroing the shared secret when it does");
+      end;
+   end Check_MLKEM_All_Parameter_Sets;
+
    procedure Check_MLKEM768_Vectors is
    begin
       declare
@@ -1435,6 +1653,8 @@ package body Tests_Key_Exchange is
    procedure Run_Check_FFDHE (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_MLDSA (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_MLDSA_Sign (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_MLKEM_All_Parameter_Sets
+     (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_MLKEM768_Vectors (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_SNTRUP761_Vectors (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_Modexp_And_DH_Group18 (Item : in out AUnit.Test_Cases.Test_Case'Class);
@@ -1480,6 +1700,13 @@ package body Tests_Key_Exchange is
    begin
       Check_MLKEM_Core_Algebra;
    end Run_Check_MLKEM_Core_Algebra;
+
+   procedure Run_Check_MLKEM_All_Parameter_Sets
+     (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_MLKEM_All_Parameter_Sets;
+   end Run_Check_MLKEM_All_Parameter_Sets;
 
    procedure Run_Check_MLKEM768_Vectors (Item : in out AUnit.Test_Cases.Test_Case'Class) is
       pragma Unreferenced (Item);
@@ -1531,6 +1758,7 @@ package body Tests_Key_Exchange is
       Register_Routine (Item, Run_Check_MLDSA'Access, "ml-dsa keygen");
       Register_Routine (Item, Run_Check_MLDSA_Sign'Access, "ml-dsa sign/verify");
       Register_Routine (Item, Run_Check_MLKEM768_Vectors'Access, "mlkem768 vectors");
+      Register_Routine (Item, Run_Check_MLKEM_All_Parameter_Sets'Access, "mlkem all parameter sets");
       Register_Routine (Item, Run_Check_SNTRUP761_Vectors'Access, "sntrup761 vectors");
       Register_Routine (Item, Run_Check_Modexp_And_DH_Group18'Access, "modexp and dh group18");
    end Register_Tests;

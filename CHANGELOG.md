@@ -29,6 +29,13 @@ predecessor.
   ffdhe2048 through ffdhe8192, the groups TLS negotiates, distinct from the SSH
   MODP groups. Primes derived from the RFC's construction and confirmed by
   OpenSSL naming them back from p and g alone.
+* ML-KEM (FIPS 203) in all three parameter sets (`MLKEM`): ML-KEM-512, 768
+  and 1024, where only 768 existed before. CNSA 2.0 is the concrete case for
+  1024 -- it pairs ML-KEM-1024 with ML-DSA-87, and the signature half was
+  already here. Checked against NIST's ACVP vectors, with the reference
+  validated against all 180 of them first. `MLKEM768` keeps its interface and
+  becomes a wrapper over the same implementation, so the KEM exists once
+  rather than twice; its own vector still passes unchanged.
 * ML-DSA (FIPS 204) for all three parameter sets: key generation, signing
   and verification, checked against NIST's own ACVP vectors. Signing offers
   both the deterministic and the hedged variant, and the FIPS 204 external

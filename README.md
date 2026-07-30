@@ -49,6 +49,7 @@ Do not run plain system `gnat*`, `gnatmake`, `gnatls`, `gnatprove`,
 | `CryptoLib.Argon2` | Argon2d/i/id (RFC 9106), the memory-hard password hash |
 | `CryptoLib.Blake2b` | BLAKE2b (RFC 7693), variable length and keyed, with a streaming interface |
 | `CryptoLib.FFDHE` | finite-field DH over the TLS named groups ffdhe2048/3072/4096/6144/8192 (RFC 7919) |
+| `CryptoLib.MLKEM` | ML-KEM (FIPS 203) — all three parameter sets: 512, 768, 1024 |
 | `CryptoLib.MLKEM768`, `CryptoLib.SNTRUP761`, `CryptoLib.Hybrid_PQ_KEX` | post-quantum KEMs + hybrid x25519 |
 | `CryptoLib.Random` | CSPRNG (getrandom/urandom/BCryptGenRandom), fail-closed |
 | `CryptoLib.Secure_Wipe` | non-elidable secret zeroization |
