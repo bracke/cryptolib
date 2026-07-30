@@ -1654,4 +1654,50 @@ package body Tests_RSA is
       end;
    end Check_RSA_PSS;
 
+   --  AUnit routine wrappers. Each check is a test of its own, so a
+   --  failure reports the check that failed and the rest still run.
+   procedure Run_Check_Weak_RSA_Key (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_RSA_Signing (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_RSA_Verify (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_RSA_PSS (Item : in out AUnit.Test_Cases.Test_Case'Class);
+
+   procedure Run_Check_Weak_RSA_Key (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Weak_RSA_Key;
+   end Run_Check_Weak_RSA_Key;
+
+   procedure Run_Check_RSA_Signing (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_RSA_Signing;
+   end Run_Check_RSA_Signing;
+
+   procedure Run_Check_RSA_Verify (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_RSA_Verify;
+   end Run_Check_RSA_Verify;
+
+   procedure Run_Check_RSA_PSS (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_RSA_PSS;
+   end Run_Check_RSA_PSS;
+
+   overriding procedure Register_Tests (Item : in out Test_Case) is
+      use AUnit.Test_Cases.Registration;
+   begin
+      Register_Routine (Item, Run_Check_Weak_RSA_Key'Access, "weak rsa key");
+      Register_Routine (Item, Run_Check_RSA_Signing'Access, "rsa signing");
+      Register_Routine (Item, Run_Check_RSA_Verify'Access, "rsa verify");
+      Register_Routine (Item, Run_Check_RSA_PSS'Access, "rsa pss");
+   end Register_Tests;
+
+   overriding function Name (Item : Test_Case) return AUnit.Message_String is
+      pragma Unreferenced (Item);
+   begin
+      return AUnit.Format ("cryptolib RSA");
+   end Name;
+
 end Tests_RSA;

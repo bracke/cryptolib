@@ -900,4 +900,42 @@ package body Tests_X509_Issuance is
       end;
    end Check_Ed448_Certificate;
 
+   --  AUnit routine wrappers. Each check is a test of its own, so a
+   --  failure reports the check that failed and the rest still run.
+   procedure Run_Check_P384_Local_CA (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Ed448_Certificate (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Certificates (Item : in out AUnit.Test_Cases.Test_Case'Class);
+
+   procedure Run_Check_P384_Local_CA (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_P384_Local_CA;
+   end Run_Check_P384_Local_CA;
+
+   procedure Run_Check_Ed448_Certificate (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Ed448_Certificate;
+   end Run_Check_Ed448_Certificate;
+
+   procedure Run_Check_Certificates (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Certificates;
+   end Run_Check_Certificates;
+
+   overriding procedure Register_Tests (Item : in out Test_Case) is
+      use AUnit.Test_Cases.Registration;
+   begin
+      Register_Routine (Item, Run_Check_P384_Local_CA'Access, "p384 local ca");
+      Register_Routine (Item, Run_Check_Ed448_Certificate'Access, "ed448 certificate");
+      Register_Routine (Item, Run_Check_Certificates'Access, "certificates");
+   end Register_Tests;
+
+   overriding function Name (Item : Test_Case) return AUnit.Message_String is
+      pragma Unreferenced (Item);
+   begin
+      return AUnit.Format ("cryptolib X.509 issuance");
+   end Name;
+
 end Tests_X509_Issuance;

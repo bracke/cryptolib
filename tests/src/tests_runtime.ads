@@ -1,3 +1,6 @@
+with AUnit;
+with AUnit.Test_Cases;
+
 --  Cross-cutting behaviour: constant time, fail-closed paths, buffer ceilings.
 --
 --  Each procedure is one group of known-answer or negative tests, and
@@ -5,16 +8,9 @@
 --  what keeps any one file readable; the driver keeps the order.
 package Tests_Runtime is
 
-   procedure Check_Random_Fails_Closed;
+   type Test_Case is new AUnit.Test_Cases.Test_Case with null record;
 
-   procedure Check_Constant_Time_Equal;
-
-   procedure Check_Buffer_Ceiling;
-
-   procedure Check_Consumer_Entry_Points;
-
-   procedure Check_Manifests_And_Helpers;
-
-   procedure Check_Zero_On_Failure;
+   overriding procedure Register_Tests (Item : in out Test_Case);
+   overriding function Name (Item : Test_Case) return AUnit.Message_String;
 
 end Tests_Runtime;

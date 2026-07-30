@@ -1,3 +1,6 @@
+with AUnit;
+with AUnit.Test_Cases;
+
 --  Elliptic-curve signatures and key agreement: ECDSA, Ed25519, Ed448, X25519, ECDH.
 --
 --  Each procedure is one group of known-answer or negative tests, and
@@ -5,26 +8,9 @@
 --  what keeps any one file readable; the driver keeps the order.
 package Tests_Curves is
 
-   procedure Check_ECDSA_P384_Public_Key;
+   type Test_Case is new AUnit.Test_Cases.Test_Case with null record;
 
-   procedure Check_ECDSA_P384_Verify;
-
-   procedure Check_ECDSA_P384_P521_Signing;
-
-   procedure Check_Off_Curve_Key;
-
-   procedure Check_Ed25519_Encoding;
-
-   procedure Check_Ed448;
-
-   procedure Check_X25519_Shared_Secret;
-
-   procedure Check_ECDSA_Raw_Entry_Points;
-
-   procedure Check_ECDH;
-
-   procedure Check_ECDSA_Curves;
-
-   procedure Check_ECDSA_Scalar_Encodings;
+   overriding procedure Register_Tests (Item : in out Test_Case);
+   overriding function Name (Item : Test_Case) return AUnit.Message_String;
 
 end Tests_Curves;

@@ -1,3 +1,6 @@
+with AUnit;
+with AUnit.Test_Cases;
+
 --  RFC 5280 name-constraint processing.
 --
 --  Each procedure is one group of known-answer or negative tests, and
@@ -5,10 +8,9 @@
 --  what keeps any one file readable; the driver keeps the order.
 package Tests_X509_Name_Constraints is
 
-   procedure Check_Name_Constraint_Depth_Fields;
+   type Test_Case is new AUnit.Test_Cases.Test_Case with null record;
 
-   procedure Check_Unapplicable_Name_Constraint;
-
-   procedure Check_Name_Constraints;
+   overriding procedure Register_Tests (Item : in out Test_Case);
+   overriding function Name (Item : Test_Case) return AUnit.Message_String;
 
 end Tests_X509_Name_Constraints;

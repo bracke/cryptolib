@@ -752,5 +752,5 @@ every status reading `Ok` while every key it produces is predictable.
   ChaCha20-Poly1305 `Open` rejects tampered ciphertext and tampered tags.
 - **`Secure_Wipe`** has a unit test asserting a filled buffer is zeroed.
 
-Run the suite: `(cd tests && alr build) && ./tests/bin/tests` (expects
-`cryptolib tests passed`).
+Run the suite: `(cd tests && alr build) && ./tests/bin/tests` (an AUnit runner:
+expects `Failed Assertions: 0` and exit status 0).

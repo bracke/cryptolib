@@ -1,5 +1,5 @@
-with Ada.Streams;
-with CryptoLib.Hashes;
+with AUnit;
+with AUnit.Test_Cases;
 
 --  Digests, checksums and fingerprints.
 --
@@ -8,21 +8,9 @@ with CryptoLib.Hashes;
 --  what keeps any one file readable; the driver keeps the order.
 package Tests_Hashes is
 
-   procedure Check_MD5
-     (Data     : Ada.Streams.Stream_Element_Array;
-      Expected : CryptoLib.Hashes.MD5_Digest;
-      Label    : String);
+   type Test_Case is new AUnit.Test_Cases.Test_Case with null record;
 
-   procedure Check_XXH3;
-
-   procedure Check_Adler32;
-
-   procedure Check_CRC32;
-
-   procedure Check_OpenSSH_Fingerprints;
-
-   procedure Check_Streaming_SHA256_SHA512;
-
-   procedure Check_SHA1_Fingerprint;
+   overriding procedure Register_Tests (Item : in out Test_Case);
+   overriding function Name (Item : Test_Case) return AUnit.Message_String;
 
 end Tests_Hashes;

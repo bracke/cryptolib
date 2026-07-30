@@ -40,11 +40,13 @@ predecessor.
   three, so the two a given host does not build cannot rot unnoticed. The
   Windows backend (`BCryptGenRandom`) has never been run on Windows -- see
   `SECURITY.md`.
-* The test suite is a driver (`tests/src/tests.adb`) plus one package per
-  topic (`tests/src/tests_<topic>.adb`), sharing the assertion and the
-  hex/string helpers through `tests_support`. It was a single 17,439-line
-  procedure; the largest file is now about a tenth of that. The driver's call
-  sequence is unchanged, so the tests still run in the order they did.
+* The test suite is AUnit: `tests/src/tests.adb` is the runner, `tests_suite`
+  assembles one `AUnit.Test_Cases.Test_Case` per topic, and each topic package
+  registers its checks as individual routines. 136 tests over 14 packages,
+  asserting through `Tests_Support.Check`. It was a single 17,439-line
+  procedure that raised on the first failed assertion and hid every check
+  after it; now each check is a test of its own, a failure names itself, and
+  the rest of the suite still runs.
 * Release preflight (`tools/bin/check_release_ready`): a forced build, the
   constant-time check, every per-OS backend, the test suite, the Alire manifest,
   the test suite's own shape, the README examples, and GNATdoc tags. CI runs it.

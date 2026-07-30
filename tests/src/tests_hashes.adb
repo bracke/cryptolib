@@ -63,6 +63,8 @@ with CryptoLib.Bignum;
 with CryptoLib.Random;
 with CryptoLib.RSA;
 with Tests_Support; use Tests_Support;
+with Ada.Streams;
+with CryptoLib.Hashes;
 
 package body Tests_Hashes is
 
@@ -75,7 +77,7 @@ package body Tests_Hashes is
    use type Interfaces.Unsigned_32;
 
 
-   procedure Check_MD5
+   procedure Expect_MD5
      (Data     : Ada.Streams.Stream_Element_Array;
       Expected : CryptoLib.Hashes.MD5_Digest;
       Label    : String)
@@ -85,7 +87,7 @@ package body Tests_Hashes is
       for Index in Actual'Range loop
          Check (Actual (Index) = Expected (Index), Label);
       end loop;
-   end Check_MD5;
+   end Expect_MD5;
 
 
    procedure Check_XXH3 is
@@ -433,5 +435,594 @@ package body Tests_Hashes is
              "and text carrying no certificate has no fingerprint rather "
              & "than the hash of nothing");
    end Check_SHA1_Fingerprint;
+
+
+   procedure Check_MD5_Vectors is
+   begin
+      Expect_MD5
+        (Ada.Streams.Stream_Element_Array'(1 .. 0 => 0),
+         [16#D4#, 16#1D#, 16#8C#, 16#D9#, 16#8F#, 16#00#, 16#B2#, 16#04#,
+          16#E9#, 16#80#, 16#09#, 16#98#, 16#EC#, 16#F8#, 16#42#, 16#7E#],
+         "MD5 empty vector");
+      Expect_MD5
+        (Bytes_From_String ("abc"),
+         [16#90#, 16#01#, 16#50#, 16#98#, 16#3C#, 16#D2#, 16#4F#, 16#B0#,
+          16#D6#, 16#96#, 16#3F#, 16#7D#, 16#28#, 16#E1#, 16#7F#, 16#72#],
+         "MD5 abc vector");
+      --  RFC 1321 vectors that exercise the padding paths the "abc" case cannot:
+      --  62 bytes forces the extra-block pad (used > 56), 80 bytes spans two
+      --  compression blocks.
+      Expect_MD5
+        (Bytes_From_String
+           ("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"),
+         [16#D1#, 16#74#, 16#AB#, 16#98#, 16#D2#, 16#77#, 16#D9#, 16#F5#,
+          16#A5#, 16#61#, 16#1C#, 16#2C#, 16#9F#, 16#41#, 16#9D#, 16#9F#],
+         "MD5 alphanumeric vector");
+      Expect_MD5
+        (Bytes_From_String
+           ("1234567890123456789012345678901234567890"
+            & "1234567890123456789012345678901234567890"),
+         [16#57#, 16#ED#, 16#F4#, 16#A2#, 16#2B#, 16#E3#, 16#C9#, 16#55#,
+          16#AC#, 16#49#, 16#DA#, 16#2E#, 16#21#, 16#07#, 16#B6#, 16#7A#],
+         "MD5 eighty-digit vector");
+   end Check_MD5_Vectors;
+
+
+   --  Streaming MD5: chunked updates reproduce the KAT, and byte-at-a-time
+   --  updates match the one-shot digest across every padding boundary.
+   procedure Check_Streaming_MD5 is
+   begin
+      declare
+         Ctx : CryptoLib.Hashes.MD5_Context;
+      begin
+         CryptoLib.Hashes.Initialize_MD5 (Ctx);
+         CryptoLib.Hashes.Update (Ctx, Bytes_From_String ("ab"));
+         CryptoLib.Hashes.Update (Ctx, Bytes_From_String ("c"));
+         Check
+           (Ada.Streams.Stream_Element_Array (CryptoLib.Hashes.Finalize (Ctx))
+            = Bytes_From_Hex ("900150983cd24fb0d6963f7d28e17f72"),
+            "MD5 streaming KAT (abc, chunked)");
+
+         for Length in 0 .. 200 loop
+            declare
+               Data : constant Ada.Streams.Stream_Element_Array :=
+                 Sequence_Data (Length);
+               Byte_Ctx  : CryptoLib.Hashes.MD5_Context;
+               Split_Ctx : CryptoLib.Hashes.MD5_Context;
+               Split     : constant Ada.Streams.Stream_Element_Offset :=
+                 Data'First + Ada.Streams.Stream_Element_Offset (Length / 3) - 1;
+            begin
+               CryptoLib.Hashes.Initialize_MD5 (Byte_Ctx);
+               for Index in Data'Range loop
+                  CryptoLib.Hashes.Update (Byte_Ctx, Data (Index .. Index));
+               end loop;
+               Check
+                 (Ada.Streams.Stream_Element_Array
+                    (CryptoLib.Hashes.Finalize (Byte_Ctx))
+                  = Ada.Streams.Stream_Element_Array (CryptoLib.Hashes.MD5 (Data)),
+                  "MD5 streaming byte-at-a-time matches one-shot");
+
+               CryptoLib.Hashes.Initialize_MD5 (Split_Ctx);
+               CryptoLib.Hashes.Update (Split_Ctx, Data (Data'First .. Split));
+               CryptoLib.Hashes.Update (Split_Ctx, Data (Split + 1 .. Data'Last));
+               Check
+                 (Ada.Streams.Stream_Element_Array
+                    (CryptoLib.Hashes.Finalize (Split_Ctx))
+                  = Ada.Streams.Stream_Element_Array (CryptoLib.Hashes.MD5 (Data)),
+                  "MD5 streaming split update matches one-shot");
+            end;
+         end loop;
+      end;
+   end Check_Streaming_MD5;
+
+
+   --  SHA-3 / SHAKE NIST known-answer vectors (previously only validated
+   --  transitively via ML-KEM / sntrup761).
+   procedure Check_SHA3_And_SHAKE_Vectors is
+   begin
+      Check
+        (Ada.Streams.Stream_Element_Array (CryptoLib.SHA3.SHA3_256 (Bytes_From_String ("")))
+         = Bytes_From_Hex
+             ("a7ffc6f8bf1ed76651c14756a061d662"
+              & "f580ff4de43b49fa82d80a4b80f8434a"),
+         "SHA3-256 NIST KAT (empty)");
+      Check
+        (Ada.Streams.Stream_Element_Array
+           (CryptoLib.SHA3.SHA3_256 (Bytes_From_String ("abc")))
+         = Bytes_From_Hex
+             ("3a985da74fe225b2045c172d6bd390bd"
+              & "855f086e3e9d525b46bfe24511431532"),
+         "SHA3-256 NIST KAT (abc)");
+      Check
+        (Ada.Streams.Stream_Element_Array
+           (CryptoLib.SHA3.SHA3_512 (Bytes_From_String ("abc")))
+         = Bytes_From_Hex
+             ("b751850b1a57168a5693cd924b6b096e08f621827444f70d884f5d0240d2712e"
+              & "10e116e9192af3c91a7ec57647e3934057340b4cf408d5a56592f8274eec53f0"),
+         "SHA3-512 NIST KAT (abc)");
+      Check
+        (CryptoLib.SHA3.SHAKE128 (Bytes_From_String (""), 32)
+         = Bytes_From_Hex
+             ("7f9c2ba4e88f827d616045507605853e"
+              & "d73b8093f6efbc88eb1a6eacfa66ef26"),
+         "SHAKE128 NIST KAT (empty, 32)");
+      Check
+        (CryptoLib.SHA3.SHAKE256 (Bytes_From_String ("abc"), 64)
+         = Bytes_From_Hex
+             ("483366601360a8771c6863080cc4114d8db44530f8f1e1ee4f94ea37e78b5739"
+              & "d5a15bef186a5386c75744c0527e1faa9f8726e462a12a4feb06bd8801e751e4"),
+         "SHAKE256 NIST KAT (abc, 64)");
+   end Check_SHA3_And_SHAKE_Vectors;
+
+
+   --  Direct SHA-1/2 known-answer vectors ("abc"), previously only exercised
+   --  transitively through PBKDF2 / ML-KEM.
+   procedure Check_SHA1_Vector is
+   begin
+      Check
+        (Ada.Streams.Stream_Element_Array
+           (CryptoLib.Hashes.SHA1 (Bytes_From_String ("abc")))
+         = Bytes_From_Hex ("a9993e364706816aba3e25717850c26c9cd0d89d"),
+         "SHA-1 KAT (abc)");
+   end Check_SHA1_Vector;
+
+   --  Streaming SHA-1: chunked updates reproduce the KAT, and a byte-at-a-time
+   --  multi-block (>64 byte) input matches the one-shot digest.
+   procedure Check_Streaming_SHA1 is
+   begin
+      declare
+         Ctx  : CryptoLib.Hashes.SHA1_Context;
+         Ctx2 : CryptoLib.Hashes.SHA1_Context;
+         Long : constant Ada.Streams.Stream_Element_Array :=
+           Bytes_From_String
+             ("The quick brown fox jumps over the lazy dog. "
+              & "Pack my box with five dozen liquor jugs. 0123456789");
+      begin
+         CryptoLib.Hashes.Initialize_SHA1 (Ctx);
+         CryptoLib.Hashes.Update (Ctx, Bytes_From_String ("ab"));
+         CryptoLib.Hashes.Update (Ctx, Bytes_From_String ("c"));
+         Check
+           (Ada.Streams.Stream_Element_Array (CryptoLib.Hashes.Finalize (Ctx))
+            = Bytes_From_Hex ("a9993e364706816aba3e25717850c26c9cd0d89d"),
+            "SHA-1 streaming KAT (abc, chunked)");
+
+         CryptoLib.Hashes.Initialize_SHA1 (Ctx2);
+         for Index in Long'Range loop
+            CryptoLib.Hashes.Update (Ctx2, Long (Index .. Index));
+         end loop;
+         Check
+           (Ada.Streams.Stream_Element_Array (CryptoLib.Hashes.Finalize (Ctx2))
+            = Ada.Streams.Stream_Element_Array (CryptoLib.Hashes.SHA1 (Long)),
+            "SHA-1 streaming matches one-shot (multi-block)");
+      end;
+   end Check_Streaming_SHA1;
+
+   procedure Check_SHA256_SHA384_Vectors is
+   begin
+      Check
+        (Ada.Streams.Stream_Element_Array
+           (CryptoLib.Hashes.SHA256 (Bytes_From_String ("abc")))
+         = Bytes_From_Hex
+             ("ba7816bf8f01cfea414140de5dae2223"
+              & "b00361a396177a9cb410ff61f20015ad"),
+         "SHA-256 KAT (abc)");
+      Check
+        (Ada.Streams.Stream_Element_Array
+           (CryptoLib.Hashes.SHA384 (Bytes_From_String ("abc")))
+         = Bytes_From_Hex
+             ("cb00753f45a35e8bb5a03d699ac65007272c32ab0eded1631a8b605a43ff5bed"
+              & "8086072ba1e7cc2358baeca134c825a7"),
+         "SHA-384 KAT (abc)");
+   end Check_SHA256_SHA384_Vectors;
+
+   --  Streaming SHA-384: chunked updates reproduce the KAT, the 112-byte NIST
+   --  vector exercises the extra-block pad (used > 112) across two blocks, and
+   --  byte-at-a-time updates match the one-shot at every padding boundary.
+   procedure Check_Streaming_SHA384 is
+   begin
+      declare
+         Ctx      : CryptoLib.Hashes.SHA384_Context;
+         Long_Ctx : CryptoLib.Hashes.SHA384_Context;
+         Long     : constant Ada.Streams.Stream_Element_Array :=
+           Bytes_From_String
+             ("abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmn"
+              & "hijklmnoijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu");
+      begin
+         CryptoLib.Hashes.Initialize_SHA384 (Ctx);
+         CryptoLib.Hashes.Update (Ctx, Bytes_From_String ("ab"));
+         CryptoLib.Hashes.Update (Ctx, Bytes_From_String ("c"));
+         Check
+           (Ada.Streams.Stream_Element_Array (CryptoLib.Hashes.Finalize (Ctx))
+            = Bytes_From_Hex
+                ("cb00753f45a35e8bb5a03d699ac65007272c32ab0eded1631a8b605a43ff5bed"
+                 & "8086072ba1e7cc2358baeca134c825a7"),
+            "SHA-384 streaming KAT (abc, chunked)");
+
+         CryptoLib.Hashes.Initialize_SHA384 (Long_Ctx);
+         for Index in Long'Range loop
+            CryptoLib.Hashes.Update (Long_Ctx, Long (Index .. Index));
+         end loop;
+         Check
+           (Ada.Streams.Stream_Element_Array
+              (CryptoLib.Hashes.Finalize (Long_Ctx))
+            = Bytes_From_Hex
+                ("09330c33f71147e83d192fc782cd1b4753111b173b3b05d22fa08086e3b0f712"
+                 & "fcc7c71a557e2db966c3e9fa91746039"),
+            "SHA-384 streaming KAT (112-byte NIST vector, byte-at-a-time)");
+
+         for Length in 0 .. 300 loop
+            declare
+               Data : constant Ada.Streams.Stream_Element_Array :=
+                 Sequence_Data (Length);
+               Split_Ctx : CryptoLib.Hashes.SHA384_Context;
+               Split     : constant Ada.Streams.Stream_Element_Offset :=
+                 Data'First + Ada.Streams.Stream_Element_Offset (Length / 3) - 1;
+            begin
+               CryptoLib.Hashes.Initialize_SHA384 (Split_Ctx);
+               CryptoLib.Hashes.Update (Split_Ctx, Data (Data'First .. Split));
+               CryptoLib.Hashes.Update (Split_Ctx, Data (Split + 1 .. Data'Last));
+               Check
+                 (Ada.Streams.Stream_Element_Array
+                    (CryptoLib.Hashes.Finalize (Split_Ctx))
+                  = Ada.Streams.Stream_Element_Array
+                      (CryptoLib.Hashes.SHA384 (Data)),
+                  "SHA-384 streaming split update matches one-shot");
+            end;
+         end loop;
+      end;
+   end Check_Streaming_SHA384;
+
+   procedure Check_SHA512_Vector is
+   begin
+      Check
+        (Ada.Streams.Stream_Element_Array
+           (CryptoLib.Hashes.SHA512 (Bytes_From_String ("abc")))
+         = Bytes_From_Hex
+             ("ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a"
+              & "2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f"),
+         "SHA-512 KAT (abc)");
+   end Check_SHA512_Vector;
+
+
+   --  HMAC known-answer vectors (RFC 2202 / RFC 4231 test case 1:
+   --  key = 0x0b x20, message = "Hi There").
+   procedure Check_HMAC_Vectors is
+   begin
+      declare
+         HK  : constant Ada.Streams.Stream_Element_Array :=
+           Bytes_From_Hex ("0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b");
+         HM  : constant Ada.Streams.Stream_Element_Array :=
+           Bytes_From_String ("Hi There");
+      begin
+         Check
+           (Ada.Streams.Stream_Element_Array (CryptoLib.Macs.HMAC_SHA1 (HK, HM))
+            = Bytes_From_Hex ("b617318655057264e28bc0b6fb378c8ef146be00"),
+            "HMAC-SHA1 RFC 2202 KAT");
+         Check
+           (Ada.Streams.Stream_Element_Array (CryptoLib.Macs.HMAC_SHA256 (HK, HM))
+            = Bytes_From_Hex
+                ("b0344c61d8db38535ca8afceaf0bf12b"
+                 & "881dc200c9833da726e9376c2e32cff7"),
+            "HMAC-SHA256 RFC 4231 KAT");
+         Check
+           (Ada.Streams.Stream_Element_Array (CryptoLib.Macs.HMAC_SHA512 (HK, HM))
+            = Bytes_From_Hex
+                ("87aa7cdea5ef619d4ff0b4241a1d6cb02379f4e2ce4ec2787ad0b30545e17cde"
+                 & "daa833b7d6b8a702038b274eaea3f4e4be9d914eeb61f1702e696c203a126854"),
+            "HMAC-SHA512 RFC 4231 KAT");
+      end;
+   end Check_HMAC_Vectors;
+
+
+   --  HMAC-SHA384 (RFC 4231 test case 1) plus the long-key path of all four
+   --  variants (RFC 2202 / RFC 4231 test case 6): a key longer than the hash
+   --  block is replaced by its own digest before the pads are derived.
+   procedure Check_HMAC_SHA384_Long_Keys is
+   begin
+      declare
+         HK  : constant Ada.Streams.Stream_Element_Array (1 .. 20) :=
+           [others => 16#0B#];
+         HM  : constant Ada.Streams.Stream_Element_Array :=
+           Bytes_From_String ("Hi There");
+         LK1 : constant Ada.Streams.Stream_Element_Array (1 .. 80) :=
+           [others => 16#AA#];
+         LK  : constant Ada.Streams.Stream_Element_Array (1 .. 131) :=
+           [others => 16#AA#];
+         LM  : constant Ada.Streams.Stream_Element_Array :=
+           Bytes_From_String
+             ("Test Using Larger Than Block-Size Key - Hash Key First");
+      begin
+         Check
+           (Ada.Streams.Stream_Element_Array (CryptoLib.Macs.HMAC_SHA384 (HK, HM))
+            = Bytes_From_Hex
+                ("afd03944d84895626b0825f4ab46907f15f9dadbe4101ec6"
+                 & "82aa034c7cebc59cfaea9ea9076ede7f4af152e8b2fa9cb6"),
+            "HMAC-SHA384 RFC 4231 KAT");
+         Check
+           (Ada.Streams.Stream_Element_Array
+              (CryptoLib.Macs.HMAC_SHA1 (LK1, LM))
+            = Bytes_From_Hex ("aa4ae5e15272d00e95705637ce8a3b55ed402112"),
+            "HMAC-SHA1 RFC 2202 long-key KAT");
+         Check
+           (Ada.Streams.Stream_Element_Array
+              (CryptoLib.Macs.HMAC_SHA256 (LK, LM))
+            = Bytes_From_Hex
+                ("60e431591ee0b67f0d8a26aacbf5b77f"
+                 & "8e0bc6213728c5140546040f0ee37f54"),
+            "HMAC-SHA256 RFC 4231 long-key KAT");
+         Check
+           (Ada.Streams.Stream_Element_Array
+              (CryptoLib.Macs.HMAC_SHA384 (LK, LM))
+            = Bytes_From_Hex
+                ("4ece084485813e9088d2c63a041bc5b44f9ef1012a2b588f"
+                 & "3cd11f05033ac4c60c2ef6ab4030fe8296248df163f44952"),
+            "HMAC-SHA384 RFC 4231 long-key KAT");
+         Check
+           (Ada.Streams.Stream_Element_Array
+              (CryptoLib.Macs.HMAC_SHA512 (LK, LM))
+            = Bytes_From_Hex
+                ("80b24263c7c1a3ebb71493c1dd7be8b49b46d1f41b4aeec1121b013783f8f352"
+                 & "6b56d037e05f2598bd0fd2215d6a1e5295e64f73f63f0aec8b915a985d786598"),
+            "HMAC-SHA512 RFC 4231 long-key KAT");
+      end;
+   end Check_HMAC_SHA384_Long_Keys;
+
+
+   --  Streaming HMAC: split and byte-at-a-time updates reproduce the one-shot
+   --  tag, with a short key and with a key longer than the hash block, and an
+   --  Initialize/Finalize with no Update matches the empty message.
+   procedure Check_Streaming_HMAC is
+   begin
+      declare
+         SK    : constant Ada.Streams.Stream_Element_Array (1 .. 20) :=
+           [others => 16#0B#];
+         LK    : constant Ada.Streams.Stream_Element_Array (1 .. 131) :=
+           [others => 16#AA#];
+         Msg   : constant Ada.Streams.Stream_Element_Array := Sequence_Data (200);
+         Empty : constant Ada.Streams.Stream_Element_Array (1 .. 0) :=
+           [others => 0];
+         Split : constant Ada.Streams.Stream_Element_Offset := Msg'First + 77;
+
+         Split_1   : CryptoLib.Macs.HMAC_SHA1_Context;
+         Split_256 : CryptoLib.Macs.HMAC_SHA256_Context;
+         Split_384 : CryptoLib.Macs.HMAC_SHA384_Context;
+         Split_512 : CryptoLib.Macs.HMAC_SHA512_Context;
+         Byte_1    : CryptoLib.Macs.HMAC_SHA1_Context;
+         Byte_256  : CryptoLib.Macs.HMAC_SHA256_Context;
+         Byte_384  : CryptoLib.Macs.HMAC_SHA384_Context;
+         Byte_512  : CryptoLib.Macs.HMAC_SHA512_Context;
+         Empty_256 : CryptoLib.Macs.HMAC_SHA256_Context;
+      begin
+         CryptoLib.Macs.Initialize_HMAC_SHA1 (Split_1, SK);
+         CryptoLib.Macs.Update (Split_1, Msg (Msg'First .. Split));
+         CryptoLib.Macs.Update (Split_1, Msg (Split + 1 .. Msg'Last));
+         Check
+           (Ada.Streams.Stream_Element_Array
+              (CryptoLib.Macs.Finalize (Split_1))
+            = Ada.Streams.Stream_Element_Array
+                (CryptoLib.Macs.HMAC_SHA1 (SK, Msg)),
+            "HMAC-SHA1 streaming split update matches one-shot");
+
+         CryptoLib.Macs.Initialize_HMAC_SHA256 (Split_256, SK);
+         CryptoLib.Macs.Update (Split_256, Msg (Msg'First .. Split));
+         CryptoLib.Macs.Update (Split_256, Msg (Split + 1 .. Msg'Last));
+         Check
+           (Ada.Streams.Stream_Element_Array
+              (CryptoLib.Macs.Finalize (Split_256))
+            = Ada.Streams.Stream_Element_Array
+                (CryptoLib.Macs.HMAC_SHA256 (SK, Msg)),
+            "HMAC-SHA256 streaming split update matches one-shot");
+
+         CryptoLib.Macs.Initialize_HMAC_SHA384 (Split_384, SK);
+         CryptoLib.Macs.Update (Split_384, Msg (Msg'First .. Split));
+         CryptoLib.Macs.Update (Split_384, Msg (Split + 1 .. Msg'Last));
+         Check
+           (Ada.Streams.Stream_Element_Array
+              (CryptoLib.Macs.Finalize (Split_384))
+            = Ada.Streams.Stream_Element_Array
+                (CryptoLib.Macs.HMAC_SHA384 (SK, Msg)),
+            "HMAC-SHA384 streaming split update matches one-shot");
+
+         CryptoLib.Macs.Initialize_HMAC_SHA512 (Split_512, SK);
+         CryptoLib.Macs.Update (Split_512, Msg (Msg'First .. Split));
+         CryptoLib.Macs.Update (Split_512, Msg (Split + 1 .. Msg'Last));
+         Check
+           (Ada.Streams.Stream_Element_Array
+              (CryptoLib.Macs.Finalize (Split_512))
+            = Ada.Streams.Stream_Element_Array
+                (CryptoLib.Macs.HMAC_SHA512 (SK, Msg)),
+            "HMAC-SHA512 streaming split update matches one-shot");
+
+         --  Long keys go through the hash-the-key branch of Initialize.
+         CryptoLib.Macs.Initialize_HMAC_SHA1 (Byte_1, LK);
+         CryptoLib.Macs.Initialize_HMAC_SHA256 (Byte_256, LK);
+         CryptoLib.Macs.Initialize_HMAC_SHA384 (Byte_384, LK);
+         CryptoLib.Macs.Initialize_HMAC_SHA512 (Byte_512, LK);
+         for Index in Msg'Range loop
+            CryptoLib.Macs.Update (Byte_1, Msg (Index .. Index));
+            CryptoLib.Macs.Update (Byte_256, Msg (Index .. Index));
+            CryptoLib.Macs.Update (Byte_384, Msg (Index .. Index));
+            CryptoLib.Macs.Update (Byte_512, Msg (Index .. Index));
+         end loop;
+         Check
+           (Ada.Streams.Stream_Element_Array (CryptoLib.Macs.Finalize (Byte_1))
+            = Ada.Streams.Stream_Element_Array
+                (CryptoLib.Macs.HMAC_SHA1 (LK, Msg)),
+            "HMAC-SHA1 streaming byte-at-a-time (long key) matches one-shot");
+         Check
+           (Ada.Streams.Stream_Element_Array (CryptoLib.Macs.Finalize (Byte_256))
+            = Ada.Streams.Stream_Element_Array
+                (CryptoLib.Macs.HMAC_SHA256 (LK, Msg)),
+            "HMAC-SHA256 streaming byte-at-a-time (long key) matches one-shot");
+         Check
+           (Ada.Streams.Stream_Element_Array (CryptoLib.Macs.Finalize (Byte_384))
+            = Ada.Streams.Stream_Element_Array
+                (CryptoLib.Macs.HMAC_SHA384 (LK, Msg)),
+            "HMAC-SHA384 streaming byte-at-a-time (long key) matches one-shot");
+         Check
+           (Ada.Streams.Stream_Element_Array (CryptoLib.Macs.Finalize (Byte_512))
+            = Ada.Streams.Stream_Element_Array
+                (CryptoLib.Macs.HMAC_SHA512 (LK, Msg)),
+            "HMAC-SHA512 streaming byte-at-a-time (long key) matches one-shot");
+
+         CryptoLib.Macs.Initialize_HMAC_SHA256 (Empty_256, SK);
+         Check
+           (Ada.Streams.Stream_Element_Array
+              (CryptoLib.Macs.Finalize (Empty_256))
+            = Ada.Streams.Stream_Element_Array
+                (CryptoLib.Macs.HMAC_SHA256 (SK, Empty)),
+            "HMAC-SHA256 streaming with no Update matches empty message");
+      end;
+   end Check_Streaming_HMAC;
+
+   --  AUnit routine wrappers. Each check is a test of its own, so a
+   --  failure reports the check that failed and the rest still run.
+   procedure Run_Check_OpenSSH_Fingerprints (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Streaming_SHA256_SHA512 (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_SHA1_Fingerprint (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_XXH3 (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Adler32 (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_CRC32 (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_MD5_Vectors (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Streaming_MD5 (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_SHA3_And_SHAKE_Vectors (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_SHA1_Vector (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Streaming_SHA1 (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_SHA256_SHA384_Vectors (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Streaming_SHA384 (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_SHA512_Vector (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_HMAC_Vectors (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_HMAC_SHA384_Long_Keys (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Streaming_HMAC (Item : in out AUnit.Test_Cases.Test_Case'Class);
+
+   procedure Run_Check_OpenSSH_Fingerprints (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_OpenSSH_Fingerprints;
+   end Run_Check_OpenSSH_Fingerprints;
+
+   procedure Run_Check_Streaming_SHA256_SHA512 (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Streaming_SHA256_SHA512;
+   end Run_Check_Streaming_SHA256_SHA512;
+
+   procedure Run_Check_SHA1_Fingerprint (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_SHA1_Fingerprint;
+   end Run_Check_SHA1_Fingerprint;
+
+   procedure Run_Check_XXH3 (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_XXH3;
+   end Run_Check_XXH3;
+
+   procedure Run_Check_Adler32 (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Adler32;
+   end Run_Check_Adler32;
+
+   procedure Run_Check_CRC32 (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_CRC32;
+   end Run_Check_CRC32;
+
+   procedure Run_Check_MD5_Vectors (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_MD5_Vectors;
+   end Run_Check_MD5_Vectors;
+
+   procedure Run_Check_Streaming_MD5 (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Streaming_MD5;
+   end Run_Check_Streaming_MD5;
+
+   procedure Run_Check_SHA3_And_SHAKE_Vectors (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_SHA3_And_SHAKE_Vectors;
+   end Run_Check_SHA3_And_SHAKE_Vectors;
+
+   procedure Run_Check_SHA1_Vector (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_SHA1_Vector;
+   end Run_Check_SHA1_Vector;
+
+   procedure Run_Check_Streaming_SHA1 (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Streaming_SHA1;
+   end Run_Check_Streaming_SHA1;
+
+   procedure Run_Check_SHA256_SHA384_Vectors (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_SHA256_SHA384_Vectors;
+   end Run_Check_SHA256_SHA384_Vectors;
+
+   procedure Run_Check_Streaming_SHA384 (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Streaming_SHA384;
+   end Run_Check_Streaming_SHA384;
+
+   procedure Run_Check_SHA512_Vector (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_SHA512_Vector;
+   end Run_Check_SHA512_Vector;
+
+   procedure Run_Check_HMAC_Vectors (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_HMAC_Vectors;
+   end Run_Check_HMAC_Vectors;
+
+   procedure Run_Check_HMAC_SHA384_Long_Keys (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_HMAC_SHA384_Long_Keys;
+   end Run_Check_HMAC_SHA384_Long_Keys;
+
+   procedure Run_Check_Streaming_HMAC (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Streaming_HMAC;
+   end Run_Check_Streaming_HMAC;
+
+   overriding procedure Register_Tests (Item : in out Test_Case) is
+      use AUnit.Test_Cases.Registration;
+   begin
+      Register_Routine (Item, Run_Check_OpenSSH_Fingerprints'Access, "openssh fingerprints");
+      Register_Routine (Item, Run_Check_Streaming_SHA256_SHA512'Access, "streaming sha256 sha512");
+      Register_Routine (Item, Run_Check_SHA1_Fingerprint'Access, "sha1 fingerprint");
+      Register_Routine (Item, Run_Check_XXH3'Access, "xxh3");
+      Register_Routine (Item, Run_Check_Adler32'Access, "adler32");
+      Register_Routine (Item, Run_Check_CRC32'Access, "crc32");
+      Register_Routine (Item, Run_Check_MD5_Vectors'Access, "md5 vectors");
+      Register_Routine (Item, Run_Check_Streaming_MD5'Access, "streaming md5");
+      Register_Routine (Item, Run_Check_SHA3_And_SHAKE_Vectors'Access, "sha3 and shake vectors");
+      Register_Routine (Item, Run_Check_SHA1_Vector'Access, "sha1 vector");
+      Register_Routine (Item, Run_Check_Streaming_SHA1'Access, "streaming sha1");
+      Register_Routine (Item, Run_Check_SHA256_SHA384_Vectors'Access, "sha256 sha384 vectors");
+      Register_Routine (Item, Run_Check_Streaming_SHA384'Access, "streaming sha384");
+      Register_Routine (Item, Run_Check_SHA512_Vector'Access, "sha512 vector");
+      Register_Routine (Item, Run_Check_HMAC_Vectors'Access, "hmac vectors");
+      Register_Routine (Item, Run_Check_HMAC_SHA384_Long_Keys'Access, "hmac sha384 long keys");
+      Register_Routine (Item, Run_Check_Streaming_HMAC'Access, "streaming hmac");
+   end Register_Tests;
+
+   overriding function Name (Item : Test_Case) return AUnit.Message_String is
+      pragma Unreferenced (Item);
+   begin
+      return AUnit.Format ("cryptolib hashes, checksums and fingerprints");
+   end Name;
 
 end Tests_Hashes;

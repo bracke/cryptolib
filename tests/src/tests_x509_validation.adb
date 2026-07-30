@@ -1685,4 +1685,90 @@ package body Tests_X509_Validation is
              "a search stopped by its budget says so");
    end Check_X509_Path_Building;
 
+   --  AUnit routine wrappers. Each check is a test of its own, so a
+   --  failure reports the check that failed and the rest still run.
+   procedure Run_Check_X509_Verify (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Unsupported_Algorithm (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Verification_Failure_Kinds (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Chain_Constraint_Bypasses (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Signature_Algorithm_Agreement (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_X509_Validation (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_X509_Identity (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_X509_Purposes (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_X509_Path_Building (Item : in out AUnit.Test_Cases.Test_Case'Class);
+
+   procedure Run_Check_X509_Verify (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_X509_Verify;
+   end Run_Check_X509_Verify;
+
+   procedure Run_Check_Unsupported_Algorithm (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Unsupported_Algorithm;
+   end Run_Check_Unsupported_Algorithm;
+
+   procedure Run_Check_Verification_Failure_Kinds (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Verification_Failure_Kinds;
+   end Run_Check_Verification_Failure_Kinds;
+
+   procedure Run_Check_Chain_Constraint_Bypasses (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Chain_Constraint_Bypasses;
+   end Run_Check_Chain_Constraint_Bypasses;
+
+   procedure Run_Check_Signature_Algorithm_Agreement (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Signature_Algorithm_Agreement;
+   end Run_Check_Signature_Algorithm_Agreement;
+
+   procedure Run_Check_X509_Validation (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_X509_Validation;
+   end Run_Check_X509_Validation;
+
+   procedure Run_Check_X509_Identity (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_X509_Identity;
+   end Run_Check_X509_Identity;
+
+   procedure Run_Check_X509_Purposes (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_X509_Purposes;
+   end Run_Check_X509_Purposes;
+
+   procedure Run_Check_X509_Path_Building (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_X509_Path_Building;
+   end Run_Check_X509_Path_Building;
+
+   overriding procedure Register_Tests (Item : in out Test_Case) is
+      use AUnit.Test_Cases.Registration;
+   begin
+      Register_Routine (Item, Run_Check_X509_Verify'Access, "x509 verify");
+      Register_Routine (Item, Run_Check_Unsupported_Algorithm'Access, "unsupported algorithm");
+      Register_Routine (Item, Run_Check_Verification_Failure_Kinds'Access, "verification failure kinds");
+      Register_Routine (Item, Run_Check_Chain_Constraint_Bypasses'Access, "chain constraint bypasses");
+      Register_Routine (Item, Run_Check_Signature_Algorithm_Agreement'Access, "signature algorithm agreement");
+      Register_Routine (Item, Run_Check_X509_Validation'Access, "x509 validation");
+      Register_Routine (Item, Run_Check_X509_Identity'Access, "x509 identity");
+      Register_Routine (Item, Run_Check_X509_Purposes'Access, "x509 purposes");
+      Register_Routine (Item, Run_Check_X509_Path_Building'Access, "x509 path building");
+   end Register_Tests;
+
+   overriding function Name (Item : Test_Case) return AUnit.Message_String is
+      pragma Unreferenced (Item);
+   begin
+      return AUnit.Format ("cryptolib X.509 validation");
+   end Name;
+
 end Tests_X509_Validation;

@@ -759,4 +759,97 @@ package body Tests_Runtime is
       end;
    end Check_Zero_On_Failure;
 
+
+   --  CryptoLib.Secure_Wipe zeroizes a buffer through volatile stores that the
+   --  optimizer cannot elide (used to scrub key material before it leaves scope).
+   procedure Check_Secure_Wipe is
+   begin
+      declare
+         use type Interfaces.Unsigned_8;
+         Secret  : array (1 .. 48) of Interfaces.Unsigned_8;
+         Nonzero : Natural := 0;
+      begin
+         for Index in Secret'Range loop
+            Secret (Index) := Interfaces.Unsigned_8 ((Index * 3) mod 251 + 1);
+         end loop;
+         CryptoLib.Secure_Wipe.Wipe (Secret'Address, Secret'Length);
+         for Index in Secret'Range loop
+            if Secret (Index) /= 0 then
+               Nonzero := Nonzero + 1;
+            end if;
+         end loop;
+         Check (Nonzero = 0, "Secure_Wipe zeroizes buffer");
+      end;
+   end Check_Secure_Wipe;
+
+   --  AUnit routine wrappers. Each check is a test of its own, so a
+   --  failure reports the check that failed and the rest still run.
+   procedure Run_Check_Constant_Time_Equal (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Buffer_Ceiling (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Zero_On_Failure (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Consumer_Entry_Points (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Manifests_And_Helpers (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Random_Fails_Closed (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Secure_Wipe (Item : in out AUnit.Test_Cases.Test_Case'Class);
+
+   procedure Run_Check_Constant_Time_Equal (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Constant_Time_Equal;
+   end Run_Check_Constant_Time_Equal;
+
+   procedure Run_Check_Buffer_Ceiling (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Buffer_Ceiling;
+   end Run_Check_Buffer_Ceiling;
+
+   procedure Run_Check_Zero_On_Failure (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Zero_On_Failure;
+   end Run_Check_Zero_On_Failure;
+
+   procedure Run_Check_Consumer_Entry_Points (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Consumer_Entry_Points;
+   end Run_Check_Consumer_Entry_Points;
+
+   procedure Run_Check_Manifests_And_Helpers (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Manifests_And_Helpers;
+   end Run_Check_Manifests_And_Helpers;
+
+   procedure Run_Check_Random_Fails_Closed (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Random_Fails_Closed;
+   end Run_Check_Random_Fails_Closed;
+
+   procedure Run_Check_Secure_Wipe (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Secure_Wipe;
+   end Run_Check_Secure_Wipe;
+
+   overriding procedure Register_Tests (Item : in out Test_Case) is
+      use AUnit.Test_Cases.Registration;
+   begin
+      Register_Routine (Item, Run_Check_Constant_Time_Equal'Access, "constant time equal");
+      Register_Routine (Item, Run_Check_Buffer_Ceiling'Access, "buffer ceiling");
+      Register_Routine (Item, Run_Check_Zero_On_Failure'Access, "zero on failure");
+      Register_Routine (Item, Run_Check_Consumer_Entry_Points'Access, "consumer entry points");
+      Register_Routine (Item, Run_Check_Manifests_And_Helpers'Access, "manifests and helpers");
+      Register_Routine (Item, Run_Check_Random_Fails_Closed'Access, "random fails closed");
+      Register_Routine (Item, Run_Check_Secure_Wipe'Access, "secure wipe");
+   end Register_Tests;
+
+   overriding function Name (Item : Test_Case) return AUnit.Message_String is
+      pragma Unreferenced (Item);
+   begin
+      return AUnit.Format ("cryptolib cross-cutting runtime behaviour");
+   end Name;
+
 end Tests_Runtime;

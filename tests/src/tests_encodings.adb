@@ -2118,4 +2118,106 @@ package body Tests_Encodings is
       end;
    end Check_PKCS12;
 
+   --  AUnit routine wrappers. Each check is a test of its own, so a
+   --  failure reports the check that failed and the rest still run.
+   procedure Run_Check_ASN1_DER (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_CSR_Signing (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_OpenSSH_Key_Unlock (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_OpenSSH_Signature (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Decoder_Robustness (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_PKCS10 (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_PKCS8 (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Identities (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_PKCS8_Encrypted (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_PKCS12 (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Identity_Predicates (Item : in out AUnit.Test_Cases.Test_Case'Class);
+
+   procedure Run_Check_ASN1_DER (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_ASN1_DER;
+   end Run_Check_ASN1_DER;
+
+   procedure Run_Check_CSR_Signing (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_CSR_Signing;
+   end Run_Check_CSR_Signing;
+
+   procedure Run_Check_OpenSSH_Key_Unlock (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_OpenSSH_Key_Unlock;
+   end Run_Check_OpenSSH_Key_Unlock;
+
+   procedure Run_Check_OpenSSH_Signature (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_OpenSSH_Signature;
+   end Run_Check_OpenSSH_Signature;
+
+   procedure Run_Check_Decoder_Robustness (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Decoder_Robustness;
+   end Run_Check_Decoder_Robustness;
+
+   procedure Run_Check_PKCS10 (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_PKCS10;
+   end Run_Check_PKCS10;
+
+   procedure Run_Check_PKCS8 (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_PKCS8;
+   end Run_Check_PKCS8;
+
+   procedure Run_Check_Identities (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Identities;
+   end Run_Check_Identities;
+
+   procedure Run_Check_PKCS8_Encrypted (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_PKCS8_Encrypted;
+   end Run_Check_PKCS8_Encrypted;
+
+   procedure Run_Check_PKCS12 (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_PKCS12;
+   end Run_Check_PKCS12;
+
+   procedure Run_Check_Identity_Predicates (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Identity_Predicates;
+   end Run_Check_Identity_Predicates;
+
+   overriding procedure Register_Tests (Item : in out Test_Case) is
+      use AUnit.Test_Cases.Registration;
+   begin
+      Register_Routine (Item, Run_Check_ASN1_DER'Access, "asn1 der");
+      Register_Routine (Item, Run_Check_CSR_Signing'Access, "csr signing");
+      Register_Routine (Item, Run_Check_OpenSSH_Key_Unlock'Access, "openssh key unlock");
+      Register_Routine (Item, Run_Check_OpenSSH_Signature'Access, "openssh signature");
+      Register_Routine (Item, Run_Check_Decoder_Robustness'Access, "decoder robustness");
+      Register_Routine (Item, Run_Check_PKCS10'Access, "pkcs10");
+      Register_Routine (Item, Run_Check_PKCS8'Access, "pkcs8");
+      Register_Routine (Item, Run_Check_Identities'Access, "identities");
+      Register_Routine (Item, Run_Check_PKCS8_Encrypted'Access, "pkcs8 encrypted");
+      Register_Routine (Item, Run_Check_PKCS12'Access, "pkcs12");
+      Register_Routine (Item, Run_Check_Identity_Predicates'Access, "identity predicates");
+   end Register_Tests;
+
+   overriding function Name (Item : Test_Case) return AUnit.Message_String is
+      pragma Unreferenced (Item);
+   begin
+      return AUnit.Format ("cryptolib ASN.1, PEM, PKCS and OpenSSH encodings");
+   end Name;
+
 end Tests_Encodings;

@@ -1951,4 +1951,138 @@ package body Tests_X509_Decoding is
       end;
    end Check_Certificate_Armour;
 
+   --  AUnit routine wrappers. Each check is a test of its own, so a
+   --  failure reports the check that failed and the rest still run.
+   procedure Run_Check_X509_Decode (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_X509_Extensions (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Serial_Comparison (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Validity_Not_Past_Issuer (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Impossible_Dates (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Undated_Statement_Ages (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Serial_Numbers (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Validity_Window (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Key_Identifiers (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Large_Certificate (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Oversized_Serial (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Certificate_Ambiguity (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_X509_Access_Locations (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_X509_Names (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Certificate_Armour (Item : in out AUnit.Test_Cases.Test_Case'Class);
+
+   procedure Run_Check_X509_Decode (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_X509_Decode;
+   end Run_Check_X509_Decode;
+
+   procedure Run_Check_X509_Extensions (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_X509_Extensions;
+   end Run_Check_X509_Extensions;
+
+   procedure Run_Check_Serial_Comparison (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Serial_Comparison;
+   end Run_Check_Serial_Comparison;
+
+   procedure Run_Check_Validity_Not_Past_Issuer (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Validity_Not_Past_Issuer;
+   end Run_Check_Validity_Not_Past_Issuer;
+
+   procedure Run_Check_Impossible_Dates (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Impossible_Dates;
+   end Run_Check_Impossible_Dates;
+
+   procedure Run_Check_Undated_Statement_Ages (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Undated_Statement_Ages;
+   end Run_Check_Undated_Statement_Ages;
+
+   procedure Run_Check_Serial_Numbers (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Serial_Numbers;
+   end Run_Check_Serial_Numbers;
+
+   procedure Run_Check_Validity_Window (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Validity_Window;
+   end Run_Check_Validity_Window;
+
+   procedure Run_Check_Key_Identifiers (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Key_Identifiers;
+   end Run_Check_Key_Identifiers;
+
+   procedure Run_Check_Large_Certificate (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Large_Certificate;
+   end Run_Check_Large_Certificate;
+
+   procedure Run_Check_Oversized_Serial (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Oversized_Serial;
+   end Run_Check_Oversized_Serial;
+
+   procedure Run_Check_Certificate_Ambiguity (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Certificate_Ambiguity;
+   end Run_Check_Certificate_Ambiguity;
+
+   procedure Run_Check_X509_Access_Locations (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_X509_Access_Locations;
+   end Run_Check_X509_Access_Locations;
+
+   procedure Run_Check_X509_Names (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_X509_Names;
+   end Run_Check_X509_Names;
+
+   procedure Run_Check_Certificate_Armour (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Certificate_Armour;
+   end Run_Check_Certificate_Armour;
+
+   overriding procedure Register_Tests (Item : in out Test_Case) is
+      use AUnit.Test_Cases.Registration;
+   begin
+      Register_Routine (Item, Run_Check_X509_Decode'Access, "x509 decode");
+      Register_Routine (Item, Run_Check_X509_Extensions'Access, "x509 extensions");
+      Register_Routine (Item, Run_Check_Serial_Comparison'Access, "serial comparison");
+      Register_Routine (Item, Run_Check_Validity_Not_Past_Issuer'Access, "validity not past issuer");
+      Register_Routine (Item, Run_Check_Impossible_Dates'Access, "impossible dates");
+      Register_Routine (Item, Run_Check_Undated_Statement_Ages'Access, "undated statement ages");
+      Register_Routine (Item, Run_Check_Serial_Numbers'Access, "serial numbers");
+      Register_Routine (Item, Run_Check_Validity_Window'Access, "validity window");
+      Register_Routine (Item, Run_Check_Key_Identifiers'Access, "key identifiers");
+      Register_Routine (Item, Run_Check_Large_Certificate'Access, "large certificate");
+      Register_Routine (Item, Run_Check_Oversized_Serial'Access, "oversized serial");
+      Register_Routine (Item, Run_Check_Certificate_Ambiguity'Access, "certificate ambiguity");
+      Register_Routine (Item, Run_Check_X509_Access_Locations'Access, "x509 access locations");
+      Register_Routine (Item, Run_Check_X509_Names'Access, "x509 names");
+      Register_Routine (Item, Run_Check_Certificate_Armour'Access, "certificate armour");
+   end Register_Tests;
+
+   overriding function Name (Item : Test_Case) return AUnit.Message_String is
+      pragma Unreferenced (Item);
+   begin
+      return AUnit.Format ("cryptolib X.509 decoding");
+   end Name;
+
 end Tests_X509_Decoding;

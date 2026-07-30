@@ -1,3 +1,6 @@
+with AUnit;
+with AUnit.Test_Cases;
+
 --  Decoding certificates and reading their fields: serials, validity, extensions, names.
 --
 --  Each procedure is one group of known-answer or negative tests, and
@@ -5,34 +8,9 @@
 --  what keeps any one file readable; the driver keeps the order.
 package Tests_X509_Decoding is
 
-   procedure Check_X509_Decode;
+   type Test_Case is new AUnit.Test_Cases.Test_Case with null record;
 
-   procedure Check_X509_Access_Locations;
-
-   procedure Check_Certificate_Ambiguity;
-
-   procedure Check_Serial_Numbers;
-
-   procedure Check_Validity_Window;
-
-   procedure Check_Key_Identifiers;
-
-   procedure Check_Large_Certificate;
-
-   procedure Check_Oversized_Serial;
-
-   procedure Check_Serial_Comparison;
-
-   procedure Check_Validity_Not_Past_Issuer;
-
-   procedure Check_Impossible_Dates;
-
-   procedure Check_Undated_Statement_Ages;
-
-   procedure Check_X509_Extensions;
-
-   procedure Check_X509_Names;
-
-   procedure Check_Certificate_Armour;
+   overriding procedure Register_Tests (Item : in out Test_Case);
+   overriding function Name (Item : Test_Case) return AUnit.Message_String;
 
 end Tests_X509_Decoding;

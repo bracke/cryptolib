@@ -6,15 +6,16 @@ with Ada.Text_IO;
 
 with Project_Tools.Files;
 
---  Test-suite metrics check, adapted for cryptolib's custom Check-based runner
---  (which does not use AUnit registration, so Project_Tools.Aunit_Checks does
---  not apply). Verifies the suite references a broad set of primitive packages
---  and carries a substantial number of assertions.
+--  Test-suite metrics check. Verifies the suite references a broad set of
+--  primitive packages and carries a substantial number of assertions.
 --
---  The suite is a driver plus one package per topic, so this reads the whole
---  of tests/src rather than a single file. The checks are defined in the topic
---  package bodies and called from the driver, which is what makes the
---  never-called test detectable: it is a name the driver does not mention.
+--  The suite is an AUnit test case per topic, so this reads the whole of
+--  tests/src rather than a single file. A check is exercised when it is
+--  registered as an AUnit routine, so that is what is checked: every
+--  Check_<name> defined in a package body must have a Run_Check_<name>'Access
+--  registered in the same file. An unregistered check passes without testing
+--  anything, which is the failure this exists to catch. A helper that is not
+--  itself a test is not named Check_<something> -- see Expect_MD5.
 procedure Check_Test_Suite is
    Suite_Dir      : constant String := "tests/src";
    Driver_Path    : constant String := "tests/src/tests.adb";
@@ -69,14 +70,14 @@ procedure Check_Test_Suite is
       end loop;
    end Collect_Primitives;
 
-   --  A test procedure that nobody calls passes every time. The checks live in
-   --  the topic packages and the calls live in the driver, so a name the
-   --  driver never mentions reads as coverage while testing nothing.
+   --  A test procedure that nobody registers passes every time: AUnit runs
+   --  what it was handed, so a check the suite never registers reads as
+   --  coverage while testing nothing.
    --
-   --  Compared by name rather than by count: some checks take parameters and
-   --  are written across several lines, so the two totals differ for reasons
-   --  that are nobody's mistake.
-   procedure Check_All_Called (Text : String; Driver : String) is
+   --  Compared by name rather than by count: the wrapper and the registration
+   --  mention the name a different number of times, so the totals differ for
+   --  reasons that are nobody's mistake.
+   procedure Check_All_Called (Text : String) is
       Marker : constant String := ASCII.LF & "   procedure Check_";
       Cursor : Natural := Text'First;
       Found  : Natural;
@@ -98,15 +99,15 @@ procedure Check_Test_Suite is
 
             declare
                Name : constant String := Text (First .. Stop - 1);
-               --  A call sits at statement level in the driver's body.
-               Call : constant String := ASCII.LF & "   " & Name;
+               --  Registration names the wrapper, in the same file.
+               Call : constant String := "Run_" & Name & "'Access";
             begin
                Defined := Defined + 1;
-               if Ada.Strings.Fixed.Index (Driver, Call) = 0 then
+               if Ada.Strings.Fixed.Index (Text, Call) = 0 then
                   Uncalled := Uncalled + 1;
                   Ada.Text_IO.Put_Line
                     (Ada.Text_IO.Standard_Error,
-                     "error: " & Name & " is defined but never called");
+                     "error: " & Name & " is defined but never registered");
                end if;
             end;
             Cursor := Stop;
@@ -129,8 +130,6 @@ begin
    end if;
 
    declare
-      Driver : constant String :=
-        Project_Tools.Files.Read_Raw_File (Driver_Path);
       Search : Ada.Directories.Search_Type;
       Item   : Ada.Directories.Directory_Entry_Type;
    begin
@@ -155,7 +154,7 @@ begin
               and then Name (Name'Last - 3 .. Name'Last) = ".adb"
               and then Name /= "tests.adb"
             then
-               Check_All_Called (Text, Driver);
+               Check_All_Called (Text);
             end if;
          end;
       end loop;
@@ -165,7 +164,7 @@ begin
    if Uncalled > 0 then
       Ada.Text_IO.Put_Line
         (Ada.Text_IO.Standard_Error,
-         "a test procedure that is never called passes without testing "
+         "a test procedure that is never registered passes without testing "
          & "anything");
       Ada.Command_Line.Set_Exit_Status (Ada.Command_Line.Failure);
       return;
@@ -174,7 +173,7 @@ begin
    Ada.Text_IO.Put_Line
      ("cryptolib test suite:" & Natural (Primitives.Length)'Image
       & " primitive packages," & Assertions'Image & " assertions,"
-      & Defined'Image & " checks, all of them called");
+      & Defined'Image & " checks, all of them registered");
    if Natural (Primitives.Length) < Min_Primitives
      or else Assertions < Min_Assertions
    then

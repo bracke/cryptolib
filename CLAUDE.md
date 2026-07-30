@@ -29,16 +29,24 @@ claims are meant to be checkable against the code.
   Alire compiler.
 - Build: `alr build`.
 - Tests (KATs + negative/fail-closed tests): `(cd tests && alr build) && ./tests/bin/tests`
-  — prints `cryptolib tests passed`. The suite links libcrypto for the
-  certificate chain cross-check; the library does not.
-- **Test layout**: `tests/src/tests.adb` is only the driver — it calls each
-  check in order and holds a few inline vectors. The checks themselves live in
-  `tests/src/tests_<topic>.adb`, one package per topic, with the shared
-  assertion and hex/string helpers in `tests_support`. A new check goes in the
-  topic package (spec and body) **and must be called from the driver**: an
-  uncalled check passes without testing anything, which is what
-  `tools/bin/check_test_suite` refuses. Order is the driver's, so tests that
-  depend on a file an earlier test wrote keep working.
+  — an AUnit runner: one line per test, a `Total Tests Run` summary, and a
+  non-zero exit status if anything failed. Every check runs even when an
+  earlier one fails. The suite links libcrypto for the certificate chain
+  cross-check; the library does not.
+- **Test layout**: `tests/src/tests.adb` is only the AUnit runner.
+  `tests_suite` builds the suite from one `AUnit.Test_Cases.Test_Case` per
+  topic, each in `tests/src/tests_<topic>.adb`, with the shared assertion and
+  hex/string helpers in `tests_support`. Nothing is declared in the topic
+  specs but the test case itself.
+- **Adding a check**: write `Check_<Name>` in the topic body, add a
+  `Run_Check_<Name>` wrapper, and register it in that package's
+  `Register_Tests`. **Registration is what runs it** — an unregistered check
+  passes without testing anything, which is what `tools/bin/check_test_suite`
+  refuses (it requires a `Run_Check_<Name>'Access` for every `Check_<Name>`).
+  A helper that is not itself a test must not be named `Check_<something>`;
+  see `Expect_MD5`.
+- Assert through `Tests_Support.Check`, not `AUnit.Assertions.Assert`
+  directly — `Check` is the one place the whole suite goes through.
 - Release/verification tooling lives in the `cryptolib_tools` crate: `(cd tools && alr build)`
   (depends on the shared `project_tools` at `../../project_tools`). Run
   `tools/bin/check_release_ready` from the crate root for the full preflight
@@ -78,7 +86,7 @@ claims are meant to be checkable against the code.
 
 ## Platform and toolchain gotchas
 
-- **Per-OS code lives in `src-linux/` and `src-windows/`**, selected by
+- **Per-OS code lives in `src-linux/`, `src-macos/` and `src-windows/`**, selected by
   `Source_Dirs = "src-" & Cryptolib_Config.Alire_Host_OS`. NEVER put a glibc-only
   symbol (`getrandom`, `explicit_bzero`) in common `src/` — it breaks the Windows
   link. `CryptoLib.Secure_Wipe` is deliberately portable (volatile stores, no

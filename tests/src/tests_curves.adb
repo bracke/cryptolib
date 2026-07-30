@@ -1026,4 +1026,433 @@ package body Tests_Curves is
       end;
    end Check_ECDSA_Scalar_Encodings;
 
+
+   --  Ed25519 sign/verify (RFC 8032-style deterministic vector).
+   procedure Check_Ed25519_Sign_Verify is
+   begin
+      declare
+         Seed : constant Ada.Streams.Stream_Element_Array :=
+           Bytes_From_Hex
+             ("9d61b19defffbaa5c0ceb40f3c9e2a5b"
+              & "2e9e6bad6f2b0f4c6a1e8d3e2c1b0a09");
+         Pub  : constant Ada.Streams.Stream_Element_Array :=
+           Bytes_From_Hex
+             ("158ce5d4d6bd44bcb829399ecbc29497"
+              & "3406965edcec77b64d2e49a2523259f5");
+         Msg  : constant Ada.Streams.Stream_Element_Array :=
+           Bytes_From_String ("abc");
+         Want : constant Ada.Streams.Stream_Element_Array :=
+           Bytes_From_Hex
+             ("77bbf796bff069ddc46177610af724d0ff666ab76b4987f087b560a0b59603b2"
+              & "35941c5db7aa566e4fa300c19764674ea123453d4785828982e6464210435b0f");
+         Sig  : Ada.Streams.Stream_Element_Array (1 .. 64);
+         St_E : CryptoLib.Errors.Status;
+         Bad  : Ada.Streams.Stream_Element_Array (1 .. 64);
+      begin
+         St_E := CryptoLib.Ed25519.Sign (Seed, Pub, Msg, Sig);
+         Check (St_E = CryptoLib.Errors.Ok, "Ed25519 sign status");
+         Check (Sig = Want, "Ed25519 RFC 8032 sign KAT");
+         Check
+           (CryptoLib.Ed25519.Verify (Pub, Sig, Msg) = CryptoLib.Errors.Ok,
+            "Ed25519 verify accepts valid signature");
+         Bad := Sig;
+         Bad (Bad'Last) := Bad (Bad'Last) xor 16#01#;
+         Check
+           (CryptoLib.Ed25519.Verify (Pub, Bad, Msg) /= CryptoLib.Errors.Ok,
+            "Ed25519 verify rejects tampered signature");
+         Check
+           (CryptoLib.Ed25519.Verify (Pub, Sig, Bytes_From_String ("abd"))
+              /= CryptoLib.Errors.Ok,
+            "Ed25519 verify rejects wrong message");
+
+         --  Malleability guard: reject a non-canonical S (S >= L).  The upper 32
+         --  signature bytes are S; all-ones is far above the group order L.
+         Bad := Sig;
+         for I in Ada.Streams.Stream_Element_Offset range 33 .. 64 loop
+            Bad (I) := 16#FF#;
+         end loop;
+         Check
+           (CryptoLib.Ed25519.Verify (Pub, Bad, Msg) /= CryptoLib.Errors.Ok,
+            "Ed25519 verify rejects non-canonical S (S >= L)");
+
+         --  Reject wrong-length signature and public key (bounds/fail-closed).
+         Check
+           (CryptoLib.Ed25519.Verify (Pub, Sig (1 .. 63), Msg)
+              /= CryptoLib.Errors.Ok,
+            "Ed25519 verify rejects short signature");
+         Check
+           (CryptoLib.Ed25519.Verify (Pub (Pub'First .. Pub'Last - 1), Sig, Msg)
+              /= CryptoLib.Errors.Ok,
+            "Ed25519 verify rejects short public key");
+      end;
+   end Check_Ed25519_Sign_Verify;
+
+
+   --  X25519 RFC 7748 section 5.2 known-answer vectors.
+   procedure Check_X25519_Vectors is
+   begin
+      declare
+         procedure Check_X25519 (Scalar_Hex, U_Hex, Out_Hex, Label : String) is
+            Scalar : constant CryptoLib.Curve25519.Public_Key :=
+              CryptoLib.Curve25519.Public_Key (Bytes_From_Hex (Scalar_Hex));
+            U_Coord : constant CryptoLib.Curve25519.Public_Key :=
+              CryptoLib.Curve25519.Public_Key (Bytes_From_Hex (U_Hex));
+            Result : CryptoLib.Curve25519.Public_Key;
+            St_X   : CryptoLib.Errors.Status;
+         begin
+            St_X := CryptoLib.Curve25519.Compute_Raw (Scalar, U_Coord, Result);
+            Check (St_X = CryptoLib.Errors.Ok, Label & " status");
+            Check
+              (Ada.Streams.Stream_Element_Array (Result) = Bytes_From_Hex (Out_Hex),
+               Label);
+         end Check_X25519;
+      begin
+         Check_X25519
+           ("a546e36bf0527c9d3b16154b82465edd62144c0ac1fc5a18506a2244ba449ac4",
+            "e6db6867583030db3594c1a424b15f7c726624ec26b3353b10a903a6d0ab1c4c",
+            "c3da55379de9c6908e94ea4df28d084f32eccf03491c71f754b4075577a28552",
+            "X25519 RFC 7748 KAT vector 1");
+         Check_X25519
+           ("4b66e9d4d1b4673c5ad22691957d6af5c11b6421e0ea01d42ca4169e7918ba0d",
+            "e5210f12786811d3f4b7959d0538ae2c31dbe7106fc03c3efc4cd549c715a493",
+            "95cbde9476e8907d7aade45cb4b873f88b595a68799fa152e6f8f7647aac7957",
+            "X25519 RFC 7748 KAT vector 2");
+      end;
+   end Check_X25519_Vectors;
+
+
+   --  ECDSA deterministic (RFC 6979) signing.  P-384 is the authoritative
+   --  RFC 6979 A.2.5 vector; P-521 is cross-verified with an external library.
+   procedure Check_ECDSA_P384_Deterministic is
+   begin
+      declare
+         Msg   : constant Ada.Streams.Stream_Element_Array :=
+           Bytes_From_String ("sample");
+         P384_D : constant Ada.Streams.Stream_Element_Array :=
+           Bytes_From_Hex
+             ("6b9d3dad2e1b8c1c05b19875b6659f4de23c3b667bf297ba9aa47740787137d8"
+              & "96d5724e4c70a825f872c9ea60d2edf5");
+         P384_R : constant Ada.Streams.Stream_Element_Array :=
+           Bytes_From_Hex
+             ("94edbb92a5ecb8aad4736e56c691916b3f88140666ce9fa73d64c4ea95ad133c"
+              & "81a648152e44acf96e36dd1e80fabe46");
+         P384_S : constant Ada.Streams.Stream_Element_Array :=
+           Bytes_From_Hex
+             ("99ef4aeb15f178cea1fe40db2603138f130e740a19624526203b6351d0a3a94f"
+              & "a329c145786e679e7b82c71a38628ac8");
+         P521_D : constant Ada.Streams.Stream_Element_Array :=
+           Bytes_From_Hex
+             ("00fad06daa62ba3b25d2fb40133da757205de67f5bb0018fee8c86e1b68c7e75"
+              & "caa896eb32f1f47c70855836a6d16fcc1466f6d8fbec67db89ec0c08b0e996b"
+              & "83538");
+         P521_R : constant Ada.Streams.Stream_Element_Array :=
+           Bytes_From_Hex
+             ("00c328fafcbd79dd77850370c46325d987cb525569fb63c5d3bc53950e6d4c5f"
+              & "174e25a1ee9017b5d450606add152b534931d7d4e8455cc91f9b15bf05ec36e"
+              & "377fa");
+         P521_S : constant Ada.Streams.Stream_Element_Array :=
+           Bytes_From_Hex
+             ("00617cce7cf5064806c467f678d3b4080d6f1cc50af26ca209417308281b68af"
+              & "282623eaa63e5b5c0723d8b8c37ff0777b1a20f8ccb1dccc43997f1ee0e44da"
+              & "4a67a");
+         R384 : Ada.Streams.Stream_Element_Array (1 .. 48);
+         S384 : Ada.Streams.Stream_Element_Array (1 .. 48);
+         R521 : Ada.Streams.Stream_Element_Array (1 .. 66);
+         S521 : Ada.Streams.Stream_Element_Array (1 .. 66);
+         St_D : CryptoLib.Errors.Status;
+      begin
+         St_D := CryptoLib.ECDSA.Sign_Nistp384_Raw (P384_D, Msg, R384, S384);
+         Check (St_D = CryptoLib.Errors.Ok, "ECDSA P-384 sign status");
+         Check (R384 = P384_R and then S384 = P384_S,
+                "ECDSA P-384 RFC 6979 A.2.5 KAT");
+         St_D := CryptoLib.ECDSA.Sign_Nistp521_Raw (P521_D, Msg, R521, S521);
+         Check (St_D = CryptoLib.Errors.Ok, "ECDSA P-521 sign status");
+         Check (R521 = P521_R and then S521 = P521_S,
+                "ECDSA P-521 RFC 6979 deterministic KAT");
+      end;
+   end Check_ECDSA_P384_Deterministic;
+
+
+   --  P-256 signing, against RFC 6979 A.2.5's own published r and s.
+   --
+   --  Two messages rather than one. The DRBG state width is the paired
+   --  digest's, and the first version of this curve's wiring inherited a
+   --  64-byte state meant for P-521 -- so a vector that only asked "did a
+   --  signature come out" would have passed on a curve that could not sign
+   --  at all. An exact r and s cannot.
+   procedure Check_ECDSA_P256_Deterministic is
+   begin
+      declare
+         D_256 : constant Ada.Streams.Stream_Element_Array :=
+           Bytes_From_Hex
+             ("c9afa9d845ba75166b5c215767b1d6934e50c3db36e89b127b8a622b120f6721");
+         Pub_256 : constant Ada.Streams.Stream_Element_Array :=
+           Bytes_From_Hex
+             ("0460fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29f"
+              & "b67903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d446"
+              & "2299");
+         Sample_R : constant Ada.Streams.Stream_Element_Array :=
+           Bytes_From_Hex
+             ("efd48b2aacb6a8fd1140dd9cd45e81d69d2c877b56aaf991c34d0ea84eaf3716");
+         Sample_S : constant Ada.Streams.Stream_Element_Array :=
+           Bytes_From_Hex
+             ("f7cb1c942d657c41d436c7a1b6e29f65f3e900dbb9aff4064dc4ab2f843acda8");
+         Test_R : constant Ada.Streams.Stream_Element_Array :=
+           Bytes_From_Hex
+             ("f1abb023518351cd71d881567b1ea663ed3efcf6c5132b354f28d3b0b7d38367");
+         Test_S : constant Ada.Streams.Stream_Element_Array :=
+           Bytes_From_Hex
+             ("019f4113742a2b14bd25926b49c649155f267e60d3814b4c0cc84250e46f0083");
+         Test_Msg : constant Ada.Streams.Stream_Element_Array :=
+           Bytes_From_String ("test");
+         Sample_Msg : constant Ada.Streams.Stream_Element_Array :=
+           Bytes_From_String ("sample");
+         R_256, S_256 : Ada.Streams.Stream_Element_Array (1 .. 32);
+         Derived      : Ada.Streams.Stream_Element_Array (1 .. 65);
+         St_256       : CryptoLib.Errors.Status;
+      begin
+         St_256 := CryptoLib.ECDSA.Public_Key_Raw
+           (CryptoLib.ECDSA.Nistp256, D_256, Derived);
+         Check (St_256 = CryptoLib.Errors.Ok and then Derived = Pub_256,
+                "ECDSA P-256 derives RFC 6979 A.2.5's public key");
+
+         St_256 := CryptoLib.ECDSA.Sign_Nistp256_Raw
+           (D_256, Sample_Msg, R_256, S_256);
+         Check (St_256 = CryptoLib.Errors.Ok, "ECDSA P-256 sign status");
+         Check (R_256 = Sample_R and then S_256 = Sample_S,
+                "ECDSA P-256 RFC 6979 A.2.5 KAT (sample)");
+         Check (CryptoLib.ECDSA.Verify_Nistp256_Raw
+                  (Pub_256, Sample_Msg, R_256, S_256) = CryptoLib.Errors.Ok,
+                "ECDSA P-256 verifies what it signed");
+
+         St_256 := CryptoLib.ECDSA.Sign_Nistp256_Raw
+           (D_256, Test_Msg, R_256, S_256);
+         Check (St_256 = CryptoLib.Errors.Ok and then R_256 = Test_R
+                and then S_256 = Test_S,
+                "ECDSA P-256 RFC 6979 A.2.5 KAT (test)");
+
+         --  The signature must not verify over a message it does not cover.
+         Check (CryptoLib.ECDSA.Verify_Nistp256_Raw
+                  (Pub_256, Sample_Msg, R_256, S_256) /= CryptoLib.Errors.Ok,
+                "ECDSA P-256 refuses a signature over another message");
+
+         --  The generic entry point must agree with the fixed-curve one, and
+         --  must not pair the curve with the wrong digest.
+         Check (CryptoLib.ECDSA.Verify_Signature
+                  (CryptoLib.ECDSA.Nistp256, CryptoLib.ECDSA.SHA256,
+                   Pub_256, Test_Msg, R_256, S_256) = CryptoLib.Errors.Ok,
+                "ECDSA P-256 verifies through Verify_Signature");
+         Check (CryptoLib.ECDSA.Verify_Signature
+                  (CryptoLib.ECDSA.Nistp256, CryptoLib.ECDSA.SHA384,
+                   Pub_256, Test_Msg, R_256, S_256) /= CryptoLib.Errors.Ok,
+                "ECDSA P-256 refuses the signature under the wrong digest");
+      end;
+   end Check_ECDSA_P256_Deterministic;
+
+
+   --  P-256 key generation: the pair it returns must actually be a pair, and
+   --  must be usable by the signer.
+   procedure Check_ECDSA_P256_Keygen is
+   begin
+      declare
+         Rng     : CryptoLib.Random.Random_Source;
+         Scalar  : Ada.Streams.Stream_Element_Array (1 .. 32);
+         Point   : Ada.Streams.Stream_Element_Array (1 .. 65);
+         Derived : Ada.Streams.Stream_Element_Array (1 .. 65);
+         R_G, S_G : Ada.Streams.Stream_Element_Array (1 .. 32);
+         Msg_G   : constant Ada.Streams.Stream_Element_Array :=
+           Bytes_From_String ("cryptolib p-256 generated key");
+         St_G    : CryptoLib.Errors.Status;
+      begin
+         CryptoLib.Random.Initialize_Production (Rng);
+         St_G := CryptoLib.ECDSA.Generate_Nistp256_Keypair (Rng, Scalar, Point);
+         Check (St_G = CryptoLib.Errors.Ok, "ECDSA P-256 keygen status");
+         Check (Point (Point'First) = 16#04#,
+                "ECDSA P-256 keygen emits an uncompressed point");
+
+         --  The point must be the one the scalar implies, not merely a point.
+         St_G := CryptoLib.ECDSA.Public_Key_Raw
+           (CryptoLib.ECDSA.Nistp256, Scalar, Derived);
+         Check (St_G = CryptoLib.Errors.Ok and then Derived = Point,
+                "ECDSA P-256 keygen returns a matching pair");
+
+         St_G := CryptoLib.ECDSA.Sign_Nistp256_Raw (Scalar, Msg_G, R_G, S_G);
+         Check (St_G = CryptoLib.Errors.Ok, "ECDSA P-256 signs with a fresh key");
+         Check (CryptoLib.ECDSA.Verify_Nistp256_Raw (Point, Msg_G, R_G, S_G)
+                  = CryptoLib.Errors.Ok,
+                "ECDSA P-256 fresh keypair round-trips");
+      end;
+   end Check_ECDSA_P256_Keygen;
+
+
+   --  Negative / fail-closed tests: low-order X25519 point and AEAD tamper.
+   procedure Check_Low_Order_X25519_Point is
+   begin
+      declare
+         Scalar : constant CryptoLib.Curve25519.Public_Key :=
+           CryptoLib.Curve25519.Public_Key
+             (Bytes_From_Hex
+                ("a546e36bf0527c9d3b16154b82465edd"
+                 & "62144c0ac1fc5a18506a2244ba449ac4"));
+         Zero_U : constant CryptoLib.Curve25519.Public_Key := [others => 0];
+         Result : CryptoLib.Curve25519.Public_Key;
+         St     : CryptoLib.Errors.Status;
+      begin
+         St := CryptoLib.Curve25519.Compute_Raw (Scalar, Zero_U, Result);
+         Check
+           (St /= CryptoLib.Errors.Ok,
+            "X25519 rejects all-zero (low-order) peer point");
+      end;
+   end Check_Low_Order_X25519_Point;
+
+   --  AUnit routine wrappers. Each check is a test of its own, so a
+   --  failure reports the check that failed and the rest still run.
+   procedure Run_Check_ECDSA_P384_P521_Signing (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_ECDSA_P384_Public_Key (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Ed448 (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_ECDSA_Raw_Entry_Points (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_ECDH (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_X25519_Shared_Secret (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Off_Curve_Key (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Ed25519_Encoding (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_ECDSA_Curves (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_ECDSA_Scalar_Encodings (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_ECDSA_P384_Verify (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Ed25519_Sign_Verify (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_X25519_Vectors (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_ECDSA_P384_Deterministic (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_ECDSA_P256_Deterministic (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_ECDSA_P256_Keygen (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Low_Order_X25519_Point (Item : in out AUnit.Test_Cases.Test_Case'Class);
+
+   procedure Run_Check_ECDSA_P384_P521_Signing (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_ECDSA_P384_P521_Signing;
+   end Run_Check_ECDSA_P384_P521_Signing;
+
+   procedure Run_Check_ECDSA_P384_Public_Key (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_ECDSA_P384_Public_Key;
+   end Run_Check_ECDSA_P384_Public_Key;
+
+   procedure Run_Check_Ed448 (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Ed448;
+   end Run_Check_Ed448;
+
+   procedure Run_Check_ECDSA_Raw_Entry_Points (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_ECDSA_Raw_Entry_Points;
+   end Run_Check_ECDSA_Raw_Entry_Points;
+
+   procedure Run_Check_ECDH (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_ECDH;
+   end Run_Check_ECDH;
+
+   procedure Run_Check_X25519_Shared_Secret (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_X25519_Shared_Secret;
+   end Run_Check_X25519_Shared_Secret;
+
+   procedure Run_Check_Off_Curve_Key (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Off_Curve_Key;
+   end Run_Check_Off_Curve_Key;
+
+   procedure Run_Check_Ed25519_Encoding (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Ed25519_Encoding;
+   end Run_Check_Ed25519_Encoding;
+
+   procedure Run_Check_ECDSA_Curves (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_ECDSA_Curves;
+   end Run_Check_ECDSA_Curves;
+
+   procedure Run_Check_ECDSA_Scalar_Encodings (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_ECDSA_Scalar_Encodings;
+   end Run_Check_ECDSA_Scalar_Encodings;
+
+   procedure Run_Check_ECDSA_P384_Verify (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_ECDSA_P384_Verify;
+   end Run_Check_ECDSA_P384_Verify;
+
+   procedure Run_Check_Ed25519_Sign_Verify (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Ed25519_Sign_Verify;
+   end Run_Check_Ed25519_Sign_Verify;
+
+   procedure Run_Check_X25519_Vectors (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_X25519_Vectors;
+   end Run_Check_X25519_Vectors;
+
+   procedure Run_Check_ECDSA_P384_Deterministic (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_ECDSA_P384_Deterministic;
+   end Run_Check_ECDSA_P384_Deterministic;
+
+   procedure Run_Check_ECDSA_P256_Deterministic (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_ECDSA_P256_Deterministic;
+   end Run_Check_ECDSA_P256_Deterministic;
+
+   procedure Run_Check_ECDSA_P256_Keygen (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_ECDSA_P256_Keygen;
+   end Run_Check_ECDSA_P256_Keygen;
+
+   procedure Run_Check_Low_Order_X25519_Point (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Low_Order_X25519_Point;
+   end Run_Check_Low_Order_X25519_Point;
+
+   overriding procedure Register_Tests (Item : in out Test_Case) is
+      use AUnit.Test_Cases.Registration;
+   begin
+      Register_Routine (Item, Run_Check_ECDSA_P384_P521_Signing'Access, "ecdsa p384 p521 signing");
+      Register_Routine (Item, Run_Check_ECDSA_P384_Public_Key'Access, "ecdsa p384 public key");
+      Register_Routine (Item, Run_Check_Ed448'Access, "ed448");
+      Register_Routine (Item, Run_Check_ECDSA_Raw_Entry_Points'Access, "ecdsa raw entry points");
+      Register_Routine (Item, Run_Check_ECDH'Access, "ecdh");
+      Register_Routine (Item, Run_Check_X25519_Shared_Secret'Access, "x25519 shared secret");
+      Register_Routine (Item, Run_Check_Off_Curve_Key'Access, "off curve key");
+      Register_Routine (Item, Run_Check_Ed25519_Encoding'Access, "ed25519 encoding");
+      Register_Routine (Item, Run_Check_ECDSA_Curves'Access, "ecdsa curves");
+      Register_Routine (Item, Run_Check_ECDSA_Scalar_Encodings'Access, "ecdsa scalar encodings");
+      Register_Routine (Item, Run_Check_ECDSA_P384_Verify'Access, "ecdsa p384 verify");
+      Register_Routine (Item, Run_Check_Ed25519_Sign_Verify'Access, "ed25519 sign verify");
+      Register_Routine (Item, Run_Check_X25519_Vectors'Access, "x25519 vectors");
+      Register_Routine (Item, Run_Check_ECDSA_P384_Deterministic'Access, "ecdsa p384 deterministic");
+      Register_Routine (Item, Run_Check_ECDSA_P256_Deterministic'Access, "ecdsa p256 deterministic");
+      Register_Routine (Item, Run_Check_ECDSA_P256_Keygen'Access, "ecdsa p256 keygen");
+      Register_Routine (Item, Run_Check_Low_Order_X25519_Point'Access, "low order x25519 point");
+   end Register_Tests;
+
+   overriding function Name (Item : Test_Case) return AUnit.Message_String is
+      pragma Unreferenced (Item);
+   begin
+      return AUnit.Format ("cryptolib elliptic curves");
+   end Name;
+
 end Tests_Curves;

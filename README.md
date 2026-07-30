@@ -279,5 +279,6 @@ alr build                                   # build the library
 (cd tests && alr build) && ./tests/bin/tests  # run the KAT + negative-test suite
 ```
 
-The suite prints `cryptolib tests passed` on success. See [`SECURITY.md`](SECURITY.md)
+The suite is AUnit: it prints a line per test and a `Total Tests Run` summary,
+and exits non-zero if any assertion fails. See [`SECURITY.md`](SECURITY.md)
 for what each test validates.

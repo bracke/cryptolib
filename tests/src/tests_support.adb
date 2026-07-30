@@ -1,3 +1,5 @@
+with AUnit.Assertions;
+
 with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded;
 with Ada.Text_IO;
@@ -75,11 +77,12 @@ package body Tests_Support is
    use type Interfaces.Unsigned_32;
 
 
+   --  The whole suite asserts through here, so this one delegation is what
+   --  makes every check an AUnit assertion: a failure is reported against the
+   --  routine that raised it and the rest of the suite still runs.
    procedure Check (Condition : Boolean; Message : String) is
    begin
-      if not Condition then
-         raise Program_Error with Message;
-      end if;
+      AUnit.Assertions.Assert (Condition, Message);
    end Check;
 
 

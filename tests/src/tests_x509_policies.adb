@@ -1505,4 +1505,74 @@ package body Tests_X509_Policies is
       end;
    end Check_Policy_Constraint_Skipcerts;
 
+   --  AUnit routine wrappers. Each check is a test of its own, so a
+   --  failure reports the check that failed and the rest still run.
+   procedure Run_Check_Policy_Processing (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Policy_Qualifiers (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Policy_Aware_Path_Building (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Self_Issued_Policy_Allowance (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Policy_Tree_Bound (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Policy_Set_Is_A_Set (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Policy_Constraint_Skipcerts (Item : in out AUnit.Test_Cases.Test_Case'Class);
+
+   procedure Run_Check_Policy_Processing (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Policy_Processing;
+   end Run_Check_Policy_Processing;
+
+   procedure Run_Check_Policy_Qualifiers (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Policy_Qualifiers;
+   end Run_Check_Policy_Qualifiers;
+
+   procedure Run_Check_Policy_Aware_Path_Building (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Policy_Aware_Path_Building;
+   end Run_Check_Policy_Aware_Path_Building;
+
+   procedure Run_Check_Self_Issued_Policy_Allowance (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Self_Issued_Policy_Allowance;
+   end Run_Check_Self_Issued_Policy_Allowance;
+
+   procedure Run_Check_Policy_Tree_Bound (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Policy_Tree_Bound;
+   end Run_Check_Policy_Tree_Bound;
+
+   procedure Run_Check_Policy_Set_Is_A_Set (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Policy_Set_Is_A_Set;
+   end Run_Check_Policy_Set_Is_A_Set;
+
+   procedure Run_Check_Policy_Constraint_Skipcerts (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Policy_Constraint_Skipcerts;
+   end Run_Check_Policy_Constraint_Skipcerts;
+
+   overriding procedure Register_Tests (Item : in out Test_Case) is
+      use AUnit.Test_Cases.Registration;
+   begin
+      Register_Routine (Item, Run_Check_Policy_Processing'Access, "policy processing");
+      Register_Routine (Item, Run_Check_Policy_Qualifiers'Access, "policy qualifiers");
+      Register_Routine (Item, Run_Check_Policy_Aware_Path_Building'Access, "policy aware path building");
+      Register_Routine (Item, Run_Check_Self_Issued_Policy_Allowance'Access, "self issued policy allowance");
+      Register_Routine (Item, Run_Check_Policy_Tree_Bound'Access, "policy tree bound");
+      Register_Routine (Item, Run_Check_Policy_Set_Is_A_Set'Access, "policy set is a set");
+      Register_Routine (Item, Run_Check_Policy_Constraint_Skipcerts'Access, "policy constraint skipcerts");
+   end Register_Tests;
+
+   overriding function Name (Item : Test_Case) return AUnit.Message_String is
+      pragma Unreferenced (Item);
+   begin
+      return AUnit.Format ("cryptolib X.509 policies");
+   end Name;
+
 end Tests_X509_Policies;

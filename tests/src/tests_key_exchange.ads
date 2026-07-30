@@ -1,3 +1,6 @@
+with AUnit;
+with AUnit.Test_Cases;
+
 --  Finite-field Diffie-Hellman and the post-quantum KEMs.
 --
 --  Each procedure is one group of known-answer or negative tests, and
@@ -5,18 +8,9 @@
 --  what keeps any one file readable; the driver keeps the order.
 package Tests_Key_Exchange is
 
-   procedure Check_DH_Peer_Validation;
+   type Test_Case is new AUnit.Test_Cases.Test_Case with null record;
 
-   procedure Check_DH_Group14;
-
-   procedure Check_DH_Group1;
-
-   procedure Check_DH_Generators;
-
-   procedure Check_Gex_Group_Selection;
-
-   procedure Check_Hybrid_PQ_Names;
-
-   procedure Check_MLKEM_Core_Algebra;
+   overriding procedure Register_Tests (Item : in out Test_Case);
+   overriding function Name (Item : Test_Case) return AUnit.Message_String;
 
 end Tests_Key_Exchange;

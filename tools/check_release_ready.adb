@@ -104,7 +104,12 @@ begin
    Step ("run test suite", "./tests/bin/tests");
    Step ("check alire manifest", "tools/bin/check_alire_manifest");
    Step ("check test suite", "tools/bin/check_test_suite");
-   Step ("build README examples", "alr exec -- gprbuild -q -P examples/examples.gpr");
+   --  Forced, like the builds above and for the same reason: examples/obj is
+   --  not cleaned between runs, and objects left there by a build against a
+   --  different libCryptolib.a link against the current one only by luck. That
+   --  failure was seen once here, and it is not one worth diagnosing twice.
+   Step ("build README examples",
+         "alr exec -- gprbuild -q -f -P examples/examples.gpr");
    Step ("check GNATdoc tags", "tools/bin/check_gnatdoc_tags");
 
    Ada.Text_IO.Put_Line ("cryptolib release preflight passed");

@@ -1,3 +1,6 @@
+with AUnit;
+with AUnit.Test_Cases;
+
 --  Verifying certificates: signatures, chains, purposes and identity matching.
 --
 --  Each procedure is one group of known-answer or negative tests, and
@@ -5,22 +8,9 @@
 --  what keeps any one file readable; the driver keeps the order.
 package Tests_X509_Validation is
 
-   procedure Check_X509_Verify;
+   type Test_Case is new AUnit.Test_Cases.Test_Case with null record;
 
-   procedure Check_Unsupported_Algorithm;
-
-   procedure Check_Verification_Failure_Kinds;
-
-   procedure Check_Chain_Constraint_Bypasses;
-
-   procedure Check_Signature_Algorithm_Agreement;
-
-   procedure Check_X509_Validation;
-
-   procedure Check_X509_Identity;
-
-   procedure Check_X509_Purposes;
-
-   procedure Check_X509_Path_Building;
+   overriding procedure Register_Tests (Item : in out Test_Case);
+   overriding function Name (Item : Test_Case) return AUnit.Message_String;
 
 end Tests_X509_Validation;

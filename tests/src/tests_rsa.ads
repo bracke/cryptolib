@@ -1,3 +1,6 @@
+with AUnit;
+with AUnit.Test_Cases;
+
 --  RSA signing and verification, PKCS#1 v1.5 and PSS.
 --
 --  Each procedure is one group of known-answer or negative tests, and
@@ -5,12 +8,9 @@
 --  what keeps any one file readable; the driver keeps the order.
 package Tests_RSA is
 
-   procedure Check_Weak_RSA_Key;
+   type Test_Case is new AUnit.Test_Cases.Test_Case with null record;
 
-   procedure Check_RSA_Signing;
-
-   procedure Check_RSA_Verify;
-
-   procedure Check_RSA_PSS;
+   overriding procedure Register_Tests (Item : in out Test_Case);
+   overriding function Name (Item : Test_Case) return AUnit.Message_String;
 
 end Tests_RSA;

@@ -1360,4 +1360,42 @@ package body Tests_X509_Name_Constraints is
       end;
    end Check_Name_Constraints;
 
+   --  AUnit routine wrappers. Each check is a test of its own, so a
+   --  failure reports the check that failed and the rest still run.
+   procedure Run_Check_Name_Constraint_Depth_Fields (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Unapplicable_Name_Constraint (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Name_Constraints (Item : in out AUnit.Test_Cases.Test_Case'Class);
+
+   procedure Run_Check_Name_Constraint_Depth_Fields (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Name_Constraint_Depth_Fields;
+   end Run_Check_Name_Constraint_Depth_Fields;
+
+   procedure Run_Check_Unapplicable_Name_Constraint (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Unapplicable_Name_Constraint;
+   end Run_Check_Unapplicable_Name_Constraint;
+
+   procedure Run_Check_Name_Constraints (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Name_Constraints;
+   end Run_Check_Name_Constraints;
+
+   overriding procedure Register_Tests (Item : in out Test_Case) is
+      use AUnit.Test_Cases.Registration;
+   begin
+      Register_Routine (Item, Run_Check_Name_Constraint_Depth_Fields'Access, "name constraint depth fields");
+      Register_Routine (Item, Run_Check_Unapplicable_Name_Constraint'Access, "unapplicable name constraint");
+      Register_Routine (Item, Run_Check_Name_Constraints'Access, "name constraints");
+   end Register_Tests;
+
+   overriding function Name (Item : Test_Case) return AUnit.Message_String is
+      pragma Unreferenced (Item);
+   begin
+      return AUnit.Format ("cryptolib X.509 name constraints");
+   end Name;
+
 end Tests_X509_Name_Constraints;

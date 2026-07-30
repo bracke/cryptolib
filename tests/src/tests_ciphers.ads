@@ -1,3 +1,6 @@
+with AUnit;
+with AUnit.Test_Cases;
+
 --  Block and stream ciphers, AEAD constructions, and MAC negotiation.
 --
 --  Each procedure is one group of known-answer or negative tests, and
@@ -5,24 +8,9 @@
 --  what keeps any one file readable; the driver keeps the order.
 package Tests_Ciphers is
 
-   procedure Check_ZIP_AES_CTR_Roundtrip;
+   type Test_Case is new AUnit.Test_Cases.Test_Case with null record;
 
-   procedure Check_RC2_40_CBC_Decrypt;
-
-   procedure Check_AES_256_CBC_Raw_Roundtrip;
-
-   procedure Check_AES_CBC_Raw_Rejects_Bad_Sizes;
-
-   procedure Check_Cipher_Names;
-
-   procedure Check_UMAC_Sequence_Nonce;
-
-   procedure Check_Chacha_Length_Agreement;
-
-   procedure Check_CBC_Paths_Agree;
-
-   procedure Check_UMAC_Negotiation_Guard;
-
-   procedure Check_ChaCha20_Poly1305_RFC8439;
+   overriding procedure Register_Tests (Item : in out Test_Case);
+   overriding function Name (Item : Test_Case) return AUnit.Message_String;
 
 end Tests_Ciphers;

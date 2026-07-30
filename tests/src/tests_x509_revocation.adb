@@ -1444,4 +1444,50 @@ package body Tests_X509_Revocation is
       end;
    end Check_Revocation;
 
+   --  AUnit routine wrappers. Each check is a test of its own, so a
+   --  failure reports the check that failed and the rest still run.
+   procedure Run_Check_X509_CRL (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Revocation_Details (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_OCSP (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Revocation (Item : in out AUnit.Test_Cases.Test_Case'Class);
+
+   procedure Run_Check_X509_CRL (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_X509_CRL;
+   end Run_Check_X509_CRL;
+
+   procedure Run_Check_Revocation_Details (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Revocation_Details;
+   end Run_Check_Revocation_Details;
+
+   procedure Run_Check_OCSP (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_OCSP;
+   end Run_Check_OCSP;
+
+   procedure Run_Check_Revocation (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Revocation;
+   end Run_Check_Revocation;
+
+   overriding procedure Register_Tests (Item : in out Test_Case) is
+      use AUnit.Test_Cases.Registration;
+   begin
+      Register_Routine (Item, Run_Check_X509_CRL'Access, "x509 crl");
+      Register_Routine (Item, Run_Check_Revocation_Details'Access, "revocation details");
+      Register_Routine (Item, Run_Check_OCSP'Access, "ocsp");
+      Register_Routine (Item, Run_Check_Revocation'Access, "revocation");
+   end Register_Tests;
+
+   overriding function Name (Item : Test_Case) return AUnit.Message_String is
+      pragma Unreferenced (Item);
+   begin
+      return AUnit.Format ("cryptolib X.509 revocation");
+   end Name;
+
 end Tests_X509_Revocation;

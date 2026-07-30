@@ -1,3 +1,6 @@
+with AUnit;
+with AUnit.Test_Cases;
+
 --  Issuing certificates: local CAs, server, client and email leaves.
 --
 --  Each procedure is one group of known-answer or negative tests, and
@@ -5,10 +8,9 @@
 --  what keeps any one file readable; the driver keeps the order.
 package Tests_X509_Issuance is
 
-   procedure Check_Certificates;
+   type Test_Case is new AUnit.Test_Cases.Test_Case with null record;
 
-   procedure Check_P384_Local_CA;
-
-   procedure Check_Ed448_Certificate;
+   overriding procedure Register_Tests (Item : in out Test_Case);
+   overriding function Name (Item : Test_Case) return AUnit.Message_String;
 
 end Tests_X509_Issuance;

@@ -1,3 +1,6 @@
+with AUnit;
+with AUnit.Test_Cases;
+
 --  CRL and OCSP revocation checking.
 --
 --  Each procedure is one group of known-answer or negative tests, and
@@ -5,12 +8,9 @@
 --  what keeps any one file readable; the driver keeps the order.
 package Tests_X509_Revocation is
 
-   procedure Check_Revocation_Details;
+   type Test_Case is new AUnit.Test_Cases.Test_Case with null record;
 
-   procedure Check_X509_CRL;
-
-   procedure Check_OCSP;
-
-   procedure Check_Revocation;
+   overriding procedure Register_Tests (Item : in out Test_Case);
+   overriding function Name (Item : Test_Case) return AUnit.Message_String;
 
 end Tests_X509_Revocation;

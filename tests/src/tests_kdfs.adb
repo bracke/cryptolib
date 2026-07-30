@@ -847,4 +847,142 @@ package body Tests_KDFs is
       end;
    end Check_HKDF;
 
+
+   --  PBKDF2-HMAC-SHA1 with a high iteration count (RFC 6070, c = 4096) to
+   --  exercise the iteration/XOR-accumulation loop (previously only c = 1).
+   procedure Check_PBKDF2_High_Iteration is
+   begin
+      Check
+        (CryptoLib.Macs.PBKDF2_HMAC_SHA1
+           (Bytes_From_String ("password"), Bytes_From_String ("salt"), 4096, 20)
+         = Bytes_From_Hex ("4b007901b765489abead49d926f721d065a429c1"),
+         "PBKDF2-HMAC-SHA1 RFC 6070 c=4096 KAT");
+   end Check_PBKDF2_High_Iteration;
+
+   --  AUnit routine wrappers. Each check is a test of its own, so a
+   --  failure reports the check that failed and the rest still run.
+   procedure Run_Check_PBKDF2_SHA1 (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_PBKDF2_SHA2 (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_PBKDF1 (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_PKCS12_KDF_SHA1 (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Scrypt_SHA256 (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Seven_Zip_AES_SHA256_KDF (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_EVP_Bytes_To_Key_MD5 (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Bcrypt_PBKDF (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_HKDF (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_TLS13_KDF (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_PKCS12_Work_Factor (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_PKCS12_Work_Ceiling (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_PKCS12_Mac_Key (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_PBKDF2_High_Iteration (Item : in out AUnit.Test_Cases.Test_Case'Class);
+
+   procedure Run_Check_PBKDF2_SHA1 (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_PBKDF2_SHA1;
+   end Run_Check_PBKDF2_SHA1;
+
+   procedure Run_Check_PBKDF2_SHA2 (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_PBKDF2_SHA2;
+   end Run_Check_PBKDF2_SHA2;
+
+   procedure Run_Check_PBKDF1 (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_PBKDF1;
+   end Run_Check_PBKDF1;
+
+   procedure Run_Check_PKCS12_KDF_SHA1 (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_PKCS12_KDF_SHA1;
+   end Run_Check_PKCS12_KDF_SHA1;
+
+   procedure Run_Check_Scrypt_SHA256 (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Scrypt_SHA256;
+   end Run_Check_Scrypt_SHA256;
+
+   procedure Run_Check_Seven_Zip_AES_SHA256_KDF (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Seven_Zip_AES_SHA256_KDF;
+   end Run_Check_Seven_Zip_AES_SHA256_KDF;
+
+   procedure Run_Check_EVP_Bytes_To_Key_MD5 (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_EVP_Bytes_To_Key_MD5;
+   end Run_Check_EVP_Bytes_To_Key_MD5;
+
+   procedure Run_Check_Bcrypt_PBKDF (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Bcrypt_PBKDF;
+   end Run_Check_Bcrypt_PBKDF;
+
+   procedure Run_Check_HKDF (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_HKDF;
+   end Run_Check_HKDF;
+
+   procedure Run_Check_TLS13_KDF (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_TLS13_KDF;
+   end Run_Check_TLS13_KDF;
+
+   procedure Run_Check_PKCS12_Work_Factor (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_PKCS12_Work_Factor;
+   end Run_Check_PKCS12_Work_Factor;
+
+   procedure Run_Check_PKCS12_Work_Ceiling (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_PKCS12_Work_Ceiling;
+   end Run_Check_PKCS12_Work_Ceiling;
+
+   procedure Run_Check_PKCS12_Mac_Key (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_PKCS12_Mac_Key;
+   end Run_Check_PKCS12_Mac_Key;
+
+   procedure Run_Check_PBKDF2_High_Iteration (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_PBKDF2_High_Iteration;
+   end Run_Check_PBKDF2_High_Iteration;
+
+   overriding procedure Register_Tests (Item : in out Test_Case) is
+      use AUnit.Test_Cases.Registration;
+   begin
+      Register_Routine (Item, Run_Check_PBKDF2_SHA1'Access, "pbkdf2 sha1");
+      Register_Routine (Item, Run_Check_PBKDF2_SHA2'Access, "pbkdf2 sha2");
+      Register_Routine (Item, Run_Check_PBKDF1'Access, "pbkdf1");
+      Register_Routine (Item, Run_Check_PKCS12_KDF_SHA1'Access, "pkcs12 kdf sha1");
+      Register_Routine (Item, Run_Check_Scrypt_SHA256'Access, "scrypt sha256");
+      Register_Routine (Item, Run_Check_Seven_Zip_AES_SHA256_KDF'Access, "seven zip aes sha256 kdf");
+      Register_Routine (Item, Run_Check_EVP_Bytes_To_Key_MD5'Access, "evp bytes to key md5");
+      Register_Routine (Item, Run_Check_Bcrypt_PBKDF'Access, "bcrypt pbkdf");
+      Register_Routine (Item, Run_Check_HKDF'Access, "hkdf");
+      Register_Routine (Item, Run_Check_TLS13_KDF'Access, "tls13 kdf");
+      Register_Routine (Item, Run_Check_PKCS12_Work_Factor'Access, "pkcs12 work factor");
+      Register_Routine (Item, Run_Check_PKCS12_Work_Ceiling'Access, "pkcs12 work ceiling");
+      Register_Routine (Item, Run_Check_PKCS12_Mac_Key'Access, "pkcs12 mac key");
+      Register_Routine (Item, Run_Check_PBKDF2_High_Iteration'Access, "pbkdf2 high iteration");
+   end Register_Tests;
+
+   overriding function Name (Item : Test_Case) return AUnit.Message_String is
+      pragma Unreferenced (Item);
+   begin
+      return AUnit.Format ("cryptolib key derivation");
+   end Name;
+
 end Tests_KDFs;
