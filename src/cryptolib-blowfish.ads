@@ -15,7 +15,13 @@ with Interfaces;
 --  CryptoLib.Bcrypt needed the same routines. Neither of those packages
 --  should be understood as endorsing Blowfish as a cipher; they use its key
 --  schedule because being slow is the point.
-package CryptoLib.Blowfish is
+--
+--  A **private child**, so it is reachable from bodies inside the CryptoLib
+--  hierarchy and from nowhere else. Sharing the code between two siblings was
+--  the reason to lift it out of one of them; making it available to a caller
+--  was not, and a 64-bit block cipher on a library's public surface is an
+--  invitation to use it for something.
+private package CryptoLib.Blowfish is
 
    subtype Word_32 is Interfaces.Unsigned_32;
 

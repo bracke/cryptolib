@@ -13,7 +13,9 @@ predecessor.
 * Hashes and MACs: SHA-1, SHA-256, SHA-384, SHA-512, SHA-3, UMAC, and the
   shared `Hashes`, `Macs`, `Checksums` and `Fingerprints` interfaces.
 * Password hashing: bcrypt (`$2b$`), hashing and verification, on a Blowfish
-  key schedule extracted from `BCrypt_PBKDF` so the two share one copy.
+  key schedule extracted from `BCrypt_PBKDF` so the two share one copy. The
+  shared package is a private child, so the cipher is reachable from inside
+  `CryptoLib` and not from a caller.
 * Password hashing: Argon2d, Argon2i and Argon2id (RFC 9106) over a new
   BLAKE2b (RFC 7693). Argon2id is the one to reach for. scrypt (RFC 7914) and
   `bcrypt_pbkdf` were already here.
