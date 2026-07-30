@@ -578,7 +578,6 @@ package body CryptoLib.Certificates is
       return Seq (Time_DER (From) & Time_DER (Till));
    end Validity_DER;
 
-
    function SPKI_DER
      (Public_Key : Ada.Streams.Stream_Element_Array;
       Algorithm  : Key_Algorithm := Ed25519_Key) return String is
@@ -1721,13 +1720,10 @@ package body CryptoLib.Certificates is
       end case;
    end Sign_Certificate;
 
-
-
    function Contains (Data : String; Needle : String) return Boolean is
    begin
       return Ada.Strings.Fixed.Index (Data, Needle) /= 0;
    end Contains;
-
 
    --  A DER INTEGER carries no leading zeros and may have gained a sign byte;
    --  the verifier wants a fixed-width big-endian value.
@@ -3150,6 +3146,5 @@ package body CryptoLib.Certificates is
         (CA_Certificate_PEM, CA_Private_Key_PEM, Common_Name, Names,
          Subject_SPKI, Client_Profile, Certificate_PEM, Valid_Days, Use_PSS);
    end Issue_Client_Certificate_For_Key;
-
 
 end CryptoLib.Certificates;
