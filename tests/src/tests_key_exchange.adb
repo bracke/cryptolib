@@ -60,6 +60,7 @@ with CryptoLib.Ed448;
 with CryptoLib.SHA3;
 with CryptoLib.Buffers;
 with CryptoLib.Diffie_Hellman;
+with CryptoLib.FFDHE;
 with CryptoLib.Modexp;
 with CryptoLib.Bignum;
 with CryptoLib.Random;
@@ -974,6 +975,142 @@ package body Tests_Key_Exchange is
       end;
    end Check_Modexp_And_DH_Group18;
 
+   --  RFC 7919 finite-field groups. The primes were derived from the RFC's
+   --  own construction and confirmed by handing p and g to OpenSSL as
+   --  anonymous explicit parameters, which named each group back; the vector
+   --  below was then computed independently in Python against that prime, so
+   --  agreement here is agreement with a second implementation and not with
+   --  this one's own arithmetic.
+   procedure Check_FFDHE is
+      package FF renames CryptoLib.FFDHE;
+      use type FF.Group_Id;
+   begin
+      declare
+         FF_XA : constant String :=
+           "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20";
+         FF_XB : constant String :=
+           "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf";
+         FF_YA : constant String :=
+           "0eef0c0eae9c65a3332cdc742b58561d362c0af526f8ad528b19ff39c91434312f83302ed9dc6f2b84b25048"
+           & "2dbd80962154f8a6d683741bf8bf4f3fdee22f80541a77553d1ae7a096c521f869987ae5eca1090d93e7bdea"
+           & "0b4349f17fee34f4775bfb380f426dec937b25825680c6e2b8c4c9eede64b91f5cdc02ba78e75908d47cd27f"
+           & "da4b5188c22baf2acd1e861ed0864e9eb9346640d354eada9f7156a601387ba5f1b8609733707803a5ac866f"
+           & "c1bbe54b15a99934727bc5c157f893d867a89abf0ce3dd0cf3d7ce00073db8b3bbae1486faedc462f7edeb3d"
+           & "c44ba30336de3d4dbfb4f14f143c46b0ba93f316f50c3377b9a38a27ae048f5605a4dcbf";
+         FF_Z : constant String :=
+           "5284cd3fd1f1074744f2f0e60003d25379171b45ef6f265606cb4065f9c390da0076da913ef1146829f6d333"
+           & "e513169ba9d21861045a3e9c5c48a0d343052ba050777a94fb1baa149ce34397c7736d1a759cbc84dc0ed883"
+           & "62e1465d0dd5f747d40744f4899ad4d37df814cd21a7e5dd6ee17cd05e70f75acf37bd30334525272b85daf6"
+           & "d00d54de618f6bfbe06ef58723fbf38c30c2fee5989b65e93488f0825f1d5162104f1937ce96f7a9f671a42b"
+           & "bfd5518302f83a37145be86edd1c988dab927c305914e8fd21489068da46c5a417e5fd7805e9bc64246b7196"
+           & "0e62eb6f22a3d0b46186302e7fa537b77785f0a22e5a33101e08b1bd6e787127e07d6d96";
+         XA : constant Ada.Streams.Stream_Element_Array := Bytes_From_Hex (FF_XA);
+         XB : constant Ada.Streams.Stream_Element_Array := Bytes_From_Hex (FF_XB);
+         Public_A : Ada.Streams.Stream_Element_Array (1 .. 256);
+         Public_B : Ada.Streams.Stream_Element_Array (1 .. 256);
+         Secret_A : Ada.Streams.Stream_Element_Array (1 .. 256);
+         Secret_B : Ada.Streams.Stream_Element_Array (1 .. 256);
+      begin
+         Check (FF.Value_Length (FF.FFDHE2048) = 256
+                and then FF.Value_Length (FF.FFDHE8192) = 1024,
+                "the group widths are the prime widths");
+
+         Check (FF.Public_Value (FF.FFDHE2048, XA, Public_A)
+                  = CryptoLib.Errors.Ok,
+                "ffdhe2048 derives a public value from a fixed exponent");
+         Check (Public_A = Bytes_From_Hex (FF_YA),
+                "and it is the value an independent modexp over the RFC 7919 "
+                & "prime gives");
+
+         Check (FF.Public_Value (FF.FFDHE2048, XB, Public_B)
+                  = CryptoLib.Errors.Ok,
+                "the second exponent derives too");
+         Check (FF.Shared_Secret (FF.FFDHE2048, XA, Public_B, Secret_A)
+                  = CryptoLib.Errors.Ok,
+                "and the two sides agree a secret");
+         Check (Secret_A = Bytes_From_Hex (FF_Z),
+                "which is the published value for this pair");
+         Check (FF.Shared_Secret (FF.FFDHE2048, XB, Public_A, Secret_B)
+                  = CryptoLib.Errors.Ok,
+                "the other direction agrees a secret too");
+         Check (Secret_B = Secret_A, "and both directions reach the same one");
+      end;
+
+      --  Degenerate peer values. Each is what an attacker sends to force a
+      --  shared secret it already knows.
+      declare
+         Secret : Ada.Streams.Stream_Element_Array (1 .. 256);
+         X      : constant Ada.Streams.Stream_Element_Array (1 .. 32) :=
+           [others => 7];
+         Zero   : constant Ada.Streams.Stream_Element_Array (1 .. 256) :=
+           [others => 0];
+         One    : Ada.Streams.Stream_Element_Array (1 .. 256) := [others => 0];
+         Narrow : constant Ada.Streams.Stream_Element_Array (1 .. 255) :=
+           [others => 1];
+      begin
+         One (One'Last) := 1;
+         Check (not FF.Valid_Peer_Value (FF.FFDHE2048, Zero),
+                "a peer value of zero is refused");
+         Check (not FF.Valid_Peer_Value (FF.FFDHE2048, One),
+                "and a peer value of one");
+         Check (not FF.Valid_Peer_Value (FF.FFDHE2048, Narrow),
+                "and one of the wrong width");
+         Check (FF.Shared_Secret (FF.FFDHE2048, X, Zero, Secret)
+                  /= CryptoLib.Errors.Ok,
+                "Shared_Secret refuses zero as well");
+         Check (Secret = [Secret'Range => 0], "and leaves the secret zero");
+         Check (FF.Shared_Secret (FF.FFDHE2048, X, One, Secret)
+                  /= CryptoLib.Errors.Ok,
+                "and refuses one");
+         Check (Secret = [Secret'Range => 0], "and leaves the secret zero");
+
+         --  A value at or above p. This is the case that pins the peer check
+         --  specifically: zero and one are caught downstream anyway, because
+         --  the secret they produce is itself refused, so a suite that tested
+         --  only those would pass with the peer check deleted -- it did, until
+         --  this was added. An unreduced base is also what CryptoLib.Modexp
+         --  documents it does not accept.
+         declare
+            Too_Large : constant Ada.Streams.Stream_Element_Array (1 .. 256) :=
+              [others => 16#FF#];
+         begin
+            Check (not FF.Valid_Peer_Value (FF.FFDHE2048, Too_Large),
+                   "a peer value above the prime is refused");
+            Check (FF.Shared_Secret (FF.FFDHE2048, X, Too_Large, Secret)
+                     /= CryptoLib.Errors.Ok,
+                   "and Shared_Secret refuses it rather than reducing it");
+            Check (Secret = [Secret'Range => 0], "and leaves the secret zero");
+         end;
+      end;
+
+      --  A generated pair must be usable by the side that consumes it.
+      declare
+         Rng      : CryptoLib.Random.Random_Source;
+         Priv     : Ada.Streams.Stream_Element_Array (1 .. 32);
+         Pub      : Ada.Streams.Stream_Element_Array (1 .. 256);
+         Peer_X   : constant Ada.Streams.Stream_Element_Array (1 .. 32) :=
+           [others => 3];
+         Peer_Pub : Ada.Streams.Stream_Element_Array (1 .. 256);
+         S1, S2   : Ada.Streams.Stream_Element_Array (1 .. 256);
+      begin
+         CryptoLib.Random.Initialize_Production (Rng);
+         Check (FF.Generate_Keypair (FF.FFDHE2048, Rng, Priv, Pub)
+                  = CryptoLib.Errors.Ok,
+                "ffdhe2048 generates a keypair");
+         Check (FF.Valid_Peer_Value (FF.FFDHE2048, Pub),
+                "and the public value it emits is one it would accept");
+         Check (FF.Public_Value (FF.FFDHE2048, Peer_X, Peer_Pub)
+                  = CryptoLib.Errors.Ok,
+                "the peer derives its own");
+         Check (FF.Shared_Secret (FF.FFDHE2048, Priv, Peer_Pub, S1)
+                  = CryptoLib.Errors.Ok
+                and then FF.Shared_Secret (FF.FFDHE2048, Peer_X, Pub, S2)
+                  = CryptoLib.Errors.Ok
+                and then S1 = S2,
+                "and a generated pair agrees with a fixed one");
+      end;
+   end Check_FFDHE;
+
    --  AUnit routine wrappers. Each check is a test of its own, so a
    --  failure reports the check that failed and the rest still run.
    procedure Run_Check_DH_Peer_Validation (Item : in out AUnit.Test_Cases.Test_Case'Class);
@@ -983,6 +1120,7 @@ package body Tests_Key_Exchange is
    procedure Run_Check_Gex_Group_Selection (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_Hybrid_PQ_Names (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_MLKEM_Core_Algebra (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_FFDHE (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_MLKEM768_Vectors (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_SNTRUP761_Vectors (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_Modexp_And_DH_Group18 (Item : in out AUnit.Test_Cases.Test_Case'Class);
@@ -1047,6 +1185,12 @@ package body Tests_Key_Exchange is
       Check_Modexp_And_DH_Group18;
    end Run_Check_Modexp_And_DH_Group18;
 
+   procedure Run_Check_FFDHE (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_FFDHE;
+   end Run_Check_FFDHE;
+
    overriding procedure Register_Tests (Item : in out Test_Case) is
       use AUnit.Test_Cases.Registration;
    begin
@@ -1057,6 +1201,7 @@ package body Tests_Key_Exchange is
       Register_Routine (Item, Run_Check_Gex_Group_Selection'Access, "gex group selection");
       Register_Routine (Item, Run_Check_Hybrid_PQ_Names'Access, "hybrid pq names");
       Register_Routine (Item, Run_Check_MLKEM_Core_Algebra'Access, "mlkem core algebra");
+      Register_Routine (Item, Run_Check_FFDHE'Access, "ffdhe groups");
       Register_Routine (Item, Run_Check_MLKEM768_Vectors'Access, "mlkem768 vectors");
       Register_Routine (Item, Run_Check_SNTRUP761_Vectors'Access, "sntrup761 vectors");
       Register_Routine (Item, Run_Check_Modexp_And_DH_Group18'Access, "modexp and dh group18");

@@ -18,6 +18,10 @@ predecessor.
   the OpenSSH one (`Seal`/`Open`) and RFC 8439's (`Seal_AEAD`/`Open_AEAD`).
   AES uses a bit-sliced S-box rather than a lookup table, trading speed for the
   absence of a cache-timing channel.
+* Finite-field Diffie-Hellman over the RFC 7919 named groups (`FFDHE`):
+  ffdhe2048 through ffdhe8192, the groups TLS negotiates, distinct from the SSH
+  MODP groups. Primes derived from the RFC's construction and confirmed by
+  OpenSSL naming them back from p and g alone.
 * Key agreement: X25519, finite-field Diffie-Hellman over the fixed-width
   Montgomery `Modexp` rather than `Big_Integers`, ECDH on P-256/384/521 with
   full peer-point validation, and a hybrid post-quantum exchange.
