@@ -7,7 +7,6 @@ with CryptoLib.Ed25519;
 with CryptoLib.Ed448;
 with CryptoLib.Errors;
 with CryptoLib.ASN1.OIDs;
-with CryptoLib.RSA;
 
 package body CryptoLib.X509.Signatures is
 
@@ -314,6 +313,64 @@ package body CryptoLib.X509.Signatures is
       Ok := DER_Reader.At_End (Cursor, Outer.Last);
    end Split_ECDSA_Signature;
 
+   --  The half of PSS verification that does not care where the parameters
+   --  came from: split the key, verify, map the status. Verify_With_Key
+   --  reaches it after reading a DER RSASSA-PSS-params;
+   --  Verify_PSS_With_Key reaches it with the parameters as arguments.
+   function Verify_PSS_Against_Key
+     (Message     : CryptoLib.ASN1.Octets;
+      Sig         : CryptoLib.ASN1.Octets;
+      Hash        : CryptoLib.RSA.Hash_Algorithm;
+      Salt_Length : Natural;
+      Key         : CryptoLib.ASN1.Octets)
+      return Verification_Result
+   is
+      Mod_First : Ada.Streams.Stream_Element_Offset;
+      Mod_Last  : Ada.Streams.Stream_Element_Offset;
+      Exp_First : Ada.Streams.Stream_Element_Offset;
+      Exp_Last  : Ada.Streams.Stream_Element_Offset;
+      Ok        : Boolean;
+   begin
+      Split_RSA_Key (Key, Mod_First, Mod_Last, Exp_First, Exp_Last, Ok);
+      if not Ok then
+         return Malformed_Signature;
+      end if;
+      declare
+         Outcome : constant CryptoLib.Errors.Status :=
+           CryptoLib.RSA.Verify_PSS
+             (Modulus     => Key (Mod_First .. Mod_Last),
+              Exponent    => Key (Exp_First .. Exp_Last),
+              Hash        => Hash,
+              Salt_Length => Salt_Length,
+              Message     => Message,
+              Signature   => Sig);
+      begin
+         if Outcome = CryptoLib.Errors.Ok then
+            return Valid;
+         elsif Outcome = CryptoLib.Errors.Authentication_Failed then
+            return Invalid_Signature;
+         else
+            return Malformed_Signature;
+         end if;
+      end;
+   end Verify_PSS_Against_Key;
+
+   function Digest_Length (Hash : PSS_Hash) return Natural is
+     (case Hash is
+         when CryptoLib.RSA.SHA256 => 32,
+         when CryptoLib.RSA.SHA384 => 48,
+         when CryptoLib.RSA.SHA512 => 64);
+
+   function Verify_PSS_With_Key
+     (Signed      : CryptoLib.ASN1.Octets;
+      Signature   : CryptoLib.ASN1.Octets;
+      Hash        : PSS_Hash;
+      Salt_Length : Natural;
+      Public_Key  : CryptoLib.ASN1.Octets)
+      return Verification_Result
+   is (Verify_PSS_Against_Key
+         (Signed, Signature, Hash, Salt_Length, Public_Key));
+
    function Verify_With_Key
      (Signed     : CryptoLib.ASN1.Octets;
       Signature  : CryptoLib.ASN1.Octets;
@@ -410,14 +467,9 @@ package body CryptoLib.X509.Signatures is
                end if;
 
                declare
-                  Mod_First : Ada.Streams.Stream_Element_Offset;
-                  Mod_Last  : Ada.Streams.Stream_Element_Offset;
-                  Exp_First : Ada.Streams.Stream_Element_Offset;
-                  Exp_Last  : Ada.Streams.Stream_Element_Offset;
-                  Ok        : Boolean;
-                  Hash      : CryptoLib.RSA.Hash_Algorithm;
-                  Salt      : Natural;
-                  Usable    : Boolean;
+                  Hash   : CryptoLib.RSA.Hash_Algorithm;
+                  Salt   : Natural;
+                  Usable : Boolean;
                begin
                   Read_PSS_Parameters (Parameters, Hash, Salt, Usable);
                   if not Usable then
@@ -425,32 +477,7 @@ package body CryptoLib.X509.Signatures is
                      --  one would turn "we could not check" into "it failed".
                      return Unsupported_Algorithm;
                   end if;
-
-                  Split_RSA_Key
-                    (Key, Mod_First, Mod_Last, Exp_First, Exp_Last, Ok);
-                  if not Ok then
-                     return Malformed_Signature;
-                  end if;
-
-                  declare
-                     Outcome : constant CryptoLib.Errors.Status :=
-                       CryptoLib.RSA.Verify_PSS
-                         (Modulus     => Key (Mod_First .. Mod_Last),
-                          Exponent    => Key (Exp_First .. Exp_Last),
-                          Hash        => Hash,
-                          Salt_Length => Salt,
-                          Message     => Message,
-                          Signature   => Sig);
-                  begin
-                     if Outcome = CryptoLib.Errors.Ok then
-                        return Valid;
-                     elsif Outcome = CryptoLib.Errors.Authentication_Failed
-                     then
-                        return Invalid_Signature;
-                     else
-                        return Malformed_Signature;
-                     end if;
-                  end;
+                  return Verify_PSS_Against_Key (Message, Sig, Hash, Salt, Key);
                end;
 
             when SHA256_With_RSA | SHA384_With_RSA | SHA512_With_RSA =>

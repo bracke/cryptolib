@@ -1,4 +1,5 @@
 with CryptoLib.ASN1;
+with CryptoLib.RSA;
 with CryptoLib.X509.Certificates;
 
 --  @summary Checking that one certificate was signed by another's key.
@@ -108,6 +109,50 @@ package CryptoLib.X509.Signatures is
       Key_Kind   : Public_Key_Algorithm;
       Public_Key : CryptoLib.ASN1.Octets;
       Parameters : CryptoLib.ASN1.Octets := Empty_Parameters)
+      return Verification_Result;
+
+   --  Which hash an RSASSA-PSS signature was made with. Re-exported so a
+   --  caller can name one without depending on CryptoLib.RSA directly.
+   subtype PSS_Hash is CryptoLib.RSA.Hash_Algorithm;
+
+   --  The digest length of a PSS hash, in octets: 32, 48 or 64.
+   --
+   --  Offered because the salt length below is a number a caller would
+   --  otherwise write as a literal, and a wrong literal is a signature that
+   --  verifies against the wrong thing.
+   --  @param Hash which hash
+   --  @return that hash's digest length in octets
+   function Digest_Length (Hash : PSS_Hash) return Natural;
+
+   --  Verify an RSASSA-PSS signature whose parameters the protocol fixes
+   --  rather than carrying.
+   --
+   --  Verify_With_Key reads the hash and salt length out of a DER
+   --  RSASSA-PSS-params, which is where a *certificate* keeps them. Several
+   --  protocols do not keep them anywhere: TLS 1.3 fixes them per signature
+   --  scheme in RFC 8446 section 4.2.3 -- MGF1 with the same hash, and a salt
+   --  length equal to the digest length -- so a CertificateVerify carries a
+   --  signature and no AlgorithmIdentifier at all.
+   --
+   --  Without this entry point such a caller has to encode an
+   --  AlgorithmIdentifier purely so that this package can parse it straight
+   --  back out, which is what SSL.Crypto was doing with three constant DER
+   --  blobs. The parameters are arguments here instead.
+   --
+   --  For TLS 1.3 pass Salt_Length => Digest_Length (Hash).
+   --  @param Signed      the bytes the signature covers
+   --  @param Signature   the signature octets
+   --  @param Hash        which digest, for both the message and MGF1
+   --  @param Salt_Length the salt length in octets
+   --  @param Public_Key  the signer's SubjectPublicKeyInfo
+   --  @return Valid, Invalid_Signature when it does not verify,
+   --    Malformed_Signature when the key or signature cannot be read
+   function Verify_PSS_With_Key
+     (Signed      : CryptoLib.ASN1.Octets;
+      Signature   : CryptoLib.ASN1.Octets;
+      Hash        : PSS_Hash;
+      Salt_Length : Natural;
+      Public_Key  : CryptoLib.ASN1.Octets)
       return Verification_Result;
 
    --  Can this crate verify signatures of this algorithm at all?

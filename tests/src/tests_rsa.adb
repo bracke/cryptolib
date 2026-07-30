@@ -1608,6 +1608,79 @@ package body Tests_RSA is
                = CryptoLib.Errors.Authentication_Failed,
              "nor under a different hash");
 
+      --  The same signature through the X.509 signature layer, both ways.
+      --
+      --  This is the TLS 1.3 shape: rsa_pss_rsae_sha256 fixes MGF1-SHA256 and
+      --  a salt equal to the digest length, and a CertificateVerify carries no
+      --  AlgorithmIdentifier at all. Verify_PSS_With_Key takes those as
+      --  arguments; Verify_With_Key takes the DER a certificate would carry.
+      --  Both must reach the same verdict on the same signature, or the new
+      --  entry point is not the old one with the parsing removed.
+      declare
+         package XS2 renames CryptoLib.X509.Signatures;
+
+         --  RSAPublicKey: SEQUENCE { INTEGER n, INTEGER e }. The modulus has
+         --  its top bit set, so its INTEGER carries a leading zero octet.
+         Key : constant Ada.Streams.Stream_Element_Array :=
+           [16#30#, 16#82#, 16#01#, 16#0A#,
+            16#02#, 16#82#, 16#01#, 16#01#, 16#00#]
+           & Modulus
+           & [16#02#, 16#03#, 16#01#, 16#00#, 16#01#];
+
+         --  RSASSA-PSS-params for SHA-256 with a 32-octet salt: the constant
+         --  a caller had to encode before Verify_PSS_With_Key existed.
+         Params : constant Ada.Streams.Stream_Element_Array :=
+           [16#30#, 16#34#,
+            16#A0#, 16#0F#, 16#30#, 16#0D#, 16#06#, 16#09#,
+            16#60#, 16#86#, 16#48#, 16#01#, 16#65#, 16#03#, 16#04#,
+            16#02#, 16#01#, 16#05#, 16#00#,
+            16#A1#, 16#1C#, 16#30#, 16#1A#, 16#06#, 16#09#,
+            16#2A#, 16#86#, 16#48#, 16#86#, 16#F7#, 16#0D#, 16#01#,
+            16#01#, 16#08#,
+            16#30#, 16#0D#, 16#06#, 16#09#,
+            16#60#, 16#86#, 16#48#, 16#01#, 16#65#, 16#03#, 16#04#,
+            16#02#, 16#01#, 16#05#, 16#00#,
+            16#A2#, 16#03#, 16#02#, 16#01#, 16#20#];
+      begin
+         Check (XS2.Digest_Length (CryptoLib.RSA.SHA256) = 32
+                and then XS2.Digest_Length (CryptoLib.RSA.SHA384) = 48
+                and then XS2.Digest_Length (CryptoLib.RSA.SHA512) = 64,
+                "the digest lengths a fixed-parameter caller needs");
+
+         Check (XS2.Verify_PSS_With_Key
+                  (Signed      => Message,
+                   Signature   => Signature,
+                   Hash        => CryptoLib.RSA.SHA256,
+                   Salt_Length => XS2.Digest_Length (CryptoLib.RSA.SHA256),
+                   Public_Key  => Key) = XS2.Valid,
+                "PSS verifies with the parameters given rather than parsed");
+
+         Check (XS2.Verify_With_Key
+                  (Signed     => Message,
+                   Signature  => Signature,
+                   Algorithm  => CryptoLib.X509.RSASSA_PSS,
+                   Key_Kind   => CryptoLib.X509.RSA,
+                   Public_Key => Key,
+                   Parameters => Params) = XS2.Valid,
+                "and the DER-carrying path agrees on the same signature");
+
+         --  The parameters are not decoration: a wrong salt length must be a
+         --  refusal, or passing them would be pointless.
+         Check (XS2.Verify_PSS_With_Key
+                  (Signed      => Message,
+                   Signature   => Signature,
+                   Hash        => CryptoLib.RSA.SHA256,
+                   Salt_Length => 20,
+                   Public_Key  => Key) = XS2.Invalid_Signature,
+                "a wrong salt length is refused here too");
+         Check (XS2.Verify_PSS_With_Key
+                  (Signed      => Message,
+                   Signature   => Signature,
+                   Hash        => CryptoLib.RSA.SHA384,
+                   Salt_Length => 32,
+                   Public_Key  => Key) = XS2.Invalid_Signature,
+                "and so is a wrong hash");
+      end;
       declare
          Tampered : Ada.Streams.Stream_Element_Array := Signature;
       begin
