@@ -13,6 +13,8 @@ with CryptoLib.X509.Extensions;
 with CryptoLib.X509.Identity;
 with CryptoLib.X509.Purposes;
 with CryptoLib.X509.Names;
+with Ada.Directories;
+with Ada.Streams.Stream_IO;
 with CryptoLib.X509.CRLs;
 with CryptoLib.X509.Revocation;
 with CryptoLib.OCSP;
@@ -10357,6 +10359,89 @@ procedure Tests is
                   = CryptoLib.Errors.Ok
                 and then Via_CRT = Plain,
                 "an incomplete CRT set signs the plain way");
+      end;
+
+      --  Everything in the machine's own trust store still parses.
+      --
+      --  This crate's DER reader is deliberately strict -- it refuses
+      --  indefinite lengths, non-minimal lengths, and now a BIT STRING whose
+      --  padding bits are not zero. Every one of those rules is a chance to
+      --  reject a certificate the world actually uses, and the crate's own
+      --  corpus cannot show that has not happened: it holds what was written
+      --  for it.
+      --
+      --  So the real store is read when there is one. The assertion is that
+      --  nothing in it is refused, not that some particular number of roots
+      --  is present -- the count changes as the machine's package updates,
+      --  and pinning it would make this fail for a reason that is not about
+      --  this crate. Absent a store, the check says so rather than passing
+      --  quietly.
+      declare
+         Store_Path : constant String := "/etc/ssl/certs/ca-certificates.crt";
+         Present    : Boolean;
+      begin
+         Present := Ada.Directories.Exists (Store_Path);
+         if not Present then
+            Ada.Text_IO.Put_Line
+              ("  (no system trust store here; roots not re-checked)");
+         else
+            declare
+               Size : constant Natural :=
+                 Natural (Ada.Directories.Size (Store_Path));
+               File : Ada.Streams.Stream_IO.File_Type;
+               Raw  : Ada.Streams.Stream_Element_Array
+                 (1 .. Ada.Streams.Stream_Element_Offset (Size));
+               Last : Ada.Streams.Stream_Element_Offset;
+               Text : String (1 .. Size);
+               Seen, Refused : Natural := 0;
+            begin
+               Ada.Streams.Stream_IO.Open
+                 (File, Ada.Streams.Stream_IO.In_File, Store_Path);
+               Ada.Streams.Stream_IO.Read (File, Raw, Last);
+               Ada.Streams.Stream_IO.Close (File);
+               for I in Text'Range loop
+                  Text (I) :=
+                    Character'Val
+                      (Raw (Ada.Streams.Stream_Element_Offset (I)));
+               end loop;
+
+               declare
+                  use type CryptoLib.PEM.Decode_Status;
+                  From   : Positive := Text'First;
+                  Buffer : Ada.Streams.Stream_Element_Array
+                    (1 .. Ada.Streams.Stream_Element_Offset
+                            (CryptoLib.PEM.Maximum_Decoded_Length (Text)));
+                  Wrote  : Ada.Streams.Stream_Element_Offset;
+                  P_St   : CryptoLib.PEM.Decode_Status;
+               begin
+                  loop
+                     CryptoLib.PEM.Decode_Block
+                       (Text, "CERTIFICATE", From, Buffer, Wrote, P_St);
+                     exit when Wrote < Buffer'First;
+                     Seen := Seen + 1;
+                     declare
+                        D_St : CryptoLib.ASN1.Errors.Decode_Status;
+                        Item : constant CryptoLib.X509.Certificates.Certificate
+                          := CryptoLib.X509.Certificates.Decode_DER
+                               (Buffer (Buffer'First .. Wrote),
+                                CryptoLib.ASN1.Default_Limits, D_St);
+                     begin
+                        if P_St /= CryptoLib.PEM.Ok
+                          or else not CryptoLib.X509.Certificates.Is_Present
+                                        (Item)
+                        then
+                           Refused := Refused + 1;
+                        end if;
+                     end;
+                  end loop;
+                  Check (Seen > 0,
+                         "the system trust store holds certificates to read");
+                  Check (Refused = 0,
+                         "every certificate in the system trust store parses,"
+                         & Seen'Image & " of them, none refused");
+               end;
+            end;
+         end if;
       end;
 
       --  A revocation entry naming a negative serial number.
