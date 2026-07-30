@@ -118,12 +118,14 @@ branches, memory indexing, or variable-latency arithmetic:
 - AES is **bit-sliced, not AES-NI** — it eliminates the cache-timing channel but
   is slower than hardware AES (the deliberate correctness/side-channel tradeoff).
 - `Constant_Time_Proof` is a **declarative manifest, not an automated proof**,
-  and `Constant_Time_Assurance` lists primitives across the stack rather than
-  in this crate: `RSA_Private_Exponentiation` and `ECDSA_P256_Scalar_Arithmetic`
-  name operations `ssh_lib` implements on top of this one. Read as an inventory
-  of what this crate does, it claims private-key operations that are not here
-  -- `CryptoLib.RSA` verifies and never holds a private key -- while omitting
-  the P-384 and P-521 signing that is. Nothing connects those levels to the
+  and `Constant_Time_Assurance` is an assurance record rather than an
+  inventory of what is implemented here. `RSA_Private_Exponentiation` and
+  `ECDSA_P256_Scalar_Arithmetic` once named only operations `ssh_lib` performs
+  on top of this crate; both are now here -- `CryptoLib.RSA` signs and
+  generates keys, and P-256 signs -- and the entries cover them. What the list
+  still lacks is a name for the P-384 and P-521 signing beside them, which
+  reaches the same scalar arithmetic, so it under-names what it covers rather
+  than over-claiming. Nothing connects those levels to the
   `check_constant_time` budgets above, so a level recorded there is not
   evidence that the gate covers the same code.
 
