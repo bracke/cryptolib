@@ -29,6 +29,9 @@ predecessor.
   ffdhe2048 through ffdhe8192, the groups TLS negotiates, distinct from the SSH
   MODP groups. Primes derived from the RFC's construction and confirmed by
   OpenSSL naming them back from p and g alone.
+* X448 key agreement (RFC 7748), which the crate lacked while carrying Ed448
+  signatures. Both are over p = 2**448 - 2**224 - 1 and now share one field
+  arithmetic, `CryptoLib.Field448`, a private child.
 * Key agreement: X25519, finite-field Diffie-Hellman over the fixed-width
   Montgomery `Modexp` rather than `Big_Integers`, ECDH on P-256/384/521 with
   full peer-point validation, and a hybrid post-quantum exchange.

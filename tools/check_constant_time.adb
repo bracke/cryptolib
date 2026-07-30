@@ -330,15 +330,29 @@ begin
       --  It is inlined into these, though, so a branch reappearing inside it
       --  raises their counts and is caught here rather than nowhere.
       Require_Within
-        ("cryptolib__ed448__borrow_of", 4, "range checks and the loop");
+        --  These moved from CryptoLib.Ed448 to CryptoLib.Field448 when X448
+        --  needed the same field arithmetic, and the check refused to vouch
+        --  for names it could no longer see -- which is what it is for.
+        --
+        --  Three budgets rose with the move: borrow_of 4 -> 9, select_field
+        --  5 -> 12, sub_mod 16 -> 19. The source is byte-identical, and that
+        --  was verified against the previous commit rather than assumed. What
+        --  changed is the compilation unit: inside Ed448 these were compiled
+        --  beside their callers and GNAT elided parameter range checks it now
+        --  emits for an out-of-line cross-package call. The added jumps are
+        --  branches on array bounds, the same public quantities the original
+        --  budgets already allowed for -- which is exactly the limit of a jump
+        --  count, stated at the top of this file: it cannot tell a bound from
+        --  a secret, so a re-recorded budget is a baseline and not a proof.
+        ("cryptolib__field448__borrow_of", 9, "range checks and the loop");
       Require_Within
-        ("cryptolib__ed448__select_field", 5, "range checks and the loop");
+        ("cryptolib__field448__select_field", 12, "range checks and the loop");
       Require_Within
-        ("cryptolib__ed448__sub_mod", 16, "range checks and the loops");
+        ("cryptolib__field448__sub_mod", 19, "range checks and the loops");
       Require_Within
-        ("cryptolib__ed448__add_mod", 14, "range checks and the loops");
+        ("cryptolib__field448__add_mod", 14, "range checks and the loops");
       Require_Within
-        ("cryptolib__ed448__mul_mod", 22, "range checks and the loops");
+        ("cryptolib__field448__mul_mod", 22, "range checks and the loops");
    end if;
 
    if Failures = 0 then

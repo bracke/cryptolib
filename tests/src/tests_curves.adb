@@ -57,6 +57,7 @@ with CryptoLib.SNTRUP761;
 with CryptoLib.Curve25519;
 with CryptoLib.Ed25519;
 with CryptoLib.Ed448;
+with CryptoLib.X448;
 with CryptoLib.SHA3;
 with CryptoLib.Buffers;
 with CryptoLib.Diffie_Hellman;
@@ -1297,10 +1298,108 @@ package body Tests_Curves is
       end;
    end Check_Low_Order_X25519_Point;
 
+   --  X448 (RFC 7748) against the RFC's own section 5.2 vector and against
+   --  python-cryptography, which reproduces that vector -- so the reference
+   --  was confirmed before anything was compared to it.
+   procedure Check_X448 is
+      package X renames CryptoLib.X448;
+      RFC_Scalar : constant String :=
+        "3d262fddf9ec8e88495266fea19a34d28882acef045104d0d1aae121700a779c984c24f8cdd78fbf"
+        & "f44943eba368f54b29259a4f1c600ad3";
+      RFC_U : constant String :=
+        "06fce640fa3487bfda5f6cf2d5263f8aad88334cbd07437f020f08f9814dc031ddbdc38c19c6da25"
+        & "83fa5429db94ada18aa7a7fb4ef8a086";
+      RFC_Out : constant String :=
+        "ce3e4ff95a60dc6697da1db1d85e6afbdf79b50a2412d7546d5f239fe14fbaadeb445fc66a01b077"
+        & "9d98223961111e21766282f73dd96b6f";
+      A_Hex : constant String :=
+        "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728"
+        & "292a2b2c2d2e2f303132333435363738";
+      Pub_A_Hex : constant String :=
+        "bda7365ba1bd9a66f2ef38db6ec5ac5fad5452e990d8b2f88f721fd53363237e775f65205d1d4667"
+        & "d473f0e1f4c57694d2d802e8dff06026";
+      B_Hex : constant String :=
+        "c0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7"
+        & "e8e9eaebecedeeeff0f1f2f3f4f5f6f7";
+      Pub_B_Hex : constant String :=
+        "c1344094f39ce50c564a2c8e4feb993bad7f347559098b0c229f9990296847f75412052e3bc062a0"
+        & "1b8a68e706d40643926fb6653bfbf62a";
+      Shared_Hex : constant String :=
+        "6a2cc622e65754f729f843a4c9785ea5450a0fb7ce7917a03a6bd4a70637cd113a4c7bd723233263"
+        & "c405350a78ed96539b81278d9da5bf1a";
+      Out_56 : Ada.Streams.Stream_Element_Array (1 .. 56);
+      Pub_A, Pub_B, S1, S2 : Ada.Streams.Stream_Element_Array (1 .. 56);
+   begin
+      Check (X.Compute_Raw (Bytes_From_Hex (RFC_Scalar),
+                            Bytes_From_Hex (RFC_U), Out_56)
+               = CryptoLib.Errors.Ok,
+             "X448 computes the RFC 7748 5.2 vector");
+      Check (Out_56 = Bytes_From_Hex (RFC_Out),
+             "and it is the u-coordinate the RFC publishes");
+
+      Check (X.Public_Value (Bytes_From_Hex (A_Hex), Pub_A)
+               = CryptoLib.Errors.Ok,
+             "a scalar yields a public value");
+      Check (Pub_A = Bytes_From_Hex (Pub_A_Hex),
+             "which agrees with an independent implementation");
+      Check (X.Public_Value (Bytes_From_Hex (B_Hex), Pub_B)
+               = CryptoLib.Errors.Ok,
+             "and so does the second");
+      Check (Pub_B = Bytes_From_Hex (Pub_B_Hex), "likewise");
+
+      Check (X.Shared_Secret (Bytes_From_Hex (A_Hex), Pub_B, S1)
+               = CryptoLib.Errors.Ok,
+             "the two sides agree a secret");
+      Check (S1 = Bytes_From_Hex (Shared_Hex),
+             "which is the published value for this pair");
+      Check (X.Shared_Secret (Bytes_From_Hex (B_Hex), Pub_A, S2)
+               = CryptoLib.Errors.Ok,
+             "and the other direction agrees too");
+      Check (S1 = S2, "reaching the same secret");
+
+      --  A small-order peer value drives the result to zero whatever the
+      --  scalar is, so the exchange must refuse it rather than hand both
+      --  sides a secret the attacker chose.
+      declare
+         Zero_U : constant Ada.Streams.Stream_Element_Array (1 .. 56) :=
+           [others => 0];
+         One_U  : Ada.Streams.Stream_Element_Array (1 .. 56) :=
+           [others => 0];
+      begin
+         One_U (1) := 1;
+         Check (X.Shared_Secret (Bytes_From_Hex (A_Hex), Zero_U, S1)
+                  /= CryptoLib.Errors.Ok,
+                "an all-zero peer value is refused");
+         Check (S1 = [S1'Range => 0], "and leaves the secret zero");
+         Check (X.Shared_Secret (Bytes_From_Hex (A_Hex), One_U, S1)
+                  /= CryptoLib.Errors.Ok,
+                "and a peer value of one");
+         Check (S1 = [S1'Range => 0], "and leaves the secret zero");
+      end;
+
+      --  A generated pair must be usable by the side that consumes it.
+      declare
+         Rng  : CryptoLib.Random.Random_Source;
+         Priv : Ada.Streams.Stream_Element_Array (1 .. 56);
+         Pub  : Ada.Streams.Stream_Element_Array (1 .. 56);
+         T1, T2 : Ada.Streams.Stream_Element_Array (1 .. 56);
+      begin
+         CryptoLib.Random.Initialize_Production (Rng);
+         Check (X.Generate_Keypair (Rng, Priv, Pub) = CryptoLib.Errors.Ok,
+                "X448 generates a keypair");
+         Check (X.Shared_Secret (Priv, Pub_A, T1) = CryptoLib.Errors.Ok
+                and then X.Shared_Secret (Bytes_From_Hex (A_Hex), Pub, T2)
+                  = CryptoLib.Errors.Ok,
+                "and it agrees with a fixed one");
+         Check (T1 = T2, "reaching the same secret");
+      end;
+   end Check_X448;
+
    --  AUnit routine wrappers. Each check is a test of its own, so a
    --  failure reports the check that failed and the rest still run.
    procedure Run_Check_ECDSA_P384_P521_Signing (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_ECDSA_P384_Public_Key (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_X448 (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_Ed448 (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_ECDSA_Raw_Entry_Points (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_ECDH (Item : in out AUnit.Test_Cases.Test_Case'Class);
@@ -1419,11 +1518,18 @@ package body Tests_Curves is
       Check_Low_Order_X25519_Point;
    end Run_Check_Low_Order_X25519_Point;
 
+   procedure Run_Check_X448 (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_X448;
+   end Run_Check_X448;
+
    overriding procedure Register_Tests (Item : in out Test_Case) is
       use AUnit.Test_Cases.Registration;
    begin
       Register_Routine (Item, Run_Check_ECDSA_P384_P521_Signing'Access, "ecdsa p384 p521 signing");
       Register_Routine (Item, Run_Check_ECDSA_P384_Public_Key'Access, "ecdsa p384 public key");
+      Register_Routine (Item, Run_Check_X448'Access, "x448");
       Register_Routine (Item, Run_Check_Ed448'Access, "ed448");
       Register_Routine (Item, Run_Check_ECDSA_Raw_Entry_Points'Access, "ecdsa raw entry points");
       Register_Routine (Item, Run_Check_ECDH'Access, "ecdh");
