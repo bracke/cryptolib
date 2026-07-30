@@ -10319,6 +10319,73 @@ procedure Tests is
                 "an incomplete CRT set signs the plain way");
       end;
 
+      --  A multi-prime RSA key is refused rather than read as two of its
+      --  primes.
+      --
+      --  RFC 3447 marks these with version 1 and puts the extra primes after
+      --  the five CRT fields. This reader takes exactly two, so such a key
+      --  decoded happily and reported a p and a q that were two of three --
+      --  86 octets each against a 257-octet modulus, whose product is not the
+      --  modulus. Nothing said so; it would have surfaced later as a CRT
+      --  signature the public-exponent check refused, with no hint why.
+      declare
+         package P8 renames CryptoLib.PKCS8;
+         use type CryptoLib.ASN1.Errors.Decode_Status;
+         Multi : constant Ada.Streams.Stream_Element_Array := Bytes_From_Hex
+           ("308204f3020100300d06092a864886f70d0101010500048204dd308204"
+            & "d90201010282010100b1f79a0176297bbfe7d5115040b8211d31edbf3b"
+            & "d6373f2b0c1eca199cf8f18534e94168553192c5018365bb250c25fa97"
+            & "d501057f5c0a633141be9235c8645531027121d369b0d46e7057401308"
+            & "08cd60b880f42d0b572ba99a92d1f3648512b1ae358fc8c0aac8620ac8"
+            & "b95ede851c599bdbd4c33688f8d852adaf58122ec9359f9e8322be87e9"
+            & "99c86bb687a9eeaa4ec6f56efe1f34e67a9ed1326944b733c4b84f1150"
+            & "1c47990c26840b18f08ea8b9ece08220a984fa08fc6366e48aeef92148"
+            & "83bd470c419f918505c6c8f722e2c0beb86f3212159423040fe8dca933"
+            & "b6bd62063c3549af94ab90c82579ef78175b9ad797dce3e943ab4da787"
+            & "930d733f02030100010282010022f8728cc2f957d5d7ea68628ab523dc"
+            & "a6c8ff00f5111a1a8d6127796cfd060894e318f535786e4cc4055be230"
+            & "5f78bf0b42d1d690b6375c527b86c518486e5ec728a1ae71ea9cd2c178"
+            & "d5cc43711ab9b0bdd0a92a74cb62c5e7ee30bf307ea916395f57c40fcd"
+            & "77fc91807e03cd4ac74007e26b37733ac95900f68fa0bbac213f2117b5"
+            & "9201cfb12a71f103ffd391b88bfde0b3dedc742315194b986bd1f94eb6"
+            & "50f4a46126f87788038dbeca6dc740294bd1e230b29d8959b60fb70142"
+            & "15f2f4c1cd6ac9ffa1854aa2f57959bf21fb5b38657011075fd4f8c7f7"
+            & "71eeeab402588445f414d0da16b6799eb6e9c1e354cc62b3519b642127"
+            & "bea3216d3f08e50102560764eca45cf51928f53419257b08e8c2b33ac5"
+            & "aad8b9c7c128b5457122a89244c234babb7e96ea45febab58aafb8b09e"
+            & "d06f3925233554df6a5b5501a5036482a3e16b1360a2db90bdf3c2fc57"
+            & "1b26303954e2d243830256071c3e751a1ac73830a854aa9d115add7412"
+            & "1a8e157f9ff089a384aa1a6e295a9fbbe26f01d8c0c6c814f16fde8591"
+            & "4e3d6455a54afaa4b375e1c0e833b967a63806a6c9a131928511582dff"
+            & "5d26c7c66aad2215842502560407987faab95850ddf0da93768dd06beb"
+            & "496858476c57d488dee14d5ada0b7cb56a0f2a073f2fc59da11b36cdb5"
+            & "156c37a3a5bcfb87210df0e47d5b3c16b13c111bd442e73359fd73c7d8"
+            & "c7b4a0f31aece3ba0965090256029cb8c172c6b5bc09fc3da6b4afa48f"
+            & "494e415d43beb076c14a46b9eb9ddf2981179897a9b90511c27e17393f"
+            & "2a18f9028af30017ecbf47831e5e2db09b03de4825016f7ffde35369cc"
+            & "d891419ab6b84986b3c7edd5025601001f23c128dd3f40776a2e7c6778"
+            & "2166729dea9744515fc3e3fc0f5b212f6b81770c3b2d87175f41b94cd7"
+            & "7e93a1bd0de56dc594811ec50d29ccc5712fd83500d74a500a8cbb19bb"
+            & "40e29d86386e3e967d26fdab423082010c30820108025603628e83649f"
+            & "544b72e732db6dd827a1672c2cc166215f9b71d84c983e23726ebf0f4f"
+            & "df727544529911339cb2d9ad9304b1123c80d784c75b429831bce4f6d3"
+            & "5e5c615e406eb22c06ffc00712c13db0c393f4e47fb102560104e42934"
+            & "db2f52c3d64d9e78b4b241cac126fc5716472592a1ef758a87bb85122a"
+            & "b6fe6c04583c91eef6ddff8ebfce5a84411c4c2216ccba7213462e3bb5"
+            & "0030119a12f94d1a815cde14df4c4b379a87577d4c6a1102560084129b"
+            & "bf4dcc97fa65012c35858d74b6a70b786b74a7a63a313adac033cb2aef"
+            & "07be8f6a5dbb541746a241891c08dcecb62828b61ce24d5b6501ab9ec2"
+            & "fe686f64b2491d8513020d13ebfb452779a4ac8fc1c5d0bd");
+         Key : P8.Private_Key;
+         St  : CryptoLib.ASN1.Errors.Decode_Status;
+      begin
+         P8.Decode_DER (Multi, CryptoLib.ASN1.Default_Limits, Key, St);
+         Check (St /= CryptoLib.ASN1.Errors.Ok,
+                "a three-prime RSA key is refused");
+         Check (not P8.Is_Present (Key),
+                "and nothing is handed back to read primes out of");
+      end;
+
       --  A reused blinding pair. The pair changes what the exponentiation
       --  sees on every signature and must change nothing about the signature,
       --  so the test is that a run of them are all identical to one made
@@ -10405,6 +10472,29 @@ procedure Tests is
                    "and a wider modulus is refused as a mismatched pair, not "
                    & "as a bad signature");
             R.Wipe (Narrow);
+         end;
+
+         --  A pair does not square for ever. Past the refresh limit it is
+         --  drawn again, so no run of signatures uses factors that are all
+         --  powers of one initial value. Signing well past the limit must
+         --  still produce the same signature every time, which is what shows
+         --  the redraw keeps the pair consistent rather than merely different.
+         declare
+            Long_Run : Ada.Streams.Stream_Element_Array (1 .. 256);
+            Steady   : Boolean := True;
+         begin
+            for Round in 1 .. R.Blinding_Refresh_Limit + 3 loop
+               if R.Sign_PKCS1_V1_5 (N, Ex, D, R.SHA256, Message, Rng, Pair,
+                                     Long_Run, P, Q, DP, DQ, QI)
+                    /= CryptoLib.Errors.Ok
+                 or else Long_Run /= Reference
+               then
+                  Steady := False;
+               end if;
+            end loop;
+            Check (Steady,
+                   "signing past the refresh limit keeps giving the reference "
+                   & "signature, so the redrawn pair is still a pair");
          end;
 
          --  An unstarted pair is drawn rather than refused, so the pair-taking

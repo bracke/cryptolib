@@ -279,6 +279,17 @@ package body CryptoLib.PKCS8 is
                         Wipe (Item);
                         return;
                      end if;
+                     --  RFC 3447: version 0 is a two-prime key; 1 means more
+                     --  primes follow the five CRT fields. This reads exactly
+                     --  two, so a multi-prime key came back with two of three
+                     --  and a modulus their product does not equal -- accepted
+                     --  and mis-described, failing only later and confusingly.
+                     --  Refused here instead.
+                     if Ver /= 0 then
+                        Wipe (Item);
+                        Status := Unsupported_Encoding;
+                        return;
+                     end if;
 
                      DER_Reader.Read_Integer
                        (Work, Part, Key.Last, 3, Limits, Number, Minus,

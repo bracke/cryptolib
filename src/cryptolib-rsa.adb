@@ -481,6 +481,7 @@ package body CryptoLib.RSA is
       Pair.Factor (1 .. Modulus'Length) :=
         CryptoLib.Modexp.Mod_Exp (R, Public_Exponent, Modulus);
       Pair.Inverse (1 .. Modulus'Length) := R_Inv;
+      Pair.Uses := 0;
       Pair.Ready := True;
       Scrub;
       return True;
@@ -648,18 +649,32 @@ package body CryptoLib.RSA is
          Signature := Candidate;
       end;
 
-      --  Refresh by squaring both halves. Squaring r and r inverse leaves them
-      --  inverses of each other, so the pair stays consistent while the factor
-      --  a watcher would have to guess changes on every signature. Two
-      --  multiplications where a fresh pair would cost an inverse.
-      Pair.Factor (1 .. Pair.Width) :=
-        CryptoLib.Modexp.Mod_Mul
-          (Pair.Factor (1 .. Pair.Width), Pair.Factor (1 .. Pair.Width),
-           Modulus);
-      Pair.Inverse (1 .. Pair.Width) :=
-        CryptoLib.Modexp.Mod_Mul
-          (Pair.Inverse (1 .. Pair.Width), Pair.Inverse (1 .. Pair.Width),
-           Modulus);
+      --  Refresh. Squaring r and r inverse leaves them inverses of each
+      --  other, so the pair stays consistent while the factor a watcher would
+      --  have to guess changes on every signature -- two multiplications where
+      --  drawing costs an inverse.
+      --
+      --  But squaring for ever makes every factor a power of the first, so
+      --  after a bounded run the pair is drawn again. Failing to redraw is not
+      --  a reason to fail the signature that has already been made and
+      --  checked: the pair is marked unready instead, and the next call draws
+      --  one.
+      Pair.Uses := Pair.Uses + 1;
+      if Pair.Uses >= Blinding_Refresh_Limit then
+         Pair.Ready := False;
+         if not Draw_Pair (Modulus, Public_Exponent, Rng, Pair) then
+            Pair.Ready := False;
+         end if;
+      else
+         Pair.Factor (1 .. Pair.Width) :=
+           CryptoLib.Modexp.Mod_Mul
+             (Pair.Factor (1 .. Pair.Width), Pair.Factor (1 .. Pair.Width),
+              Modulus);
+         Pair.Inverse (1 .. Pair.Width) :=
+           CryptoLib.Modexp.Mod_Mul
+             (Pair.Inverse (1 .. Pair.Width), Pair.Inverse (1 .. Pair.Width),
+              Modulus);
+      end if;
 
       Scrub;
       return CryptoLib.Errors.Ok;
@@ -878,6 +893,7 @@ package body CryptoLib.RSA is
       CryptoLib.Secure_Wipe.Wipe (Pair.Factor'Address, Pair.Factor'Length);
       CryptoLib.Secure_Wipe.Wipe (Pair.Inverse'Address, Pair.Inverse'Length);
       Pair.Width := 0;
+      Pair.Uses := 0;
       Pair.Ready := False;
    end Wipe;
 

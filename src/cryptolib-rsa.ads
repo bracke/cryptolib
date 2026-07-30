@@ -151,6 +151,14 @@ package CryptoLib.RSA is
    --  from another key would blind with a factor whose inverse does not undo
    --  it -- which would produce signatures that do not verify rather than
    --  anything worse, but a clear refusal is better than a puzzle.
+   --  A pair is redrawn from scratch after this many signatures rather than
+   --  squared again. Squaring is cheap and keeps the pair valid indefinitely,
+   --  but every factor in the run is then a power of the first one -- learning
+   --  any of them gives the rest. Redrawing bounds how far that reaches, at
+   --  the cost of one inverse per this many signatures. The number matches
+   --  what OpenSSL uses.
+   Blinding_Refresh_Limit : constant := 32;
+
    type Blinding_Pair is limited private;
 
    --  Start a blinding pair for a key. This is where the one inverse is paid.
@@ -438,6 +446,7 @@ private
       Inverse : Ada.Streams.Stream_Element_Array (1 .. Maximum_Pair_Width) :=
         [others => 0];                 --  r inverse mod n, what undoes it
       Width   : Ada.Streams.Stream_Element_Offset := 0;
+      Uses    : Natural := 0;          --  since this pair was drawn
       Ready   : Boolean := False;
    end record;
 
