@@ -7,6 +7,7 @@ maintainers = ["Bent Bracke <bent@bracke.dk>"]
 maintainers-logins = ["bracke"]
 licenses = "MIT"
 website = "https://github.com/bracke/cryptolib"
+long-description = "CryptoLib is a pure Ada 2022 implementation of the cryptographic primitives an application needs rather than a binding to one: hashes, MACs and KDFs, symmetric ciphers and AEAD, elliptic-curve and finite-field key agreement, signatures, post-quantum KEMs and signatures, and the X.509 and PEM handling around them. It has no dependency on OpenSSL at all -- the cross-check reference vectors were generated offline from pyca, OpenSSL and the RFC and NIST publications, and are embedded in a test suite that links nothing beyond the Ada runtime. Security properties, constant-time guarantees and known limitations are documented rather than implied."
 tags = ["cryptography", "hashes", "signatures", "x509", "post-quantum"]
 
 [[depends-on]]
