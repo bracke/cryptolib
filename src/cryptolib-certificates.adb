@@ -733,23 +733,6 @@ package body CryptoLib.Certificates is
       return Result;
    end PEM;
 
-   function Base64_Value (C : Character) return Integer is
-   begin
-      if C in 'A' .. 'Z' then
-         return Character'Pos (C) - Character'Pos ('A');
-      elsif C in 'a' .. 'z' then
-         return Character'Pos (C) - Character'Pos ('a') + 26;
-      elsif C in '0' .. '9' then
-         return Character'Pos (C) - Character'Pos ('0') + 52;
-      elsif C = '+' then
-         return 62;
-      elsif C = '/' then
-         return 63;
-      else
-         return -1;
-      end if;
-   end Base64_Value;
-
    --  Decode the first armoured block in Text.
    --
    --  Delegates to CryptoLib.PEM, which permits only base64, padding and
@@ -1725,37 +1708,6 @@ package body CryptoLib.Certificates is
       return Ada.Strings.Fixed.Index (Data, Needle) /= 0;
    end Contains;
 
-   --  A DER INTEGER carries no leading zeros and may have gained a sign byte;
-   --  the verifier wants a fixed-width big-endian value.
-   function Fixed_Width
-     (Value : String;
-      Out_Bytes : out Ada.Streams.Stream_Element_Array) return Boolean
-   is
-      First : Natural := Value'First;
-   begin
-      Out_Bytes := [others => 0];
-      while First <= Value'Last and then Value (First) = Character'Val (0) loop
-         First := First + 1;
-      end loop;
-      if First > Value'Last
-        or else Natural (Value'Last - First + 1) > Natural (Out_Bytes'Length)
-      then
-         return False;
-      end if;
-
-      declare
-         Width : constant Natural := Value'Last - First + 1;
-         Start : constant Ada.Streams.Stream_Element_Offset :=
-           Out_Bytes'Last - Ada.Streams.Stream_Element_Offset (Width) + 1;
-      begin
-         for I in 0 .. Width - 1 loop
-            Out_Bytes (Start + Ada.Streams.Stream_Element_Offset (I)) :=
-              Ada.Streams.Stream_Element (Character'Pos (Value (First + I)));
-         end loop;
-      end;
-      return True;
-   end Fixed_Width;
-
    --  Read a certification request and check the asker holds the key.
    --
    --  Two hundred lines of hand-written DER walking until there was a parsed
@@ -1846,73 +1798,6 @@ package body CryptoLib.Certificates is
          end;
       end;
    end Extract_CSR_Info;
-
-   function Extract_CSR
-     (CSR_PEM    : String;
-      Subject_CN : out Unbounded_String;
-      Public_Key : out Ada.Streams.Stream_Element_Array) return Boolean
-   is
-      use type CryptoLib.ASN1.Errors.Decode_Status;
-      use type CryptoLib.X509.Signatures.Verification_Result;
-
-      DER : constant String := Base64_Decode (CSR_PEM);
-   begin
-      Subject_CN := Null_Unbounded_String;
-      Public_Key := [others => 0];
-
-      if DER'Length = 0 then
-         return False;
-      end if;
-
-      declare
-         Raw : Ada.Streams.Stream_Element_Array
-           (1 .. Ada.Streams.Stream_Element_Offset (DER'Length));
-      begin
-         for I in DER'Range loop
-            Raw (Ada.Streams.Stream_Element_Offset (I - DER'First + 1)) :=
-              Character'Pos (DER (I));
-         end loop;
-
-         declare
-            Status : CryptoLib.ASN1.Errors.Decode_Status;
-            Item   : constant CryptoLib.PKCS10.Request :=
-              CryptoLib.PKCS10.Decode_DER
-                (Raw, CryptoLib.ASN1.Default_Limits, Status);
-         begin
-            if Status /= CryptoLib.ASN1.Errors.Ok
-              or else not CryptoLib.PKCS10.Is_Present (Item)
-            then
-               return False;
-            end if;
-
-            --  Proof of possession. A request whose signature does not check
-            --  is an assertion that somebody holds a key, made by somebody
-            --  who has not shown that they do.
-            if CryptoLib.PKCS10.Verify_Signature (Item)
-              /= CryptoLib.X509.Signatures.Valid
-            then
-               return False;
-            end if;
-
-            declare
-               Key : constant Ada.Streams.Stream_Element_Array :=
-                 CryptoLib.PKCS10.Public_Key (Item);
-            begin
-               if Key'Length /= Public_Key'Length then
-                  --  Not the shape this caller is prepared for; it will try
-                  --  another.
-                  return False;
-               end if;
-
-               Public_Key := Key;
-               Subject_CN :=
-                 To_Unbounded_String
-                   (CryptoLib.PKCS10.Subject_Common_Name (Item));
-               return Length (Subject_CN) > 0;
-            end;
-         end;
-      end;
-   end Extract_CSR;
 
    function Create_Local_CA
      (Common_Name     : String;

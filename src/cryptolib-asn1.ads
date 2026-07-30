@@ -12,6 +12,9 @@ with Ada.Streams;
 package CryptoLib.ASN1 is
    pragma Preelaborate;
 
+   --  Kept although GNAT reports it as having no effect here: the effect is
+   --  on the children. CryptoLib.ASN1.DER and its siblings inherit this
+   --  visibility from the parent spec, and removing it stops them compiling.
    use type Ada.Streams.Stream_Element;
    use type Ada.Streams.Stream_Element_Offset;
 

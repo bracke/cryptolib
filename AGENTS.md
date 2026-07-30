@@ -118,9 +118,22 @@ claims are meant to be checkable against the code.
   `tests/tests.gpr` both end their switch list with `-gnatwU` (the tools and
   examples projects do not): unused entities, including unused subprograms and
   with-clauses. `-gnatwa` would not report unused subprograms anyway (that needs
-  `-gnatwu`), but note that adding `-gnatwu` earlier in the list achieves nothing
-  — `-gnatwU` comes last and wins. A clean build is not evidence that nothing is
-  dead.
+  `-gnatwu`), and adding `-gnatwu` earlier in the list achieves nothing —
+  `-gnatwU` comes last and wins. To audit for dead code, put it last yourself:
+
+  ```sh
+  alr build --validation -- -f -cargs -gnatwu
+  ```
+
+  Do this occasionally rather than never. The first run of it found six dead
+  subprograms — including a second copy of `Base64_Value` that duplicated the
+  live one in `CryptoLib.PEM` — and a dozen dead with/use clauses. Removals
+  cascade, so re-run until it stops reporting.
+- One caveat that run teaches: for a **spec**, "use clause has no effect" means
+  no effect *in that spec*. Children inherit the visibility. Removing the
+  `use type Ada.Streams.Stream_Element;` from `cryptolib-asn1.ads` on GNAT's
+  advice stopped `CryptoLib.ASN1.DER` compiling; it is back, with a comment
+  saying why.
 - Nothing is suppressed beyond `-gnatwU`. The suite used to pass `-gnatwM` to
   silence GNAT's useless-assignment warning at the 40 places a test calls an
   operation for its status alone; those are now assertions that the out buffer

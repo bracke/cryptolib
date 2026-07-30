@@ -158,18 +158,6 @@ package body CryptoLib.MLKEM768 is
       return Result;
    end Combine_2;
 
-   function Combine_Key_Material
-     (Left : Seed_32;
-      Ciphertext_Hash : Seed_32)
-      return Stream_Element_Array
-   is
-      Result : Stream_Element_Array (1 .. 64) := [others => 0];
-   begin
-      Copy_Slice (Left, Result, 0);
-      Copy_Slice (Ciphertext_Hash, Result, 32);
-      return Result;
-   end Combine_Key_Material;
-
    procedure Expand_G
      (Message_Seed : Seed_32;
       Public_Hash  : Seed_32;

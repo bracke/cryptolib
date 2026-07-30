@@ -12,7 +12,6 @@ package body CryptoLib.PBES2 is
 
    use CryptoLib.ASN1;
    use CryptoLib.ASN1.Errors;
-   use type Ada.Streams.Stream_Element;
    use type Ada.Streams.Stream_Element_Offset;
    use type CryptoLib.Errors.Status;
 

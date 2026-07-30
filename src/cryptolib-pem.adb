@@ -36,24 +36,6 @@ package body CryptoLib.PEM is
       end case;
    end Base64_Value;
 
-   --  Does Text hold Pattern at Position?
-   function Matches_At
-     (Text     : String;
-      Position : Integer;
-      Pattern  : String) return Boolean
-   is
-   begin
-      if Pattern'Length = 0 then
-         return True;
-      end if;
-      if Position < Text'First
-        or else Position + Pattern'Length - 1 > Text'Last
-      then
-         return False;
-      end if;
-      return Text (Position .. Position + Pattern'Length - 1) = Pattern;
-   end Matches_At;
-
    --  Find the next occurrence of Pattern at or after From.
    function Index_From
      (Text    : String;

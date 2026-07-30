@@ -11,7 +11,6 @@ package body CryptoLib.PKCS12 is
 
    use CryptoLib.ASN1;
    use CryptoLib.ASN1.Errors;
-   use type Ada.Streams.Stream_Element;
    use type CryptoLib.PKCS8.Unlock_Status;
    use type CryptoLib.PBES2.Unlock_Status;
    use type Ada.Streams.Stream_Element_Offset;

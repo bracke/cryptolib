@@ -3,7 +3,6 @@ with CryptoLib.Hashes;
 with CryptoLib.Bignum;
 with CryptoLib.Modexp;
 with CryptoLib.Secure_Wipe;
-with System;
 
 package body CryptoLib.RSA is
 
@@ -1082,11 +1081,15 @@ package body CryptoLib.RSA is
       return True;
    end Probably_Prime;
 
-   --  Draw a prime of the given width, with the top two bits set so the
-   --  product of two of them has exactly twice the width.
+   --  Draw a prime as wide as Value, with the top two bits set so the product
+   --  of two of them has exactly twice the width.
+   --
+   --  The width is Value's own, not a separate argument. It used to be both,
+   --  and the argument was never read -- so a caller passing a width that
+   --  disagreed with the buffer would have been silently ignored, in a prime
+   --  generator, which is not a place to keep a parameter that means nothing.
    function Draw_Prime
-     (Width : Offset;
-      Rng   : in out CryptoLib.Random.Random_Source;
+     (Rng   : in out CryptoLib.Random.Random_Source;
       Value : out Octets) return Boolean
    is
       use type CryptoLib.Errors.Status;
@@ -1176,8 +1179,8 @@ package body CryptoLib.RSA is
                CryptoLib.Secure_Wipe.Wipe (Q'Address, Q'Length);
             end Scrub_Primes;
          begin
-            if not Draw_Prime (Half, Rng, P)
-              or else not Draw_Prime (Half, Rng, Q)
+            if not Draw_Prime (Rng, P)
+              or else not Draw_Prime (Rng, Q)
             then
                Scrub_Primes;
                return CryptoLib.Errors.Internal_Error;

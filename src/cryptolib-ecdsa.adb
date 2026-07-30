@@ -3,7 +3,6 @@ with CryptoLib.Hashes;
 with CryptoLib.Macs;
 with CryptoLib.EC_Arith; use CryptoLib.EC_Arith;
 with CryptoLib.EC_Curves; use CryptoLib.EC_Curves;
-with CryptoLib.Modexp;
 with CryptoLib.Secure_Wipe;
 with System;
 

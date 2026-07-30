@@ -1,5 +1,4 @@
 with Ada.Streams;
-with CryptoLib.EC_Arith;
 with CryptoLib.EC_Curves;
 with CryptoLib.Errors;
 with CryptoLib.Random;
@@ -113,9 +112,5 @@ package CryptoLib.ECDH is
    function Valid_Peer_Point
      (Curve      : Curve_Id;
       Peer_Point : Ada.Streams.Stream_Element_Array) return Boolean;
-
-private
-
-   use CryptoLib.EC_Arith;
 
 end CryptoLib.ECDH;

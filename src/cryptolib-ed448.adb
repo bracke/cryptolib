@@ -1,5 +1,4 @@
 with Ada.Streams; use Ada.Streams;
-with System;
 
 with CryptoLib.SHA3;
 with CryptoLib.Secure_Wipe;

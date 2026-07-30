@@ -7,7 +7,6 @@ with CryptoLib.ASN1.OIDs;
 package body CryptoLib.X509.Names is
 
    use CryptoLib.ASN1;
-   use type Ada.Streams.Stream_Element;
    use type Ada.Streams.Stream_Element_Offset;
    use type CryptoLib.ASN1.Errors.Decode_Status;
 

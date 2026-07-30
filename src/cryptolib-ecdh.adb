@@ -1,6 +1,7 @@
 with Ada.Streams; use Ada.Streams;
 with System;
 
+with CryptoLib.EC_Arith;  use CryptoLib.EC_Arith;
 with CryptoLib.EC_Curves; use CryptoLib.EC_Curves;
 with CryptoLib.Secure_Wipe;
 

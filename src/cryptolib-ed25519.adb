@@ -161,24 +161,6 @@ package body CryptoLib.Ed25519 is
       return Field_Element
      with SPARK_Mode => On;
 
-   procedure Subtract_In_Place
-     (Left_Item : in out Field_Element; Right_Item : Field_Element)
-   is
-      Borrow_Value : Integer := 0;
-      Work_Value   : Integer;
-   begin
-      for Index_Value in Fe_Index loop
-         --  Left-Right-Borrow lies in [-256,255]; +256 maps it to [0,511], so
-         --  the byte result and next borrow come out without a branch.
-         Work_Value :=
-           Integer (Left_Item (Index_Value))
-           - Integer (Right_Item (Index_Value))
-           - Borrow_Value + 256;
-         Borrow_Value := 1 - Work_Value / 256;
-         Left_Item (Index_Value) := Byte_Value (Work_Value mod 256);
-      end loop;
-   end Subtract_In_Place;
-
    function Subtract_With_Borrow
      (Left_Item   : Field_Element;
       Right_Item  : Field_Element;

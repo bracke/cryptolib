@@ -1,5 +1,4 @@
 with Ada.Streams;
-with System.Storage_Elements;
 
 with CryptoLib.ASN1.DER;
 with CryptoLib.ASN1.OIDs;
@@ -11,7 +10,6 @@ package body CryptoLib.PKCS8 is
    use CryptoLib.ASN1;
    use CryptoLib.ASN1.Errors;
    use CryptoLib.X509;
-   use type Ada.Streams.Stream_Element;
    use type Ada.Streams.Stream_Element_Offset;
 
    package DER_Reader renames CryptoLib.ASN1.DER;
