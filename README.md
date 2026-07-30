@@ -256,6 +256,24 @@ begin
    --  a leaf is cut short at the CA's own expiry rather than outliving it
 ```
 
+### Hash a password
+
+```ada
+with CryptoLib.Argon2;   use CryptoLib;
+Salt : Ada.Streams.Stream_Element_Array (1 .. 16);   --  fresh, stored beside the tag
+Tag  : Ada.Streams.Stream_Element_Array (1 .. 32);
+St   : Errors.Status;
+begin
+   --  RFC 9106's second recommended setting. Lower the memory last, not first.
+   St := Argon2.Derive (Argon2.Argon2id, Password, Salt,
+                        Iterations => 3, Memory_KiB => 65536, Lanes => 4,
+                        Tag => Tag);
+```
+
+Verify by deriving again with the stored salt and comparing with
+`Constant_Time.Equal`, never with `=`. `CryptoLib.Bcrypt` reads and writes
+`$2b$` strings for databases that already hold them.
+
 ### Random bytes
 
 ```ada

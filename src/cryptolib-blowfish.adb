@@ -1,5 +1,4 @@
 package body CryptoLib.Blowfish is
-   use type Ada.Streams.Stream_Element;
    use type Ada.Streams.Stream_Element_Offset;
    use type Interfaces.Unsigned_32;
 
