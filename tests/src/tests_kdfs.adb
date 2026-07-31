@@ -1216,6 +1216,48 @@ package body Tests_KDFs is
          Refuses ("$argon2id$v=19$m=1024,t=2,p=1$c29tZXNhbHQxMjM0NTY3OA",
                   "and a string with no tag at all");
       end;
+
+      --  Encode on its own. Hash goes through it, but only ever with
+      --  parameters that work, so its refusals were unexecuted.
+      declare
+         Tag : Ada.Streams.Stream_Element_Array (1 .. 32);
+         Big : constant Ada.Streams.Stream_Element_Array (1 .. 65) :=
+           [others => 16#11#];
+         Empty : constant Ada.Streams.Stream_Element_Array (1 .. 0) :=
+           [others => 0];
+         Small : String (1 .. 20);
+         Stop  : Natural;
+      begin
+         Check (CryptoLib.Argon2.Derive
+                  (CryptoLib.Argon2.Argon2id, Password, Salt, 2, 1024, 1, Tag)
+                  = CryptoLib.Errors.Ok,
+                "argon2 derives a tag to encode on its own");
+         Check (CryptoLib.Argon2.Encode
+                  (CryptoLib.Argon2.Argon2id, Salt, 2, 1024, 1, Tag,
+                   Text, Last) = CryptoLib.Errors.Ok
+                and then Text (Text'First .. Last) = Ref_Id,
+                "argon2 encode alone produces the same string as hash");
+         Check (CryptoLib.Argon2.Encode
+                  (CryptoLib.Argon2.Argon2id, Empty, 2, 1024, 1, Tag,
+                   Text, Last) = CryptoLib.Errors.Handshake_Failed
+                and then Last < Text'First,
+                "argon2 encode refuses an empty salt");
+         Check (CryptoLib.Argon2.Encode
+                  (CryptoLib.Argon2.Argon2id, Salt, 2, 1024, 1, Empty,
+                   Text, Last) = CryptoLib.Errors.Handshake_Failed
+                and then Last < Text'First,
+                "and an empty tag");
+         Check (CryptoLib.Argon2.Encode
+                  (CryptoLib.Argon2.Argon2id, Big, 2, 1024, 1, Tag,
+                   Text, Last) = CryptoLib.Errors.Handshake_Failed
+                and then Last < Text'First,
+                "and a salt past the 64-octet limit");
+         Check (CryptoLib.Argon2.Encode
+                  (CryptoLib.Argon2.Argon2id, Salt, 2, 1024, 1, Tag,
+                   Small, Stop) = CryptoLib.Errors.Handshake_Failed
+                and then Stop < Small'First,
+                "and a buffer too small to hold the string");
+      end;
    end Check_Argon2_Encoded;
 
    --  bcrypt against the Python bcrypt module, which wraps the OpenBSD

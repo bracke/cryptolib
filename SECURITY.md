@@ -204,11 +204,16 @@ turned out to be exercised in shipping code and by nothing in this suite:
 `Hybrid_PQ_Kex.Is_OpenSSH_Hybrid_PQ_Kex_Name` and `X509.Policies.Encoded_Value`
 (`ssh_lib`), and `Ciphers.Is_Active` and `Errors.Is_Success` (`versionlib`).
 
-Every public subprogram in the library is now named by the suite: the audit
-that found those six was run to exhaustion, and the count of subprograms
-neither tested here nor called anywhere else in the library is zero. The last
-of them were ML-KEM's algebraic core, the two self-describing manifests, and a
-handful of small helpers.
+Every public subprogram in the library is named by the suite. That is a
+property to re-check rather than one that stays true on its own: it lapses
+whenever an interface is added, and it had lapsed. `MLKEM.Generate_Keypair`,
+`MLKEM.Encapsulate` and `Argon2.Encode` went in untested, and the first two
+are the forms a caller actually uses -- every ML-KEM vector runs through the
+deterministic entry points instead, so a `Generate_Keypair` that drew one seed
+twice, or an `Encapsulate` that reused a message, would have produced
+vector-perfect output and been wrong. They are covered now: a round trip per
+parameter set, that two key generations differ, that two encapsulations to one
+key differ, and that the wrong secret key rejects implicitly.
 
 ML-KEM used to be checked by algebraic identity rather than by stored
 vectors, because no official vectors were wired in: the NTT round-tripped, the

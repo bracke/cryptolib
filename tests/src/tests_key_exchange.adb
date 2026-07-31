@@ -734,6 +734,63 @@ package body Tests_Key_Exchange is
          end;
       end;
 
+      --  The random-source forms, which are what a caller actually uses. The
+      --  vectors above all go through the deterministic entry points, so
+      --  nothing until now executed these two at all: a Generate_Keypair that
+      --  drew one seed twice, or an Encapsulate that reused a message, would
+      --  have produced vector-perfect output and been wrong.
+      declare
+         Rng : CryptoLib.Random.Random_Source;
+      begin
+         CryptoLib.Random.Initialize_Production (Rng);
+         for Set in M.Parameter_Set loop
+            declare
+               PK : Ada.Streams.Stream_Element_Array
+                 (1 .. Ada.Streams.Stream_Element_Offset
+                         (M.Public_Key_Length (Set)));
+               SK : Ada.Streams.Stream_Element_Array
+                 (1 .. Ada.Streams.Stream_Element_Offset
+                         (M.Secret_Key_Length (Set)));
+               PK2 : Ada.Streams.Stream_Element_Array (PK'Range);
+               SK2 : Ada.Streams.Stream_Element_Array (SK'Range);
+               CT : Ada.Streams.Stream_Element_Array
+                 (1 .. Ada.Streams.Stream_Element_Offset
+                         (M.Ciphertext_Length (Set)));
+               CT2 : Ada.Streams.Stream_Element_Array (CT'Range);
+               K1, K2, K3, K4 : Ada.Streams.Stream_Element_Array (1 .. 32);
+               Label : constant String := M.Parameter_Set'Image (Set);
+            begin
+               Check (M.Generate_Keypair (Set, Rng, PK, SK)
+                        = CryptoLib.Errors.Ok,
+                      Label & " generates a keypair");
+               Check (M.Generate_Keypair (Set, Rng, PK2, SK2)
+                        = CryptoLib.Errors.Ok
+                      and then PK /= PK2 and then SK /= SK2,
+                      Label & " draws fresh seeds each time");
+
+               Check (M.Encapsulate (Set, Rng, PK, CT, K1)
+                        = CryptoLib.Errors.Ok,
+                      Label & " encapsulates to a generated key");
+               Check (M.Decapsulate (Set, SK, CT, K2) = CryptoLib.Errors.Ok,
+                      Label & " decapsulates");
+               Check (K2 = K1, Label & " decapsulates what it encapsulated");
+
+               --  Two encapsulations to the same key must not agree; if they
+               --  did, the message would not be coming from the source.
+               Check (M.Encapsulate (Set, Rng, PK, CT2, K3)
+                        = CryptoLib.Errors.Ok
+                      and then CT2 /= CT and then K3 /= K1,
+                      Label & " draws a fresh message each time");
+
+               --  The other key's secret must not open this ciphertext.
+               Check (M.Decapsulate (Set, SK2, CT, K4) = CryptoLib.Errors.Ok,
+                      Label & " decapsulates under the wrong key");
+               Check (K4 /= K1,
+                      Label & " rejects implicitly under the wrong key");
+            end;
+         end loop;
+      end;
+
       --  A wrong-length buffer is refused rather than silently mis-parsed.
       declare
          PK : Ada.Streams.Stream_Element_Array (1 .. 1184);
