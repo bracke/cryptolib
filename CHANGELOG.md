@@ -32,6 +32,11 @@ commits; each of those says what it changed.
   (x86-64), and `Update` hashes whole blocks where they lie instead of copying
   and counting each byte: 66 to 312 MB/s, the digest unchanged. Every hub
   download is hashed as it arrives.
+- ChaCha20 computes eight blocks at once, each state word a row of eight lanes
+  the compiler turns into vector instructions (built at -O3, validity checks
+  off for that unit), and Poly1305 takes whole blocks in one copy: 62 to 325
+  MB/s, output matching pyca/cryptography at lengths on both sides of the
+  eight-block boundary.
 
 ## Releasing
 

@@ -150,6 +150,75 @@ package body CryptoLib.ChaCha20_Poly1305 is
       end loop;
    end ChaCha20_Block;
 
+   --  Eight blocks at once, each state word a row of eight lanes, one lane a
+   --  block: the loops over the lanes are what the compiler turns into the
+   --  processor's vector instructions, on any processor that has them. A
+   --  block at a time, ChaCha20 held a TLS connection to about sixty
+   --  megabytes a second.
+   Lanes : constant := 8;
+   type Lane_Row is array (0 .. Lanes - 1) of Word;
+   type Lane_State is array (0 .. 15) of Lane_Row;
+
+   procedure Quarter_Rows (S : in out Lane_State; A, B, C, D : Natural) is
+      function Turned (Value : Word; Count : Natural) return Word is
+        (Shift_Left (Value, Count) or Shift_Right (Value, 32 - Count));
+   begin
+      for L in Lane_Row'Range loop
+         S (A) (L) := S (A) (L) + S (B) (L);
+         S (D) (L) := Turned (S (D) (L) xor S (A) (L), 16);
+         S (C) (L) := S (C) (L) + S (D) (L);
+         S (B) (L) := Turned (S (B) (L) xor S (C) (L), 12);
+         S (A) (L) := S (A) (L) + S (B) (L);
+         S (D) (L) := Turned (S (D) (L) xor S (A) (L), 8);
+         S (C) (L) := S (C) (L) + S (D) (L);
+         S (B) (L) := Turned (S (B) (L) xor S (C) (L), 7);
+      end loop;
+   end Quarter_Rows;
+
+   --  The keystream of eight consecutive blocks from Counter, 512 bytes.
+   procedure ChaCha20_Blocks
+     (Key_Data : Byte_Array;
+      Counter  : Word;
+      Nonce    : Byte_Array;
+      Output   : out Byte_Array)
+   is
+      Initial : Lane_State;
+      Working : Lane_State;
+   begin
+      for L in Lane_Row'Range loop
+         Initial (0) (L) := Load32 (Sigma, 0);
+         Initial (1) (L) := Load32 (Sigma, 4);
+         Initial (2) (L) := Load32 (Sigma, 8);
+         Initial (3) (L) := Load32 (Sigma, 12);
+         for Index_Value in 0 .. 7 loop
+            Initial (4 + Index_Value) (L) := Load32 (Key_Data, Index_Value * 4);
+         end loop;
+         Initial (12) (L) := Counter + Word (L);
+         Initial (13) (L) := Load32 (Nonce, 0);
+         Initial (14) (L) := Load32 (Nonce, 4);
+         Initial (15) (L) := Load32 (Nonce, 8);
+      end loop;
+      Working := Initial;
+      for Round_Index in 1 .. 10 loop
+         Quarter_Rows (Working, 0, 4, 8, 12);
+         Quarter_Rows (Working, 1, 5, 9, 13);
+         Quarter_Rows (Working, 2, 6, 10, 14);
+         Quarter_Rows (Working, 3, 7, 11, 15);
+         Quarter_Rows (Working, 0, 5, 10, 15);
+         Quarter_Rows (Working, 1, 6, 11, 12);
+         Quarter_Rows (Working, 2, 7, 8, 13);
+         Quarter_Rows (Working, 3, 4, 9, 14);
+      end loop;
+      for L in Lane_Row'Range loop
+         for Index_Value in 0 .. 15 loop
+            Store32
+              (Working (Index_Value) (L) + Initial (Index_Value) (L),
+               Output,
+               Output'First + L * 64 + Index_Value * 4);
+         end loop;
+      end loop;
+   end ChaCha20_Blocks;
+
    --  The keystream body. Both constructions in this package run it: the SSH
    --  one hands it a nonce built from the packet sequence number, RFC 8439
    --  hands it the caller's 96-bit nonce. Kept as one body so a fix to the
@@ -162,10 +231,22 @@ package body CryptoLib.ChaCha20_Poly1305 is
       Output   : out Stream_Element_Array)
    is
       Block   : Byte_Array (0 .. 63);
+      Wide    : Byte_Array (0 .. Lanes * 64 - 1);
       Count   : Word := Counter;
       In_Pos  : Stream_Element_Offset := Input'First;
       Out_Pos : Stream_Element_Offset := Output'First;
    begin
+      --  Eight blocks at a time while eight are left, then one at a time.
+      while Input'Last - In_Pos + 1 >= Stream_Element_Offset (Wide'Length) loop
+         ChaCha20_Blocks (Key_Data, Count, Nonce, Wide);
+         Count := Count + Lanes;
+         for Offset_Value in Wide'Range loop
+            Output (Out_Pos + Stream_Element_Offset (Offset_Value)) :=
+              To_Element (To_Byte (Input (In_Pos + Stream_Element_Offset (Offset_Value))) xor Wide (Offset_Value));
+         end loop;
+         In_Pos := In_Pos + Stream_Element_Offset (Wide'Length);
+         Out_Pos := Out_Pos + Stream_Element_Offset (Wide'Length);
+      end loop;
       while In_Pos <= Input'Last loop
          ChaCha20_Block (Key_Data, Count, Nonce, Block);
          Count := Count + 1;
@@ -247,11 +328,21 @@ package body CryptoLib.ChaCha20_Poly1305 is
             Block : Byte_Array (0 .. 16) := [others => 0];
             Take  : Natural := 0;
          begin
-            while Take < 16 and then Pos <= Message_Data'Last loop
-               Block (Take) := To_Byte (Message_Data (Pos));
-               Take := Take + 1;
-               Pos := Pos + 1;
-            end loop;
+            --  A whole block in one fixed copy; the last, short one byte by
+            --  byte.
+            if Message_Data'Last - Pos + 1 >= 16 then
+               for Offset in 0 .. 15 loop
+                  Block (Offset) := To_Byte (Message_Data (Pos + Stream_Element_Offset (Offset)));
+               end loop;
+               Take := 16;
+               Pos := Pos + 16;
+            else
+               while Take < 16 and then Pos <= Message_Data'Last loop
+                  Block (Take) := To_Byte (Message_Data (Pos));
+                  Take := Take + 1;
+                  Pos := Pos + 1;
+               end loop;
+            end if;
             Block (Take) := 1;
 
             H0 := H0 + (Double_Word (Load32 (Block, 0)) and Mask26);
