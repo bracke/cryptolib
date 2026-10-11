@@ -437,6 +437,12 @@ package body CryptoLib.Hashes is
       W : array (Natural range 0 .. 79) of Word := [others => 0];
       A, B, C, D, E, F, K, Temp_Value : Word;
    begin
+      if Hardware_Ready then
+         CryptoLib.Hashes.Hardware.Compress_SHA1 (Context_Item.State_Data, Context_Item.Block_Data);
+         Context_Item.Block_Data := [others => 0];
+         Context_Item.Block_Used := 0;
+         return;
+      end if;
       for Index_Value in 0 .. 15 loop
          W (Index_Value) :=
            Shift_Left (Word (Context_Item.Block_Data (Index_Value * 4)), 24) or
@@ -503,13 +509,36 @@ package body CryptoLib.Hashes is
      (Context_Item : in out SHA1_Context;
       Data         : Ada.Streams.Stream_Element_Array)
    is
+      Position : Ada.Streams.Stream_Element_Offset := Data'First;
    begin
-      for Byte_Value of Data loop
-         Context_Item.Block_Data (Context_Item.Block_Used) := Unsigned_8 (Byte_Value);
-         Context_Item.Block_Used := Context_Item.Block_Used + 1;
-         Context_Item.Total_Bytes := Context_Item.Total_Bytes + 1;
-         if Context_Item.Block_Used = 64 then
-            Process_SHA1_Block (Context_Item);
+      --  As SHA-256's: whole blocks where they lie, the rest a block's
+      --  worth at a time. Every git object id is a SHA-1.
+      while Position <= Data'Last loop
+         if Context_Item.Block_Used = 0 and then Data'Last - Position + 1 >= 64 and then Hardware_Ready then
+            declare
+               Block : SHA1_Block
+                 with Import, Address => Data (Position)'Address;
+            begin
+               CryptoLib.Hashes.Hardware.Compress_SHA1 (Context_Item.State_Data, Block);
+            end;
+            Context_Item.Total_Bytes := Context_Item.Total_Bytes + 64;
+            Position := Position + 64;
+         else
+            declare
+               Take : constant Natural :=
+                 Natural'Min (64 - Context_Item.Block_Used, Natural (Data'Last - Position + 1));
+            begin
+               for Offset in 0 .. Take - 1 loop
+                  Context_Item.Block_Data (Context_Item.Block_Used + Offset) :=
+                    Unsigned_8 (Data (Position + Ada.Streams.Stream_Element_Offset (Offset)));
+               end loop;
+               Context_Item.Block_Used := Context_Item.Block_Used + Take;
+               Context_Item.Total_Bytes := Context_Item.Total_Bytes + Unsigned_64 (Take);
+               Position := Position + Ada.Streams.Stream_Element_Offset (Take);
+               if Context_Item.Block_Used = 64 then
+                  Process_SHA1_Block (Context_Item);
+               end if;
+            end;
          end if;
       end loop;
    end Update;

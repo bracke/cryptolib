@@ -11,4 +11,10 @@ is
       raise Program_Error with "no SHA instructions on this host";
    end Compress;
 
+   procedure Compress_SHA1 (State : in out SHA1_State; Block : SHA1_Block) is
+      pragma Unreferenced (State, Block);
+   begin
+      raise Program_Error with "no SHA instructions on this host";
+   end Compress_SHA1;
+
 end CryptoLib.Hashes.Hardware;

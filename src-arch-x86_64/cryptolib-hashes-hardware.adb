@@ -30,6 +30,15 @@ is
    function Message_2 (Partial, Last : V4SI) return V4SI
      with Import, Convention => Intrinsic, External_Name => "__builtin_ia32_sha256msg2";
 
+   function Sha1_Rounds_4 (ABCD, E_Message : V4SI; Kind : Integer) return V4SI
+     with Import, Convention => Intrinsic, External_Name => "__builtin_ia32_sha1rnds4";
+   function Sha1_Next_E (Previous_ABCD, Message : V4SI) return V4SI
+     with Import, Convention => Intrinsic, External_Name => "__builtin_ia32_sha1nexte";
+   function Sha1_Message_1 (Earlier, Later : V4SI) return V4SI
+     with Import, Convention => Intrinsic, External_Name => "__builtin_ia32_sha1msg1";
+   function Sha1_Message_2 (Partial, Last : V4SI) return V4SI
+     with Import, Convention => Intrinsic, External_Name => "__builtin_ia32_sha1msg2";
+
    K : constant array (0 .. 63) of Unsigned_32 :=
      [16#428A2F98#, 16#71374491#, 16#B5C0FBCF#, 16#E9B5DBA5#, 16#3956C25B#, 16#59F111F1#, 16#923F82A4#, 16#AB1C5ED5#,
       16#D807AA98#, 16#12835B01#, 16#243185BE#, 16#550C7DC3#, 16#72BE5D74#, 16#80DEB1FE#, 16#9BDC06A7#, 16#C19BF174#,
@@ -128,5 +137,58 @@ is
          State := [Front (3), Front (2), Back (3), Back (2), Front (1), Front (0), Back (1), Back (0)];
       end;
    end Compress;
+
+   --  SHA-1's instructions keep a group's first word in the highest lane:
+   --  A, B, C, D from lane 3 down, E alone in lane 3, and each group of four
+   --  message words likewise.
+   procedure Compress_SHA1 (State : in out SHA1_State; Block : SHA1_Block) is
+      W         : array (0 .. 19) of Lanes;
+      ABCD      : V4SI := To_Vector ([State (3), State (2), State (1), State (0)]);
+      E_Was     : constant V4SI := To_Vector ([0, 0, 0, State (4)]);
+      ABCD_Was  : constant V4SI := ABCD;
+      Previous  : V4SI := ABCD;
+      E_Message : V4SI;
+
+      function Word_At (At_Byte : Natural) return Unsigned_32 is
+        (Shift_Left (Unsigned_32 (Block (At_Byte)), 24) or Shift_Left (Unsigned_32 (Block (At_Byte + 1)), 16)
+         or Shift_Left (Unsigned_32 (Block (At_Byte + 2)), 8) or Unsigned_32 (Block (At_Byte + 3)));
+
+      function Xor_Of (Left, Right : Lanes) return Lanes is
+        [Left (0) xor Right (0), Left (1) xor Right (1), Left (2) xor Right (2), Left (3) xor Right (3)];
+   begin
+      for Group in 0 .. 3 loop
+         W (Group) := [Word_At (Group * 16 + 12), Word_At (Group * 16 + 8),
+                       Word_At (Group * 16 + 4), Word_At (Group * 16)];
+      end loop;
+      for Group in 0 .. 19 loop
+         if Group >= 4 then
+            W (Group) := To_Lanes
+              (Sha1_Message_2
+                 (To_Vector (Xor_Of (To_Lanes (Sha1_Message_1 (To_Vector (W (Group - 4)), To_Vector (W (Group - 3)))),
+                                     W (Group - 2))),
+                  To_Vector (W (Group - 1))));
+         end if;
+         if Group = 0 then
+            E_Message := To_Vector (Plus (To_Lanes (E_Was), W (0)));
+         else
+            E_Message := Sha1_Next_E (Previous, To_Vector (W (Group)));
+         end if;
+         Previous := ABCD;
+         --  The round function is a constant of the instruction: one call
+         --  for each.
+         case Group / 5 is
+            when 0 => ABCD := Sha1_Rounds_4 (ABCD, E_Message, 0);
+            when 1 => ABCD := Sha1_Rounds_4 (ABCD, E_Message, 1);
+            when 2 => ABCD := Sha1_Rounds_4 (ABCD, E_Message, 2);
+            when others => ABCD := Sha1_Rounds_4 (ABCD, E_Message, 3);
+         end case;
+      end loop;
+      declare
+         Front : constant Lanes := Plus (To_Lanes (ABCD), To_Lanes (ABCD_Was));
+         Last  : constant Lanes := To_Lanes (Sha1_Next_E (Previous, E_Was));
+      begin
+         State := [Front (3), Front (2), Front (1), Front (0), Last (3)];
+      end;
+   end Compress_SHA1;
 
 end CryptoLib.Hashes.Hardware;

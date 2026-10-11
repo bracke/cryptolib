@@ -17,4 +17,11 @@ is
    --  @param Block The block.
    procedure Compress (State : in out SHA256_State; Block : SHA256_Block);
 
+   --  One 64-byte block folded into a SHA-1 state, as Process_SHA1_Block
+   --  folds it.
+   --
+   --  @param State The five working words, updated.
+   --  @param Block The block.
+   procedure Compress_SHA1 (State : in out SHA1_State; Block : SHA1_Block);
+
 end CryptoLib.Hashes.Hardware;
