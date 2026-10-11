@@ -1,9 +1,13 @@
 with CryptoLib.Constant_Time;
+with CryptoLib.Ciphers.Hardware;
 
 package body CryptoLib.Ciphers is
    use Ada.Streams;
    use Interfaces;
    use type CryptoLib.Errors.Status;
+
+   --  The processor's AES and carry-less multiply, where it has them.
+   Hardware_Ready : constant Boolean := CryptoLib.Ciphers.Hardware.Available;
 
    subtype Byte is Unsigned_8;
    subtype Word is Unsigned_32;
@@ -1238,6 +1242,7 @@ package body CryptoLib.Ciphers is
       Item.Mode_Value := CTR_Mode;
       Item.Round_Count := 0;
       Item.Round_Keys := [others => 0];
+      Item.Round_Blocks := [others => [others => 0]];
       Item.DES3_Key_Data := [others => 0];
       Item.Counter_Value := [others => 0];
       Item.CTR_Stream_Value := [others => 0];
@@ -1305,6 +1310,20 @@ package body CryptoLib.Ciphers is
       end loop;
 
       Item.Round_Count := Nr;
+      --  Each round's key as the bytes it adds, column by column, each
+      --  column's word high byte first: as Add_Round_Key adds it.
+      for Round in 0 .. Nr loop
+         for Column in 0 .. 3 loop
+            declare
+               Value : constant Word := Item.Round_Keys (AES_Word_Index (Round * 4 + Column));
+            begin
+               Item.Round_Blocks (Round) (Column * 4)     := Byte (Shift_Right (Value, 24) and 16#FF#);
+               Item.Round_Blocks (Round) (Column * 4 + 1) := Byte (Shift_Right (Value, 16) and 16#FF#);
+               Item.Round_Blocks (Round) (Column * 4 + 2) := Byte (Shift_Right (Value, 8) and 16#FF#);
+               Item.Round_Blocks (Round) (Column * 4 + 3) := Byte (Value and 16#FF#);
+            end;
+         end loop;
+      end loop;
       return CryptoLib.Errors.Ok;
    exception
       when others =>
@@ -1410,6 +1429,10 @@ package body CryptoLib.Ciphers is
       Block_In  : Counter_Block;
       Block_Out : out Counter_Block) is
    begin
+      if Hardware_Ready then
+         CryptoLib.Ciphers.Hardware.Encrypt (Item.Round_Blocks, Item.Round_Count, Block_In, Block_Out);
+         return;
+      end if;
       Block_Out := Block_In;
       Add_Round_Key (Block_Out, Item, 0);
       for Round in 1 .. Item.Round_Count - 1 loop
@@ -2441,6 +2464,9 @@ package body CryptoLib.Ciphers is
       X_Mask  : Byte;
       R_Mask  : Byte;
    begin
+      if Hardware_Ready then
+         return CryptoLib.Ciphers.Hardware.Multiply (Left_Value, Right_Value);
+      end if;
       --  Constant-time: no data-dependent branches.  GHASH runs on the secret
       --  authentication subkey H, so branch timing would leak it (GCM forgery).
       --  Process X most-significant bit first; masks replace the conditionals.

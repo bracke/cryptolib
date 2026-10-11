@@ -19,6 +19,16 @@ commits; each of those says what it changed.
 - The ECDSA DER signature encoder and decoder.
 - Tests for the ML-KEM and Argon2 entry points that nothing executed.
 
+### Changed
+
+- AES and GHASH run on the processor's AES-NI and PCLMULQDQ instructions where
+  CPUID reports both (x86-64), in data-independent time as the bitsliced code
+  does, and several hundred times faster: a TLS download through ssllib went
+  from 1.2 MB/s at a full core to the link's speed at a tenth of one. The
+  bitsliced AES and bitwise GHASH remain the portable path, and the one used
+  elsewhere. The expanded key is kept also as round-key blocks
+  (`Round_Blocks`), the form the instructions take.
+
 ## Releasing
 
 No procedure yet.

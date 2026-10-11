@@ -6,7 +6,13 @@ project Cryptolib is
 
    --  Per-OS backend directory (e.g. src-linux / src-windows) selected by the
    --  Alire host OS; holds the platform CryptoLib.OS_Random body.
-   for Source_Dirs use ("src/", "config/", "src-" & Cryptolib_Config.Alire_Host_OS & "/");
+   --  The AES and GHASH instructions a processor has: x86-64's, or none.
+   Arch_Dir := "src-arch-generic/";
+   case Cryptolib_Config.Alire_Host_Arch is
+      when "x86_64" => Arch_Dir := "src-arch-x86_64/";
+      when others => null;
+   end case;
+   for Source_Dirs use ("src/", "config/", "src-" & Cryptolib_Config.Alire_Host_OS & "/", Arch_Dir);
    for Object_Dir use "obj/" & Cryptolib_Config.Build_Profile;
    for Create_Missing_Dirs use "True";
    for Library_Dir use "lib";
@@ -18,6 +24,14 @@ project Cryptolib is
 
    package Compiler is
       for Default_Switches ("Ada") use Cryptolib_Config.Ada_Compiler_Switches & ("-gnat2022", "-gnatyM120", "-gnatX", "-gnatwU");
+      --  Only this body uses the instructions, and only once CPUID has said
+      --  they are there.
+      case Cryptolib_Config.Alire_Host_Arch is
+         when "x86_64" =>
+            for Switches ("cryptolib-ciphers-hardware.adb") use
+              Cryptolib_Config.Ada_Compiler_Switches & ("-gnat2022", "-gnatyM120", "-gnatX", "-gnatwU", "-maes", "-mpclmul");
+         when others => null;
+      end case;
    end Compiler;
 
    package Binder is

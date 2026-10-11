@@ -267,6 +267,10 @@ private
      array (AES_Word_Index) of Interfaces.Unsigned_32;
    type Counter_Block is
      array (Natural range 0 .. 15) of Interfaces.Unsigned_8;
+
+   --  The round keys again, each as the sixteen bytes it adds to the state:
+   --  the form the processor's AES instructions take them in.
+   type Round_Block_Array is array (Natural range 0 .. 14) of Counter_Block;
    type Cipher_Mode is (CTR_Mode, CBC_Mode, DES3_CBC_Mode);
    subtype DES3_Key_Buffer is Ada.Streams.Stream_Element_Array (1 .. 24);
 
@@ -276,6 +280,7 @@ private
       Mode_Value        : Cipher_Mode := CTR_Mode;
       Round_Count       : Natural range 0 .. 14 := 0;
       Round_Keys        : AES_Round_Key_Words := [others => 0];
+      Round_Blocks      : Round_Block_Array := [others => [others => 0]];
       DES3_Key_Data     : DES3_Key_Buffer := [others => 0];
       Counter_Value     : Counter_Block := [others => 0];
       CTR_Stream_Value  : Counter_Block := [others => 0];
