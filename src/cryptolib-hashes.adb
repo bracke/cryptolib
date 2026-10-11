@@ -1,5 +1,12 @@
 
+with CryptoLib.Hashes.Hardware;
+
 package body CryptoLib.Hashes is
+
+   --  The processor's SHA-256 instructions, where it has them: asked on
+   --  first use, this package being preelaborated.
+   function Hardware_Ready return Boolean renames CryptoLib.Hashes.Hardware.Available;
+
    use type Ada.Streams.Stream_Element_Offset;
    --  One-shot SHA-1 via the streaming context, so a large input is hashed
    --  block-at-a-time without allocating the whole padded message on the
@@ -259,6 +266,12 @@ package body CryptoLib.Hashes is
       Temp_1  : Word;
       Temp_2  : Word;
    begin
+      if Hardware_Ready then
+         CryptoLib.Hashes.Hardware.Compress (Context_Item.State_Data, Context_Item.Block_Data);
+         Context_Item.Block_Data := [others => 0];
+         Context_Item.Block_Used := 0;
+         return;
+      end if;
       for Index_Value in 0 .. 15 loop
          Work_Items (Index_Value) :=
            Shift_Left (Word (Context_Item.Block_Data (Index_Value * 4)), 24) or
@@ -322,14 +335,39 @@ package body CryptoLib.Hashes is
      (Context_Item : in out SHA256_Context;
       Data         : Ada.Streams.Stream_Element_Array)
    is
+      Position : Ada.Streams.Stream_Element_Offset := Data'First;
    begin
-      for Byte_Value of Data loop
-         Context_Item.Block_Data (Context_Item.Block_Used) := Unsigned_8 (Byte_Value);
-         Context_Item.Block_Used := Context_Item.Block_Used + 1;
-         Context_Item.Total_Bytes := Context_Item.Total_Bytes + 1;
-         if Context_Item.Block_Used = 64 then
-            Process_Block (Context_Item);
+      --  A block's worth at a time: counted and placed per byte, the copy
+      --  cost more than the hashing.
+      while Position <= Data'Last loop
+         --  Whole blocks, nothing held: hashed where they are.
+         if Context_Item.Block_Used = 0 and then Data'Last - Position + 1 >= 64 and then Hardware_Ready then
+            declare
+               Block : SHA256_Block
+                 with Import, Address => Data (Position)'Address;
+            begin
+               CryptoLib.Hashes.Hardware.Compress (Context_Item.State_Data, Block);
+            end;
+            Context_Item.Total_Bytes := Context_Item.Total_Bytes + 64;
+            Position := Position + 64;
+            goto Next_Block;
          end if;
+         declare
+            Take : constant Natural :=
+              Natural'Min (64 - Context_Item.Block_Used, Natural (Data'Last - Position + 1));
+         begin
+            for Offset in 0 .. Take - 1 loop
+               Context_Item.Block_Data (Context_Item.Block_Used + Offset) :=
+                 Unsigned_8 (Data (Position + Ada.Streams.Stream_Element_Offset (Offset)));
+            end loop;
+            Context_Item.Block_Used := Context_Item.Block_Used + Take;
+            Context_Item.Total_Bytes := Context_Item.Total_Bytes + Unsigned_64 (Take);
+            Position := Position + Ada.Streams.Stream_Element_Offset (Take);
+            if Context_Item.Block_Used = 64 then
+               Process_Block (Context_Item);
+            end if;
+         end;
+         <<Next_Block>>
       end loop;
    end Update;
 

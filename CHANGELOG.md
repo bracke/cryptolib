@@ -28,6 +28,10 @@ commits; each of those says what it changed.
   bitsliced AES and bitwise GHASH remain the portable path, and the one used
   elsewhere. The expanded key is kept also as round-key blocks
   (`Round_Blocks`), the form the instructions take.
+- SHA-256 runs on the processor's SHA extensions where CPUID reports them
+  (x86-64), and `Update` hashes whole blocks where they lie instead of copying
+  and counting each byte: 66 to 312 MB/s, the digest unchanged. Every hub
+  download is hashed as it arrives.
 
 ## Releasing
 

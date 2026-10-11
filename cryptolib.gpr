@@ -29,7 +29,9 @@ project Cryptolib is
       case Cryptolib_Config.Alire_Host_Arch is
          when "x86_64" =>
             for Switches ("cryptolib-ciphers-hardware.adb") use
-              Cryptolib_Config.Ada_Compiler_Switches & ("-gnat2022", "-gnatyM120", "-gnatX", "-gnatwU", "-maes", "-mpclmul");
+              Cryptolib_Config.Ada_Compiler_Switches & ("-gnat2022", "-gnatyM120", "-gnatX", "-gnatwU", "-maes", "-mpclmul", "-O2");
+            for Switches ("cryptolib-hashes-hardware.adb") use
+              Cryptolib_Config.Ada_Compiler_Switches & ("-gnat2022", "-gnatyM120", "-gnatX", "-gnatwU", "-msha", "-O2");
          when others => null;
       end case;
    end Compiler;
