@@ -779,19 +779,31 @@ package body CryptoLib.Hashes is
      (Context_Item : in out SHA512_Context;
       Data         : Ada.Streams.Stream_Element_Array)
    is
-      Old_Low : Word64;
+      Old_Low  : Word64;
+      Position : Ada.Streams.Stream_Element_Offset := Data'First;
    begin
-      for Byte_Value of Data loop
-         Context_Item.Block_Data (Context_Item.Block_Used) := Unsigned_8 (Byte_Value);
-         Context_Item.Block_Used := Context_Item.Block_Used + 1;
-         Old_Low := Context_Item.Total_Bytes_Low;
-         Context_Item.Total_Bytes_Low := Context_Item.Total_Bytes_Low + 1;
-         if Context_Item.Total_Bytes_Low < Old_Low then
-            Context_Item.Total_Bytes_High := Context_Item.Total_Bytes_High + 1;
-         end if;
-         if Context_Item.Block_Used = 128 then
-            Process_SHA512_Block (Context_Item);
-         end if;
+      --  A block's worth at a time, the 128-bit count advanced once for
+      --  each: counted per byte, the bookkeeping cost more than the rounds.
+      while Position <= Data'Last loop
+         declare
+            Take : constant Natural :=
+              Natural'Min (128 - Context_Item.Block_Used, Natural (Data'Last - Position + 1));
+         begin
+            for Offset in 0 .. Take - 1 loop
+               Context_Item.Block_Data (Context_Item.Block_Used + Offset) :=
+                 Unsigned_8 (Data (Position + Ada.Streams.Stream_Element_Offset (Offset)));
+            end loop;
+            Context_Item.Block_Used := Context_Item.Block_Used + Take;
+            Old_Low := Context_Item.Total_Bytes_Low;
+            Context_Item.Total_Bytes_Low := Context_Item.Total_Bytes_Low + Word64 (Take);
+            if Context_Item.Total_Bytes_Low < Old_Low then
+               Context_Item.Total_Bytes_High := Context_Item.Total_Bytes_High + 1;
+            end if;
+            Position := Position + Ada.Streams.Stream_Element_Offset (Take);
+            if Context_Item.Block_Used = 128 then
+               Process_SHA512_Block (Context_Item);
+            end if;
+         end;
       end loop;
    end Update;
 

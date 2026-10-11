@@ -34,6 +34,11 @@ commits; each of those says what it changed.
   download is hashed as it arrives.
 - SHA-1 likewise, on the SHA extensions' SHA-1 rounds and with whole blocks
   hashed in place: 854 MB/s. Every git object id is one.
+- SHA-3 and SHAKE: Keccak-f[1600] written out round by round, every lane
+  index and rotation a literal, and whole 8-byte lanes absorbed: 112 to 410
+  MB/s, digests matching hashlib across the rate boundaries. SHA-512/384's
+  `Update` copies a block's worth at a time and the hashes are built at -O2:
+  295 to 310 MB/s, about what software SHA-512 reaches.
 - ChaCha20 computes eight blocks at once, each state word a row of eight lanes
   the compiler turns into vector instructions (built at -O3, validity checks
   off for that unit), and Poly1305 takes whole blocks in one copy: 62 to 325

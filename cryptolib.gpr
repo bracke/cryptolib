@@ -26,6 +26,12 @@ project Cryptolib is
       for Default_Switches ("Ada") use Cryptolib_Config.Ada_Compiler_Switches & ("-gnat2022", "-gnatyM120", "-gnatX", "-gnatwU");
       --  ChaCha20's rounds: arithmetic only, and slow at the debug level the
       --  rest is built at.
+      --  The hashes, likewise: SHA-512/384 and MD5 have no instructions here,
+      --  and SHA-3's permutation is all 64-bit arithmetic.
+      for Switches ("cryptolib-hashes.adb") use
+        Cryptolib_Config.Ada_Compiler_Switches & ("-gnat2022", "-gnatyM120", "-gnatX", "-gnatwU", "-O2", "-gnatVn");
+      for Switches ("cryptolib-sha3.adb") use
+        Cryptolib_Config.Ada_Compiler_Switches & ("-gnat2022", "-gnatyM120", "-gnatX", "-gnatwU", "-O3", "-gnatVn");
       for Switches ("cryptolib-chacha20_poly1305.adb") use
         Cryptolib_Config.Ada_Compiler_Switches & ("-gnat2022", "-gnatyM120", "-gnatX", "-gnatwU", "-O3", "-gnatVn");
       --  Only this body uses the instructions, and only once CPUID has said

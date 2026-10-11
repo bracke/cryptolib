@@ -73,52 +73,81 @@ package body CryptoLib.SHA3 is
       end if;
    end Rotate_Left_64;
 
+   --  Keccak-f[1600], each round written out: every lane index and rotation
+   --  a literal, so nothing is looked up or reduced modulo five at run time.
+   --  Generated from the definition: theta, rho and pi, chi, iota.
    procedure Permute (State_Item : in out Keccak_State) is
-      C_Data : array (Natural range 0 .. 4) of Word64 := [others => 0];
-      D_Data : array (Natural range 0 .. 4) of Word64 := [others => 0];
-      B_Data : Keccak_State := [others => 0];
+      function Rot (Value : Word64; Amount : Natural) return Word64 is
+        (Interfaces.Rotate_Left (Value, Amount))
+        with Inline;
+      A : Keccak_State := State_Item;
+      B : Keccak_State;
+      C0, C1, C2, C3, C4, D0, D1, D2, D3, D4 : Word64;
    begin
       for Round_Value in Round_Index loop
-         for X_Value in 0 .. 4 loop
-            C_Data (X_Value) := State_Item (Index_Of (X_Value, 0))
-              xor State_Item (Index_Of (X_Value, 1))
-              xor State_Item (Index_Of (X_Value, 2))
-              xor State_Item (Index_Of (X_Value, 3))
-              xor State_Item (Index_Of (X_Value, 4));
-         end loop;
-
-         for X_Value in 0 .. 4 loop
-            D_Data (X_Value) := C_Data ((X_Value + 4) mod 5)
-              xor Rotate_Left_64 (C_Data ((X_Value + 1) mod 5), 1);
-         end loop;
-
-         for X_Value in 0 .. 4 loop
-            for Y_Value in 0 .. 4 loop
-               State_Item (Index_Of (X_Value, Y_Value)) :=
-                 State_Item (Index_Of (X_Value, Y_Value)) xor D_Data (X_Value);
-            end loop;
-         end loop;
-
-         for X_Value in 0 .. 4 loop
-            for Y_Value in 0 .. 4 loop
-               B_Data (Index_Of (Y_Value, (2 * X_Value + 3 * Y_Value) mod 5)) :=
-                 Rotate_Left_64
-                   (State_Item (Index_Of (X_Value, Y_Value)),
-                    Rho (Index_Of (X_Value, Y_Value)));
-            end loop;
-         end loop;
-
-         for X_Value in 0 .. 4 loop
-            for Y_Value in 0 .. 4 loop
-               State_Item (Index_Of (X_Value, Y_Value)) :=
-                 B_Data (Index_Of (X_Value, Y_Value)) xor
-                 ((not B_Data (Index_Of ((X_Value + 1) mod 5, Y_Value)))
-                  and B_Data (Index_Of ((X_Value + 2) mod 5, Y_Value)));
-            end loop;
-         end loop;
-
-         State_Item (0) := State_Item (0) xor RC (Round_Value);
+         C0 := A (0) xor A (5) xor A (10) xor A (15) xor A (20);
+         C1 := A (1) xor A (6) xor A (11) xor A (16) xor A (21);
+         C2 := A (2) xor A (7) xor A (12) xor A (17) xor A (22);
+         C3 := A (3) xor A (8) xor A (13) xor A (18) xor A (23);
+         C4 := A (4) xor A (9) xor A (14) xor A (19) xor A (24);
+         D0 := C4 xor Rot (C1, 1);
+         D1 := C0 xor Rot (C2, 1);
+         D2 := C1 xor Rot (C3, 1);
+         D3 := C2 xor Rot (C4, 1);
+         D4 := C3 xor Rot (C0, 1);
+         B (0) := (A (0) xor D0);
+         B (16) := Rot (A (5) xor D0, 36);
+         B (7) := Rot (A (10) xor D0, 3);
+         B (23) := Rot (A (15) xor D0, 41);
+         B (14) := Rot (A (20) xor D0, 18);
+         B (10) := Rot (A (1) xor D1, 1);
+         B (1) := Rot (A (6) xor D1, 44);
+         B (17) := Rot (A (11) xor D1, 10);
+         B (8) := Rot (A (16) xor D1, 45);
+         B (24) := Rot (A (21) xor D1, 2);
+         B (20) := Rot (A (2) xor D2, 62);
+         B (11) := Rot (A (7) xor D2, 6);
+         B (2) := Rot (A (12) xor D2, 43);
+         B (18) := Rot (A (17) xor D2, 15);
+         B (9) := Rot (A (22) xor D2, 61);
+         B (5) := Rot (A (3) xor D3, 28);
+         B (21) := Rot (A (8) xor D3, 55);
+         B (12) := Rot (A (13) xor D3, 25);
+         B (3) := Rot (A (18) xor D3, 21);
+         B (19) := Rot (A (23) xor D3, 56);
+         B (15) := Rot (A (4) xor D4, 27);
+         B (6) := Rot (A (9) xor D4, 20);
+         B (22) := Rot (A (14) xor D4, 39);
+         B (13) := Rot (A (19) xor D4, 8);
+         B (4) := Rot (A (24) xor D4, 14);
+         A (0) := B (0) xor ((not B (1)) and B (2));
+         A (1) := B (1) xor ((not B (2)) and B (3));
+         A (2) := B (2) xor ((not B (3)) and B (4));
+         A (3) := B (3) xor ((not B (4)) and B (0));
+         A (4) := B (4) xor ((not B (0)) and B (1));
+         A (5) := B (5) xor ((not B (6)) and B (7));
+         A (6) := B (6) xor ((not B (7)) and B (8));
+         A (7) := B (7) xor ((not B (8)) and B (9));
+         A (8) := B (8) xor ((not B (9)) and B (5));
+         A (9) := B (9) xor ((not B (5)) and B (6));
+         A (10) := B (10) xor ((not B (11)) and B (12));
+         A (11) := B (11) xor ((not B (12)) and B (13));
+         A (12) := B (12) xor ((not B (13)) and B (14));
+         A (13) := B (13) xor ((not B (14)) and B (10));
+         A (14) := B (14) xor ((not B (10)) and B (11));
+         A (15) := B (15) xor ((not B (16)) and B (17));
+         A (16) := B (16) xor ((not B (17)) and B (18));
+         A (17) := B (17) xor ((not B (18)) and B (19));
+         A (18) := B (18) xor ((not B (19)) and B (15));
+         A (19) := B (19) xor ((not B (15)) and B (16));
+         A (20) := B (20) xor ((not B (21)) and B (22));
+         A (21) := B (21) xor ((not B (22)) and B (23));
+         A (22) := B (22) xor ((not B (23)) and B (24));
+         A (23) := B (23) xor ((not B (24)) and B (20));
+         A (24) := B (24) xor ((not B (20)) and B (21));
+         A (0) := A (0) xor RC (Round_Value);
       end loop;
+      State_Item := A;
    end Permute;
 
    procedure Xor_Rate_Byte
@@ -163,14 +192,35 @@ package body CryptoLib.SHA3 is
         [others => 0];
       Out_Index  : Ada.Streams.Stream_Element_Offset := Result'First;
    begin
-      for Data_Index in Data'Range loop
-         Xor_Rate_Byte (State_Item, Position, Byte (Data (Data_Index)));
-         Position := Position + 1;
-         if Position = Rate_Bytes then
-            Permute (State_Item);
-            Position := 0;
-         end if;
-      end loop;
+      --  Whole lanes at a time where they line up -- the rates are
+      --  multiples of eight -- and the rest a byte at a time.
+      declare
+         Data_Index : Ada.Streams.Stream_Element_Offset := Data'First;
+      begin
+         while Data_Index <= Data'Last loop
+            if Position mod 8 = 0 and then Data'Last - Data_Index + 1 >= 8 then
+               declare
+                  Lane_Value : Word64 := 0;
+               begin
+                  for K in reverse 0 .. 7 loop
+                     Lane_Value := Interfaces.Shift_Left (Lane_Value, 8)
+                       or Word64 (Data (Data_Index + Ada.Streams.Stream_Element_Offset (K)));
+                  end loop;
+                  State_Item (Lane_Index (Position / 8)) := State_Item (Lane_Index (Position / 8)) xor Lane_Value;
+               end;
+               Position := Position + 8;
+               Data_Index := Data_Index + 8;
+            else
+               Xor_Rate_Byte (State_Item, Position, Byte (Data (Data_Index)));
+               Position := Position + 1;
+               Data_Index := Data_Index + 1;
+            end if;
+            if Position = Rate_Bytes then
+               Permute (State_Item);
+               Position := 0;
+            end if;
+         end loop;
+      end;
 
       Xor_Rate_Byte (State_Item, Position, Domain_Suffix);
       Xor_Rate_Byte (State_Item, Rate_Bytes - 1, 16#80#);
