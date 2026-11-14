@@ -1,7 +1,7 @@
 with AUnit;
 with AUnit.Test_Cases;
 
---  ASN.1/DER, PEM, PKCS#8, PKCS#10, PKCS#12 and OpenSSH key encodings.
+--  ASN.1/DER, PEM, base64, PKCS#8, PKCS#10, PKCS#12 and OpenSSH key encodings.
 --
 --  Each procedure is one group of known-answer or negative tests, and
 --  is called from the Tests driver. Splitting the suite by topic is

@@ -5,6 +5,7 @@ with Ada.Text_IO;
 with Interfaces;
 with System;
 with CryptoLib.ASN1;
+with CryptoLib.Base64;
 with CryptoLib.PEM;
 with CryptoLib.X509;
 with CryptoLib.X509.Certificates;
@@ -2101,6 +2102,120 @@ package body Tests_Encodings is
       end;
    end Check_PKCS12;
 
+   --  CryptoLib.Base64: the RFC 4648 section 10 vectors in both forms, a round
+   --  trip at every length, and the refusals -- each of which must leave the
+   --  output zeroed and say nothing was written.
+   procedure Check_Base64 is
+      use CryptoLib.Base64;
+
+      function Encode (Plain : String; Padded : Boolean) return String is
+         Data : constant Ada.Streams.Stream_Element_Array := Bytes_From_String (Plain);
+         Text : String (1 .. Encoded_Length (Plain'Length, Padded) + 4);
+         Last : Natural;
+      begin
+         Encode (Data, Text, Last, Padded);
+         Check (Last = Encoded_Length (Plain'Length, Padded), "base64: Encoded_Length is what Encode writes");
+         return Text (1 .. Last);
+      end Encode;
+
+      function Decode (Text : String; Padded : Boolean) return String is
+         Data  : Ada.Streams.Stream_Element_Array (1 .. Ada.Streams.Stream_Element_Offset (Text'Length));
+         Last  : Ada.Streams.Stream_Element_Offset;
+         Valid : Boolean;
+         Plain : String (1 .. Text'Length);
+      begin
+         Decode (Text, Data, Last, Valid, Padded);
+         Check (Valid, "base64: """ & Text & """ is refused");
+         Check (Natural (Last) <= Decoded_Length (Text'Length, Padded), "base64: Decoded_Length is a bound");
+         for Index in 1 .. Natural (Last) loop
+            Plain (Index) := Character'Val (Data (Ada.Streams.Stream_Element_Offset (Index)));
+         end loop;
+         return Plain (1 .. Natural (Last));
+      end Decode;
+
+      procedure Expect_Refused (Text : String; Padded : Boolean) is
+         Data  : Ada.Streams.Stream_Element_Array (1 .. Ada.Streams.Stream_Element_Offset (Text'Length) + 3) :=
+           [others => 16#AA#];
+         Last  : Ada.Streams.Stream_Element_Offset;
+         Valid : Boolean;
+      begin
+         Decode (Text, Data, Last, Valid, Padded);
+         Check (not Valid, "base64: """ & Text & """ is accepted");
+         Check (Last = Data'First - 1, "base64: a refusal says nothing was written");
+         Check (Data = Ada.Streams.Stream_Element_Array'(Data'Range => 0), "base64: a refusal leaves the output zero");
+      end Expect_Refused;
+
+      --  One RFC 4648 section 10 test vector, in both directions and both forms.
+      procedure Vector (Plain, Padded_Text, Unpadded_Text : String) is
+      begin
+         Check (Encode (Plain, True) = Padded_Text, "base64: padded encoding of """ & Plain & """");
+         Check (Encode (Plain, False) = Unpadded_Text, "base64: unpadded encoding of """ & Plain & """");
+         Check (Decode (Padded_Text, True) = Plain, "base64: padded decoding of """ & Padded_Text & """");
+         Check (Decode (Unpadded_Text, False) = Plain, "base64: unpadded decoding of """ & Unpadded_Text & """");
+      end Vector;
+   begin
+      Vector ("", "", "");
+      Vector ("f", "Zg==", "Zg");
+      Vector ("fo", "Zm8=", "Zm8");
+      Vector ("foo", "Zm9v", "Zm9v");
+      Vector ("foob", "Zm9vYg==", "Zm9vYg");
+      Vector ("fooba", "Zm9vYmE=", "Zm9vYmE");
+      Vector ("foobar", "Zm9vYmFy", "Zm9vYmFy");
+
+      --  Every length from 0 to 64 octets, with every octet value in the mix.
+      for Length in 0 .. 64 loop
+         declare
+            Plain : String (1 .. Length);
+         begin
+            for Index in Plain'Range loop
+               Plain (Index) := Character'Val ((Index * 37 + Length * 11) mod 256);
+            end loop;
+            Check (Decode (Encode (Plain, True), True) = Plain, "base64: padded round trip");
+            Check (Decode (Encode (Plain, False), False) = Plain, "base64: unpadded round trip");
+            Check (Encode (Plain, True)'Length mod 4 = 0, "base64: padded text is whole groups");
+         end;
+      end loop;
+
+      --  The standard alphabet, not the URL-safe one: FB FF encodes with '+' and '/'.
+      Check (Encode (Character'Val (16#FB#) & Character'Val (16#FF#), True) = "+/8=",
+             "base64: the alphabet ends in '+' and '/'");
+
+      --  Lengths: a padded encoding is whole groups, an unpadded one may end short.
+      Check (Encoded_Length (0) = 0 and then Encoded_Length (1) = 2 and then Encoded_Length (2) = 3
+             and then Encoded_Length (3) = 4 and then Encoded_Length (1, True) = 4
+             and then Encoded_Length (2, True) = 4 and then Encoded_Length (4, True) = 8,
+             "base64: Encoded_Length");
+      Check (Decoded_Length (4) = 3 and then Decoded_Length (2) = 1 and then Decoded_Length (3) = 2
+             and then Decoded_Length (5) = 0 and then Decoded_Length (4, True) = 3
+             and then Decoded_Length (3, True) = 0 and then Decoded_Length (2, True) = 0,
+             "base64: Decoded_Length");
+
+      --  Refusals. A decoder that accepts two spellings of one value cannot be used where the text is
+      --  compared, so the stray low bits of a short final group are among them.
+      for Padded in Boolean loop
+         Expect_Refused ("Zm9v!", Padded);         --  outside the alphabet
+         Expect_Refused ("Zm9 v", Padded);         --  white space
+         Expect_Refused ("Zm9v" & Character'Val (10), Padded);
+         Expect_Refused ("Zm9v-_", Padded);        --  the URL-safe alphabet
+      end loop;
+      Expect_Refused ("Z", False);                 --  one character over a group encodes nothing
+      Expect_Refused ("Zm9vY", False);
+      Expect_Refused ("Zh", False);                --  stray low bits: "Zg" is the spelling
+      Expect_Refused ("Zm9=", False);              --  padding where none is asked for
+      Expect_Refused ("Zg==", False);
+      Expect_Refused ("Zg", True);                 --  padding missing
+      Expect_Refused ("Zg=", True);
+      Expect_Refused ("Zm9", True);
+      Expect_Refused ("Zg===", True);              --  too much of it
+      Expect_Refused ("Z===", True);
+      Expect_Refused ("====", True);
+      Expect_Refused ("Z=g=", True);               --  in the middle
+      Expect_Refused ("Zg=a", True);               --  not at the end
+      Expect_Refused ("Zh==", True);               --  stray low bits
+      Expect_Refused ("Zm9=", True);
+      Expect_Refused ("Zm9v=", True);              --  not whole groups
+   end Check_Base64;
+
    --  AUnit routine wrappers. Each check is a test of its own, so a
    --  failure reports the check that failed and the rest still run.
    procedure Run_Check_ASN1_DER (Item : in out AUnit.Test_Cases.Test_Case'Class);
@@ -2114,6 +2229,7 @@ package body Tests_Encodings is
    procedure Run_Check_PKCS8_Encrypted (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_PKCS12 (Item : in out AUnit.Test_Cases.Test_Case'Class);
    procedure Run_Check_Identity_Predicates (Item : in out AUnit.Test_Cases.Test_Case'Class);
+   procedure Run_Check_Base64 (Item : in out AUnit.Test_Cases.Test_Case'Class);
 
    procedure Run_Check_ASN1_DER (Item : in out AUnit.Test_Cases.Test_Case'Class) is
       pragma Unreferenced (Item);
@@ -2181,6 +2297,12 @@ package body Tests_Encodings is
       Check_Identity_Predicates;
    end Run_Check_Identity_Predicates;
 
+   procedure Run_Check_Base64 (Item : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (Item);
+   begin
+      Check_Base64;
+   end Run_Check_Base64;
+
    overriding procedure Register_Tests (Item : in out Test_Case) is
       use AUnit.Test_Cases.Registration;
    begin
@@ -2195,6 +2317,7 @@ package body Tests_Encodings is
       Register_Routine (Item, Run_Check_PKCS8_Encrypted'Access, "pkcs8 encrypted");
       Register_Routine (Item, Run_Check_PKCS12'Access, "pkcs12");
       Register_Routine (Item, Run_Check_Identity_Predicates'Access, "identity predicates");
+      Register_Routine (Item, Run_Check_Base64'Access, "base64");
    end Register_Tests;
 
    overriding function Name (Item : Test_Case) return AUnit.Message_String is
