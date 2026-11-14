@@ -5,24 +5,30 @@ package body CryptoLib.Base64 is
    Alphabet : constant String :=
      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
-   function Encoded_Length (Count : Natural) return Natural is
-     ((Count / 3) * 4 + (case Count mod 3 is
-                            when 0 => 0,
-                            when 1 => 2,
-                            when others => 3));
+   function Encoded_Length
+     (Count : Natural; Padded : Boolean := False) return Natural is
+     (if Padded then ((Count + 2) / 3) * 4
+      else (Count / 3) * 4 + (case Count mod 3 is
+                                 when 0 => 0,
+                                 when 1 => 2,
+                                 when others => 3));
 
-   function Decoded_Length (Length : Natural) return Natural is
-     (case Length mod 4 is
-         when 0 => (Length / 4) * 3,
-         when 2 => (Length / 4) * 3 + 1,
-         when 3 => (Length / 4) * 3 + 2,
-         --  One character over a group boundary encodes nothing.
-         when others => 0);
+   function Decoded_Length
+     (Length : Natural; Padded : Boolean := False) return Natural is
+     (if Padded then (if Length mod 4 = 0 then (Length / 4) * 3 else 0)
+      else
+        (case Length mod 4 is
+            when 0 => (Length / 4) * 3,
+            when 2 => (Length / 4) * 3 + 1,
+            when 3 => (Length / 4) * 3 + 2,
+            --  One character over a group boundary encodes nothing.
+            when others => 0));
 
    procedure Encode
-     (Data : Ada.Streams.Stream_Element_Array;
-      Into : out String;
-      Last : out Natural)
+     (Data   : Ada.Streams.Stream_Element_Array;
+      Into   : out String;
+      Last   : out Natural;
+      Padded : Boolean := False)
    is
       Cursor : Stream_Element_Offset := Data'First;
       Out_At : Natural := Into'First;
@@ -34,7 +40,7 @@ package body CryptoLib.Base64 is
       end Put;
    begin
       Last := Into'First - 1;
-      if Into'Length < Encoded_Length (Natural (Data'Length)) then
+      if Into'Length < Encoded_Length (Natural (Data'Length), Padded) then
          return;
       end if;
 
@@ -55,6 +61,13 @@ package body CryptoLib.Base64 is
             end if;
             if Remaining > 2 then
                Put (Trio mod 64);
+            elsif Padded then
+               Into (Out_At) := '=';
+               Out_At := Out_At + 1;
+               if Remaining = 1 then
+                  Into (Out_At) := '=';
+                  Out_At := Out_At + 1;
+               end if;
             end if;
             Cursor := Cursor + 3;
          end;
@@ -62,7 +75,9 @@ package body CryptoLib.Base64 is
       Last := Out_At - 1;
    end Encode;
 
-   procedure Decode
+   --  Decode for text without padding. A refusal may come after earlier groups
+   --  were written; Decode zeroes them, so that no caller sees half a result.
+   procedure Decode_Unpadded
      (Text  : String;
       Into  : out Ada.Streams.Stream_Element_Array;
       Last  : out Ada.Streams.Stream_Element_Offset;
@@ -143,6 +158,40 @@ package body CryptoLib.Base64 is
 
       Last := Out_At - 1;
       Valid := True;
+   end Decode_Unpadded;
+
+   procedure Decode
+     (Text   : String;
+      Into   : out Ada.Streams.Stream_Element_Array;
+      Last   : out Ada.Streams.Stream_Element_Offset;
+      Valid  : out Boolean;
+      Padded : Boolean := False)
+   is
+      Stop : Natural := Text'Last;
+   begin
+      Into := [others => 0];
+      Last := Into'First - 1;
+      Valid := False;
+
+      if Padded then
+         --  Whole groups only, and at most two `=` at the very end; what is
+         --  left is an unpadded encoding, decoded (strictly) as one.
+         if Text'Length mod 4 /= 0 then
+            return;
+         end if;
+         if Stop >= Text'First and then Text (Stop) = '=' then
+            Stop := Stop - 1;
+            if Text (Stop) = '=' then
+               Stop := Stop - 1;
+            end if;
+         end if;
+      end if;
+
+      Decode_Unpadded (Text (Text'First .. Stop), Into, Last, Valid);
+      if not Valid then
+         Into := [others => 0];
+         Last := Into'First - 1;
+      end if;
    end Decode;
 
 end CryptoLib.Base64;

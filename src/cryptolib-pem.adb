@@ -1,3 +1,5 @@
+with CryptoLib.Base64;
+
 package body CryptoLib.PEM is
 
    use type Ada.Streams.Stream_Element_Offset;
@@ -20,21 +22,6 @@ package body CryptoLib.PEM is
 
    function Is_Whitespace (C : Character) return Boolean
    is (C = ' ' or else C = ASCII.HT or else C = ASCII.CR or else C = ASCII.LF);
-
-   --  Base64 alphabet value, or -1. Padding is not a value and is handled by
-   --  the decoder, which is the only place that knows whether padding is
-   --  allowed at the position it appears.
-   function Base64_Value (C : Character) return Integer is
-   begin
-      case C is
-         when 'A' .. 'Z' => return Character'Pos (C) - Character'Pos ('A');
-         when 'a' .. 'z' => return Character'Pos (C) - Character'Pos ('a') + 26;
-         when '0' .. '9' => return Character'Pos (C) - Character'Pos ('0') + 52;
-         when '+'        => return 62;
-         when '/'        => return 63;
-         when others     => return -1;
-      end case;
-   end Base64_Value;
 
    --  Find the next occurrence of Pattern at or after From.
    function Index_From
@@ -118,9 +105,8 @@ package body CryptoLib.PEM is
       Body_First : Natural;
       Body_Last  : Natural;
       After      : Natural;
-      Quantum    : array (0 .. 3) of Integer := [others => 0];
+      Group      : String (1 .. 4);
       Filled     : Natural := 0;
-      Padding    : Natural := 0;
       Cursor     : Offset;
       Finished   : Boolean := False;
    begin
@@ -137,15 +123,11 @@ package body CryptoLib.PEM is
          return;
       end if;
 
+      --  The body is read four characters at a time, white space skipped, and
+      --  each group is decoded by CryptoLib.Base64, which refuses what is not
+      --  base64, padding in the wrong place, and stray low bits.
       for I in Body_First .. Body_Last loop
-         declare
-            C     : constant Character := Text (I);
-            Value : Integer;
-         begin
-            if Is_Whitespace (C) then
-               goto Continue;
-            end if;
-
+         if not Is_Whitespace (Text (I)) then
             --  Anything after the padding has ended the encoding.
             if Finished then
                Status := Invalid_Base64;
@@ -153,70 +135,37 @@ package body CryptoLib.PEM is
                return;
             end if;
 
-            if C = '=' then
-               --  Padding only completes a quantum, and only the last two
-               --  positions of one.
-               if Filled < 2 then
-                  Status := Invalid_Base64;
-                  Last := Output'First - 1;
-                  return;
-               end if;
-               Padding := Padding + 1;
-               Quantum (Filled) := 0;
-               Filled := Filled + 1;
-            else
-               if Padding > 0 then
-                  --  Base64 after padding.
-                  Status := Invalid_Base64;
-                  Last := Output'First - 1;
-                  return;
-               end if;
-
-               Value := Base64_Value (C);
-               if Value < 0 then
-                  Status := Invalid_Base64;
-                  Last := Output'First - 1;
-                  return;
-               end if;
-               Quantum (Filled) := Value;
-               Filled := Filled + 1;
-            end if;
+            Filled := Filled + 1;
+            Group (Filled) := Text (I);
 
             if Filled = 4 then
                declare
-                  Produced : constant Natural := 3 - Padding;
-                  Packed   : constant Integer :=
-                    Quantum (0) * 262_144 + Quantum (1) * 4_096
-                    + Quantum (2) * 64 + Quantum (3);
+                  Decoded : Octets (1 .. 3);
+                  Count   : Offset;
+                  Valid   : Boolean;
                begin
-                  if Cursor + Offset (Produced) - 1 > Output'Last then
+                  CryptoLib.Base64.Decode
+                    (Group, Decoded, Count, Valid, Padded => True);
+                  if not Valid then
+                     Status := Invalid_Base64;
+                     Last := Output'First - 1;
+                     return;
+                  end if;
+
+                  if Cursor + Count - 1 > Output'Last then
                      Status := Buffer_Too_Small;
                      Last := Output'First - 1;
                      return;
                   end if;
 
-                  if Produced >= 1 then
-                     Output (Cursor) :=
-                       Ada.Streams.Stream_Element (Packed / 65_536);
-                     Cursor := Cursor + 1;
-                  end if;
-                  if Produced >= 2 then
-                     Output (Cursor) :=
-                       Ada.Streams.Stream_Element ((Packed / 256) mod 256);
-                     Cursor := Cursor + 1;
-                  end if;
-                  if Produced >= 3 then
-                     Output (Cursor) :=
-                       Ada.Streams.Stream_Element (Packed mod 256);
-                     Cursor := Cursor + 1;
-                  end if;
+                  Output (Cursor .. Cursor + Count - 1) := Decoded (1 .. Count);
+                  Cursor := Cursor + Count;
                end;
 
                Filled := 0;
-               Finished := Padding > 0;
+               Finished := Group (4) = '=';
             end if;
-         end;
-         <<Continue>>
+         end if;
       end loop;
 
       if Filled /= 0 then

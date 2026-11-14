@@ -250,6 +250,14 @@ package body Tests_X509_Decoding is
          Good : constant String :=
            "-----BEGIN CERTIFICATE-----" & ASCII.LF & "QUJD" & ASCII.LF
            & "-----END CERTIFICATE-----" & ASCII.LF;
+         --  "QQ==" is "A"; "QR==" has a bit set where the encoding of one
+         --  octet has none, which is a second spelling of the same octet.
+         Padded_Block : constant String :=
+           "-----BEGIN CERTIFICATE-----" & ASCII.LF & "QQ==" & ASCII.LF
+           & "-----END CERTIFICATE-----" & ASCII.LF;
+         Stray_Bits : constant String :=
+           "-----BEGIN CERTIFICATE-----" & ASCII.LF & "QR==" & ASCII.LF
+           & "-----END CERTIFICATE-----" & ASCII.LF;
          Preamble : constant String :=
            "Alias name: mykey" & ASCII.LF & "Entry type: PrivateKeyEntry"
            & ASCII.LF & Good;
@@ -265,6 +273,23 @@ package body Tests_X509_Decoding is
            (Junk, CryptoLib.PEM.Certificate_Label, From, Buffer, Last, St);
          Check (St = CryptoLib.PEM.Invalid_Base64,
                 "a character that is not base64 is refused, not skipped");
+
+         From := Padded_Block'First;
+         CryptoLib.PEM.Decode_Block
+           (Padded_Block, CryptoLib.PEM.Certificate_Label, From, Buffer, Last,
+            St);
+         Check (St = CryptoLib.PEM.Ok
+                and then Last = Buffer'First
+                and then Buffer (Buffer'First) = Character'Pos ('A'),
+                "a block ending in padding decodes to its bytes");
+
+         From := Stray_Bits'First;
+         CryptoLib.PEM.Decode_Block
+           (Stray_Bits, CryptoLib.PEM.Certificate_Label, From, Buffer, Last,
+            St);
+         Check (St = CryptoLib.PEM.Invalid_Base64
+                and then Last = Buffer'First - 1,
+                "padding that hides stray bits is refused, not dropped");
 
          From := Good'First;
          CryptoLib.PEM.Decode_Block
