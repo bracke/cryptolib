@@ -25,6 +25,11 @@ commits; each of those says what it changed.
 
 ### Changed
 
+- `CryptoLib.PEM` decodes the armour's body through `CryptoLib.Base64`, where it
+  had a decoder of its own. It is one place stricter: a final group whose
+  unused low bits are not zero (a second spelling of the same octets, which
+  `Base64.Decode` already refused) is now `Invalid_Base64`. Every other input
+  decodes, or is refused, as before.
 - AES and GHASH run on the processor's AES-NI and PCLMULQDQ instructions where
   CPUID reports both (x86-64), in data-independent time as the bitsliced code
   does, and several hundred times faster: a TLS download through ssllib went

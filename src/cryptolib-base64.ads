@@ -14,6 +14,7 @@ with Ada.Streams;
 --  second copy of an encoding that is easy to get subtly wrong. CryptoLib.PEM
 --  decodes its own armour, line breaks included, and does not go through it.
 package CryptoLib.Base64 is
+   pragma Preelaborate;
 
    --  The encoded length of Count octets.
    --  @param Count  the number of octets to encode
